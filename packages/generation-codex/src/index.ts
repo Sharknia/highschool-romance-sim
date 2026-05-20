@@ -3,7 +3,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
   createDeterministicEventExpansionPlan,
+  describeEventExpansionPolicy,
   createImageGenerationJob,
+  parseEventExpansionPlan,
   validateEventExpansionPlan,
   type AssetKind,
   type EventExpansionPlan,
@@ -330,18 +332,6 @@ export async function createCodexImageAssetResult(
   };
 }
 
-function isEventExpansionPlan(value: unknown): value is EventExpansionPlan {
-  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const decision = record.decision && typeof record.decision === "object" ? record.decision as Record<string, unknown> : {};
-  const patch = record.patch && typeof record.patch === "object" ? record.patch as Record<string, unknown> : {};
-  return typeof record.summary === "string"
-    && typeof decision.sceneCount === "number"
-    && typeof decision.choiceCount === "number"
-    && typeof decision.cgCount === "number"
-    && typeof decision.newExpressionAssetCount === "number"
-    && Array.isArray(patch.operations);
-}
-
 function classifyValidationFailure(validation: EventExpansionValidationResult): EventTextGenerationAttempt["failureKind"] {
   return validation.issues.some((issue) => issue.path.startsWith("decision") || issue.path.includes("newExpressionAssetCount"))
     ? "quality_rule_failed"
@@ -387,12 +377,14 @@ function createEventExpansionPrompt(
 ): string {
   const route = project.routes.find((item) => item.id === request.routeId);
   const afterScene = project.scenes.find((scene) => scene.id === request.afterSceneId);
+  const policy = describeEventExpansionPolicy();
   return [
     "You are generating a small validated patch for a Korean teen-safe visual novel maker.",
     "Return JSON only. Do not use markdown.",
     "The JSON must match EventExpansionPlan with summary, decision, and patch.operations.",
-    "Allowed operation types: addScene, updateScene, updateSceneLink, addChoice, addAsset, addGenerationJob.",
-    "Do not rewrite the whole project, add heroines, add routes, delete scenes, add expression assets, or exceed constraints.",
+    `Allowed operation types: ${policy.allowedOperationTypes.join(", ")}.`,
+    `Forbidden changes: ${policy.forbiddenOperationSummary.join(", ")}.`,
+    "Do not exceed request constraints.",
     `Attempt: ${attempt}`,
     `Previous failures: ${JSON.stringify(previousAttempts, null, 2)}`,
     `Project summary: ${JSON.stringify({
@@ -406,7 +398,7 @@ function createEventExpansionPrompt(
       generationJobIds: project.generationJobs.map((job) => job.id)
     }, null, 2)}`,
     `EventExpansionRequest: ${JSON.stringify(request, null, 2)}`,
-    "The Alpha target is sceneCount 3, choiceCount 1, cgCount 1 when constraints allow it."
+    `The Alpha target is sceneCount ${policy.alphaTarget.sceneCount}, choiceCount ${policy.alphaTarget.choiceCount}, cgCount ${policy.alphaTarget.cgCount}, newExpressionAssetCount ${policy.alphaTarget.newExpressionAssetCount} when constraints allow it.`
   ].join("\n\n");
 }
 
@@ -431,17 +423,18 @@ export async function expandNaturalLanguageEvent(
       previousAttempts: attempts
     });
 
-    if (!isEventExpansionPlan(candidate)) {
+    const parsed = parseEventExpansionPlan(candidate);
+    if (!parsed.ok) {
       attempts.push({
         attempt,
         ok: false,
         failureKind: "schema_invalid",
-        issues: ["생성 결과가 EventExpansionPlan 스키마와 일치하지 않습니다."]
+        issues: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`)
       });
       continue;
     }
 
-    const validation = validateEventExpansionPlan(input.project, input.request, candidate);
+    const validation = validateEventExpansionPlan(input.project, input.request, parsed.value);
     if (!validation.ok) {
       attempts.push({
         attempt,
@@ -459,7 +452,7 @@ export async function expandNaturalLanguageEvent(
     });
     return {
       ok: true,
-      plan: candidate,
+      plan: parsed.value,
       validation,
       attempts
     };

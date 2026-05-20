@@ -8,7 +8,7 @@ DB, 백엔드 프레임워크, 앱 패키징 결정은 [architecture-decisions.m
 
 - Codex가 외부에서 CLI로 엔진을 호출할 수 있다.
 - 웹앱은 사람이 자연어로 지시하고, 서버/API 라우트가 Codex app-server의 ChatGPT OAuth와 생성 어댑터를 호출한다.
-- CLI와 웹앱은 같은 `@vn-maker/engine-core`를 사용한다.
+- CLI와 웹앱은 같은 `@vn-maker/engine-core`와 `@vn-maker/use-cases`를 사용한다.
 - 게임 엔진, 제작 툴, Codex 호출, 이미지 생성, 저장소를 분리한다.
 
 ## 패키지 구조
@@ -17,10 +17,16 @@ DB, 백엔드 프레임워크, 앱 패키징 결정은 [architecture-decisions.m
 packages/
   engine-core/
     프로젝트 스키마
+    DTO schema
     시나리오/분기 검증
     에셋 매니페스트
     HTML 빌더
     이미지 생성 작업 스펙
+
+  use-cases/
+    CLI와 Web API가 공유하는 제작 use case
+    project-store orchestration
+    provider-neutral generation request
 
   cli/
     Codex/AI가 호출하는 JSON stdin/stdout 명령 인터페이스
@@ -195,6 +201,7 @@ interface VnMakerGenerationJob {
 현재 탑재된 어댑터:
 
 - `@vn-maker/generation-codex`: Codex app-server ChatGPT OAuth, auth 상태 조회, 로그인 시작, 로그아웃, imageGeneration 실행
+- `@vn-maker/use-cases`: CLI와 Web API가 공유하는 제작 use case, DTO schema 통과 후 project-store/generation adapter 조합
 
 다음 단계에서 붙일 어댑터:
 

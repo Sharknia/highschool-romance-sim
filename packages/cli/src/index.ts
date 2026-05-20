@@ -1,33 +1,19 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import {
-  expandNaturalLanguageEvent,
-  sharedCodexAppServerClient,
-  type CodexImageGenerationInput
+  sharedCodexAppServerClient
 } from "@vn-maker/generation-codex";
 import {
   buildProjectHtml,
   createAssetManifest,
-  createEventExpansionRequest,
-  createHeroineProfile,
   createImageGenerationJob,
-  createProjectFromHeroine,
   createStarterProject,
   validateProject,
-  type EventExpansionPlan,
-  type EventExpansionRequest,
-  type CreateImageGenerationJobInput,
-  type CreateHeroineProfileInput,
   type VnMakerCharacter,
   type VnMakerProject,
   type VnMakerScene
 } from "@vn-maker/engine-core";
-import {
-  createProjectWorkspace,
-  openProjectStore,
-  smokeTestWebExport,
-  type ProjectStore
-} from "@vn-maker/project-store";
+import { createVnMakerUseCases } from "@vn-maker/use-cases";
 
 interface CliInput {
   projectDirectory?: string;
@@ -35,16 +21,16 @@ interface CliInput {
   outputPath?: string;
   character?: VnMakerCharacter;
   scene?: VnMakerScene;
-  heroine?: CreateHeroineProfileInput;
+  heroine?: unknown;
   heroineId?: string;
-  request?: EventExpansionRequest;
-  plan?: EventExpansionPlan;
+  request?: unknown;
+  plan?: unknown;
   userEvent?: string;
   routeId?: string;
   afterSceneId?: string;
   startSceneId?: string;
-  job?: CreateImageGenerationJobInput;
-  image?: CodexImageGenerationInput;
+  job?: unknown;
+  image?: unknown;
   login?: {
     flow?: "browser" | "device";
   };
@@ -68,12 +54,8 @@ function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
-}
-
 function isVnMakerProject(value: unknown): value is VnMakerProject {
-  const record = asRecord(value);
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
   return record.version === "vn-maker/v1"
     && typeof record.id === "string"
     && typeof record.title === "string"
@@ -89,33 +71,14 @@ function getProject(input: CliInput): VnMakerProject {
   return isVnMakerProject(input.project) ? input.project : createStarterProject(input.starter);
 }
 
-function requireProjectDirectory(input: CliInput): string {
-  if (!input.projectDirectory) {
-    throw new Error("projectDirectory 입력이 필요합니다.");
+const useCases = createVnMakerUseCases({
+  eventText: {
+    generateEventExpansionPlan: (input) => sharedCodexAppServerClient.generateEventExpansionPlan(input)
+  },
+  image: {
+    generateImageAsset: (input) => sharedCodexAppServerClient.generateImageAsset(input)
   }
-  return input.projectDirectory;
-}
-
-async function withProjectStore<T>(input: CliInput, operation: (store: ProjectStore) => Promise<T> | T): Promise<T> {
-  const store = await openProjectStore(requireProjectDirectory(input));
-  try {
-    return await operation(store);
-  } finally {
-    store.close();
-  }
-}
-
-async function ensureProjectStore(input: CliInput): Promise<ProjectStore> {
-  const store = await openProjectStore(requireProjectDirectory(input));
-  if (isVnMakerProject(input.project)) {
-    store.saveProject(input.project);
-    return store;
-  }
-  if (!store.getProject()) {
-    store.saveProject(createStarterProject(input.starter));
-  }
-  return store;
-}
+});
 
 function printCapabilities(): void {
   writeJson({
@@ -167,162 +130,53 @@ async function run(): Promise<void> {
   }
 
   if (command === "create-project") {
-    const store = await createProjectWorkspace({
-      projectDirectory: requireProjectDirectory(input),
-      starter: input.starter,
-      project: isVnMakerProject(input.project) ? input.project : undefined
-    });
-    try {
-      writeJson({
-        ok: true,
-        projectDirectory: store.paths.projectDirectory,
-        paths: store.paths,
-        project: store.requireProject(),
-        validation: store.validateAndStore()
-      });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.createProject(input));
     return;
   }
 
   if (command === "create-project-from-heroine") {
-    if (!input.heroine) {
-      throw new Error("heroine 입력이 필요합니다.");
-    }
-    const heroine = createHeroineProfile(input.heroine);
-    const store = await createProjectWorkspace({
-      projectDirectory: requireProjectDirectory(input),
-      project: createProjectFromHeroine({
-        id: input.starter?.id,
-        title: input.starter?.title,
-        premise: input.starter?.premise,
-        heroine
-      })
-    });
-    try {
-      store.saveHeroine(heroine);
-      writeJson({
-        ok: true,
-        projectDirectory: store.paths.projectDirectory,
-        paths: store.paths,
-        heroine,
-        project: store.requireProject(),
-        validation: store.validateAndStore()
-      });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.createProjectFromHeroine(input));
     return;
   }
 
   if (command === "open-project") {
-    await withProjectStore(input, (store) => {
-      writeJson({
-        ok: true,
-        projectDirectory: store.paths.projectDirectory,
-        paths: store.paths,
-        project: store.requireProject(),
-        validation: store.validateAndStore()
-      });
-    });
+    writeJson(await useCases.openProject(input));
     return;
   }
 
   if (command === "list-heroines") {
-    await withProjectStore(input, (store) => {
-      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, heroines: store.listHeroines() });
-    });
+    writeJson(await useCases.listHeroines(input));
     return;
   }
 
   if (command === "save-heroine") {
-    if (!input.heroine) {
-      throw new Error("heroine 입력이 필요합니다.");
-    }
-    const store = await ensureProjectStore(input);
-    try {
-      const heroine = store.saveHeroine(createHeroineProfile(input.heroine));
-      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, heroine, heroines: store.listHeroines() });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.saveHeroine(input));
     return;
   }
 
   if (command === "delete-heroine") {
-    if (!input.heroineId) {
-      throw new Error("heroineId 입력이 필요합니다.");
-    }
-    await withProjectStore(input, (store) => {
-      store.deleteHeroine(input.heroineId!);
-      writeJson({
-        ok: true,
-        projectDirectory: store.paths.projectDirectory,
-        heroines: store.listHeroines(),
-        project: store.requireProject()
-      });
-    });
+    writeJson(await useCases.deleteHeroine(input));
     return;
   }
 
   if (command === "save-character") {
-    if (!input.character) {
-      throw new Error("character 입력이 필요합니다.");
-    }
-    const store = await ensureProjectStore(input);
-    try {
-      const project = store.upsertCharacter(input.character);
-      writeJson({
-        ok: true,
-        projectDirectory: store.paths.projectDirectory,
-        project,
-        validation: store.validateAndStore()
-      });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.saveCharacter(input));
     return;
   }
 
   if (command === "save-scene") {
-    if (!input.scene) {
-      throw new Error("scene 입력이 필요합니다.");
-    }
-    const store = await ensureProjectStore(input);
-    try {
-      const project = store.upsertScene(input.scene);
-      writeJson({
-        ok: true,
-        projectDirectory: store.paths.projectDirectory,
-        project,
-        validation: store.validateAndStore()
-      });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.saveScene(input));
     return;
   }
 
   if (command === "validate-store") {
-    await withProjectStore(input, (store) => {
-      const validation = store.validateAndStore();
-      writeJson({
-        ok: validation.ok,
-        projectDirectory: store.paths.projectDirectory,
-        issues: validation.issues,
-        project: store.requireProject()
-      });
-    });
+    writeJson(await useCases.validateProject(input));
     return;
   }
 
   if (command === "validate") {
     if (input.projectDirectory) {
-      await withProjectStore(input, (store) => {
-        const validation = store.validateAndStore();
-        writeJson({ ok: validation.ok, issues: validation.issues, project: store.requireProject() });
-      });
+      writeJson(await useCases.validateProject(input));
       return;
     }
     const issues = validateProject(getProject(input));
@@ -332,9 +186,7 @@ async function run(): Promise<void> {
 
   if (command === "manifest") {
     if (input.projectDirectory) {
-      await withProjectStore(input, (store) => {
-        writeJson({ ok: true, manifest: createAssetManifest(store.requireProject()) });
-      });
+      writeJson(await useCases.createManifest(input));
       return;
     }
     writeJson({ ok: true, manifest: createAssetManifest(getProject(input)) });
@@ -342,101 +194,53 @@ async function run(): Promise<void> {
   }
 
   if (command === "build-html") {
-    const project = input.projectDirectory
-      ? await withProjectStore(input, (store) => store.requireProject())
-      : getProject(input);
-    const artifact = buildProjectHtml(project);
+    const result = input.projectDirectory
+      ? await useCases.buildProject(input)
+      : { ok: true, artifact: buildProjectHtml(getProject(input)) };
     if (input.outputPath) {
-      writeFileSync(input.outputPath, artifact.html, "utf8");
+      const artifact = (result as { artifact?: { html?: string } }).artifact;
+      if (artifact?.html) {
+        writeFileSync(input.outputPath, artifact.html, "utf8");
+      }
     }
-    writeJson({ ok: true, artifact });
+    writeJson(result);
     return;
   }
 
   if (command === "expand-event") {
-    const store = await ensureProjectStore(input);
-    try {
-      const project = store.requireProject();
-      const route = project.routes.find((item) => item.id === input.routeId) || project.routes[0];
-      if (!route) {
-        throw new Error("이벤트를 추가할 루트가 없습니다.");
-      }
-      const request = input.request || createEventExpansionRequest(project, {
-        projectDirectory: store.paths.projectDirectory,
-        routeId: route.id,
-        afterSceneId: input.afterSceneId || route.entrySceneId,
-        heroineId: input.heroineId || route.heroineId,
-        userEvent: input.userEvent || ""
-      });
-      const result = await expandNaturalLanguageEvent({ project, request });
-      writeJson({ projectDirectory: store.paths.projectDirectory, request, ...result });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.expandEvent(input));
     return;
   }
 
   if (command === "approve-event") {
-    if (!input.request || !input.plan) {
-      throw new Error("request와 plan 입력이 필요합니다.");
-    }
-    const store = await ensureProjectStore(input);
-    try {
-      const result = store.applyEventExpansionPlan(input.request, input.plan);
-      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, ...result });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.approveEvent(input));
     return;
   }
 
   if (command === "preview") {
-    await withProjectStore(input, (store) => {
-      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, runtime: store.previewProject(input.startSceneId) });
-    });
+    writeJson(await useCases.previewProject(input));
     return;
   }
 
   if (command === "export-web") {
-    const store = await ensureProjectStore(input);
-    try {
-      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, ...(await store.exportWebPlayer(input.outputPath)) });
-    } finally {
-      store.close();
-    }
+    writeJson(await useCases.exportProject({ ...input, outputDirectory: input.outputPath }));
     return;
   }
 
   if (command === "smoke-export") {
-    if (!input.outputPath) {
-      throw new Error("outputPath 입력이 필요합니다.");
-    }
-    writeJson({ ok: true, smoke: await smokeTestWebExport(input.outputPath) });
+    writeJson(await useCases.smokeExport(input));
     return;
   }
 
   if (command === "create-image-job") {
-    if (!input.job) {
-      throw new Error("job 입력이 필요합니다.");
-    }
-    const job = createImageGenerationJob(input.job);
-    if (input.projectDirectory) {
-      const store = await ensureProjectStore(input);
-      try {
-        const project = store.requireProject();
-        const index = project.generationJobs.findIndex((item) => item.id === job.id);
-        if (index >= 0) {
-          project.generationJobs[index] = job;
-        } else {
-          project.generationJobs.push(job);
-        }
-        writeJson({ ok: true, job, project: store.saveProject(project) });
-      } finally {
-        store.close();
+    if (!input.projectDirectory) {
+      if (!input.job || typeof input.job !== "object") {
+        throw new Error("job 입력이 필요합니다.");
       }
+      writeJson({ ok: true, job: createImageGenerationJob(input.job as Parameters<typeof createImageGenerationJob>[0]) });
       return;
     }
-    writeJson({ ok: true, job });
+    writeJson(await useCases.createGenerationJob({ ...input, ...(input.job && typeof input.job === "object" ? input.job : {}) }));
     return;
   }
 
@@ -457,29 +261,10 @@ async function run(): Promise<void> {
   }
 
   if (command === "generate-image") {
-    if (!input.image) {
-      throw new Error("image 입력이 필요합니다.");
-    }
-
-    if (input.projectDirectory) {
-      const store = await ensureProjectStore(input);
-      try {
-        const result = await sharedCodexAppServerClient.generateImageAsset({
-          ...input.image,
-          outputDirectory: input.image.outputDirectory || store.paths.generatedAssetsDirectory,
-          publicPathPrefix: input.image.publicPathPrefix || "/generated-assets",
-          cwd: input.image.cwd || store.paths.projectDirectory
-        });
-        const project = await store.storeGenerationResult(result);
-        writeJson({ ok: true, result, project });
-      } finally {
-        store.close();
-      }
-      return;
-    }
-
-    const result = await sharedCodexAppServerClient.generateImageAsset(input.image);
-    writeJson({ ok: true, result });
+    writeJson(await useCases.generateImage({
+      ...input,
+      ...(input.image && typeof input.image === "object" ? input.image : {})
+    }));
     return;
   }
 

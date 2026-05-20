@@ -121,29 +121,6 @@ function projectPayloadFromEditor(projectJson: string): { project?: unknown; sta
     : { starter: parsed.starter || parsed };
 }
 
-function projectFromJson(projectJson: string): Record<string, unknown> | null {
-  try {
-    const payload = projectPayloadFromEditor(projectJson);
-    return payload.project && typeof payload.project === "object" ? payload.project as Record<string, unknown> : null;
-  } catch {
-    return null;
-  }
-}
-
-function getProjectRoute(project: Record<string, unknown> | null): Record<string, unknown> | null {
-  const routes = Array.isArray(project?.routes) ? project.routes : [];
-  return routes[0] && typeof routes[0] === "object" ? routes[0] as Record<string, unknown> : null;
-}
-
-function getPlannedCgJob(project: Record<string, unknown> | null): Record<string, unknown> | null {
-  const jobs = Array.isArray(project?.generationJobs) ? project.generationJobs : [];
-  const job = jobs.find((item) => {
-    const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
-    return record.kind === "cg" && record.status === "planned";
-  });
-  return job && typeof job === "object" ? job as Record<string, unknown> : null;
-}
-
 export function WorkspacePage() {
   const { logout, postAuthedJson, refreshSession, session } = useAuth();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
@@ -159,8 +136,6 @@ export function WorkspacePage() {
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState("작업 대기 중");
 
-  const project = useMemo(() => projectFromJson(projectJson), [projectJson]);
-  const route = useMemo(() => getProjectRoute(project), [project]);
   const scene = useMemo(() => {
     if (!runtime) {
       return null;
@@ -278,15 +253,10 @@ export function WorkspacePage() {
 
   async function expandEvent(): Promise<void> {
     const response = await runAction("이벤트 패치 제안", async () => {
-      const routeId = typeof route?.id === "string" ? route.id : undefined;
-      const heroineId = typeof route?.heroineId === "string" ? route.heroineId : heroineDraft.id;
-      const afterSceneId = currentSceneId || (typeof route?.entrySceneId === "string" ? route.entrySceneId : undefined);
       return postAuthedJson<ApiResult>("/api/events/expand", {
         projectDirectory: projectDirectory || undefined,
         userEvent: prompt,
-        routeId,
-        heroineId,
-        afterSceneId
+        afterSceneId: currentSceneId || undefined
       });
     });
     if (response && typeof response === "object" && (response as ApiResult).ok) {
@@ -320,23 +290,11 @@ export function WorkspacePage() {
   }
 
   async function generatePlannedCg(): Promise<void> {
-    const plannedJob = getPlannedCgJob(project);
-    if (!plannedJob) {
-      setResult(formatResult({ ok: false, error: "planned 상태의 CG 작업이 없습니다." }));
-      setWorkspaceStatus("CG 생성 실패");
-      return;
-    }
-
     setPreviewSrc(null);
     await runAction("CG 이미지 생성", async () => {
       const response = await postAuthedJson<ApiResult & ImagePreviewResult>("/api/generation/images", {
         projectDirectory: projectDirectory || undefined,
-        kind: "cg",
-        targetId: plannedJob.targetId,
-        jobId: plannedJob.id,
-        outputAssetId: plannedJob.outputAssetId,
-        prompt: plannedJob.prompt,
-        style: plannedJob.style
+        kind: "cg"
       });
       setPreviewSrc(response.image?.dataUrl || response.image?.uri || response.asset?.uri || null);
       await refreshSession();
@@ -350,10 +308,7 @@ export function WorkspacePage() {
       const response = await postAuthedJson<ApiResult & ImagePreviewResult>("/api/generation/images", {
         projectDirectory: projectDirectory || undefined,
         kind: "portrait",
-        targetId: heroineDraft.id || heroineDraft.name,
-        outputAssetId: heroineDraft.defaultPortraitAssetId || `asset-${heroineDraft.id || heroineDraft.name}-portrait`,
-        prompt: `${heroineDraft.name}, ${heroineDraft.appearance}, clean visual novel heroine portrait`,
-        style: "soft, polished, romance visual novel portrait"
+        heroine: heroineDraft
       });
       setPreviewSrc(response.image?.dataUrl || response.image?.uri || response.asset?.uri || null);
       await refreshSession();
