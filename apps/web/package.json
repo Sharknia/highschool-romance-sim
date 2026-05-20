@@ -13,10 +13,17 @@
   },
   "dependencies": {
     "@vn-maker/engine-core": "0.1.0",
-    "@vn-maker/generation-codex": "0.1.0"
+    "@vn-maker/generation-codex": "0.1.0",
+    "lucide-react": "^1.16.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router-dom": "^7.15.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
     "typescript": "^5.8.0",
     "vite": "^6.0.0"
   }

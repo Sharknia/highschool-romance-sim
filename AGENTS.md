@@ -15,7 +15,7 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 - `packages/engine-core`: 프로젝트 스키마, 시나리오/분기 검증, 빌더, 에셋 매니페스트.
 - `packages/generation-codex`: Codex app-server, ChatGPT managed OAuth, imageGeneration 어댑터.
 - `packages/cli`: AI/Codex가 호출하는 JSON stdin/stdout 자동화 인터페이스.
-- `apps/web`: 사람이 쓰는 제작 UI와 Node API 라우트.
+- `apps/web`: 사람이 쓰는 제작 UI와 Node API 라우트. 프론트는 Vite + React + React Router + 중앙 UI 컴포넌트를 기준으로 한다.
 - `src/engine`, `index.html`: 기존 플레이어/레거시 런타임. 요구가 없으면 중심 작업으로 삼지 않는다.
 
 ## 작업 원칙

@@ -65,6 +65,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   const filePath = join(clientRoot, safePath);
 
   if (!filePath.startsWith(clientRoot) || !existsSync(filePath)) {
+    const indexPath = join(clientRoot, "index.html");
+    const method = request.method || "GET";
+    if ((method === "GET" || method === "HEAD") && !extname(url.pathname) && existsSync(indexPath)) {
+      response.writeHead(200, { "Content-Type": contentTypes[".html"] });
+      if (method === "HEAD") {
+        response.end();
+      } else {
+        createReadStream(indexPath).pipe(response);
+      }
+      return;
+    }
+
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     response.end("Not found");
     return;
