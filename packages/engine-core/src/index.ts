@@ -248,6 +248,26 @@ export interface EventExpansionValidationResult {
   diff: ProjectPatchDescription;
 }
 
+export type DtoParseResult<T> =
+  | { ok: true; value: T; issues: [] }
+  | { ok: false; issues: ValidationIssue[] };
+
+export interface EventExpansionPolicyDescription {
+  allowedOperationTypes: VnMakerProjectPatchOperation["type"][];
+  forbiddenOperationSummary: string[];
+  alphaTarget: {
+    sceneCount: number;
+    choiceCount: number;
+    cgCount: number;
+    newExpressionAssetCount: 0;
+  };
+}
+
+export interface ApplyGenerationResultToProjectInput {
+  job: VnMakerGenerationJob;
+  asset: VnMakerAsset;
+}
+
 export interface PlayerRuntimeData {
   projectId: string;
   title: string;
@@ -298,6 +318,284 @@ function uniqueStrings(values: string[]): string[] {
 
 function cloneProject(project: VnMakerProject): VnMakerProject {
   return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function addSchemaIssue(issues: ValidationIssue[], path: string, message: string): void {
+  issues.push({ severity: "error", path, message });
+}
+
+function hasString(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[], options: { nonEmpty?: boolean } = {}): boolean {
+  const value = record[key];
+  if (typeof value !== "string") {
+    addSchemaIssue(issues, path, "문자열이어야 합니다.");
+    return false;
+  }
+  if (options.nonEmpty && !value.trim()) {
+    addSchemaIssue(issues, path, "비어 있을 수 없습니다.");
+    return false;
+  }
+  return true;
+}
+
+function hasArray(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): boolean {
+  if (!Array.isArray(record[key])) {
+    addSchemaIssue(issues, path, "배열이어야 합니다.");
+    return false;
+  }
+  return true;
+}
+
+function hasObject(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): boolean {
+  if (!isRecord(record[key])) {
+    addSchemaIssue(issues, path, "객체여야 합니다.");
+    return false;
+  }
+  return true;
+}
+
+function hasNumber(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): boolean {
+  if (typeof record[key] !== "number" || !Number.isFinite(record[key])) {
+    addSchemaIssue(issues, path, "숫자여야 합니다.");
+    return false;
+  }
+  return true;
+}
+
+function parseOk<T>(value: T): DtoParseResult<T> {
+  return { ok: true, value, issues: [] };
+}
+
+function parseFail<T>(issues: ValidationIssue[]): DtoParseResult<T> {
+  return { ok: false, issues };
+}
+
+export function parseVnMakerProject(value: unknown): DtoParseResult<VnMakerProject> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "프로젝트는 객체여야 합니다." }]);
+  }
+
+  if (value.version !== "vn-maker/v1") {
+    addSchemaIssue(issues, "version", "지원하지 않는 프로젝트 버전입니다.");
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "title", "title", issues, { nonEmpty: true });
+  hasString(value, "premise", "premise", issues);
+  hasArray(value, "characters", "characters", issues);
+  hasArray(value, "routes", "routes", issues);
+  hasArray(value, "scenes", "scenes", issues);
+  hasArray(value, "assets", "assets", issues);
+  hasArray(value, "generationJobs", "generationJobs", issues);
+  hasObject(value, "settings", "settings", issues);
+
+  if (issues.length > 0) {
+    return parseFail(issues);
+  }
+
+  const project = value as unknown as VnMakerProject;
+  const domainIssues = validateProject(project).filter((issue) => issue.severity === "error");
+  return domainIssues.length > 0 ? parseFail(domainIssues) : parseOk(project);
+}
+
+export function parseHeroineProfileInput(value: unknown): DtoParseResult<CreateHeroineProfileInput> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "heroine 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "name", "name", issues, { nonEmpty: true });
+  hasString(value, "description", "description", issues);
+  hasString(value, "personality", "personality", issues);
+  hasString(value, "speechStyle", "speechStyle", issues);
+  hasString(value, "appearance", "appearance", issues);
+  if (value.id !== undefined && typeof value.id !== "string") {
+    addSchemaIssue(issues, "id", "문자열이어야 합니다.");
+  }
+  if (value.defaultPortraitAssetId !== undefined && typeof value.defaultPortraitAssetId !== "string") {
+    addSchemaIssue(issues, "defaultPortraitAssetId", "문자열이어야 합니다.");
+  }
+  if (value.portraitAssetIds !== undefined && !Array.isArray(value.portraitAssetIds)) {
+    addSchemaIssue(issues, "portraitAssetIds", "배열이어야 합니다.");
+  }
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as CreateHeroineProfileInput);
+}
+
+export function parseVnMakerCharacter(value: unknown): DtoParseResult<VnMakerCharacter> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "character 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "displayName", "displayName", issues, { nonEmpty: true });
+  hasString(value, "role", "role", issues);
+  hasString(value, "profile", "profile", issues);
+  hasArray(value, "emotionTags", "emotionTags", issues);
+  hasArray(value, "portraitAssetIds", "portraitAssetIds", issues);
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerCharacter);
+}
+
+export function parseVnMakerScene(value: unknown): DtoParseResult<VnMakerScene> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "scene 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "label", "label", issues, { nonEmpty: true });
+  hasString(value, "speaker", "speaker", issues);
+  hasString(value, "text", "text", issues);
+  hasArray(value, "characters", "characters", issues);
+  hasArray(value, "choices", "choices", issues);
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerScene);
+}
+
+export function parseCreateImageGenerationJobInput(value: unknown): DtoParseResult<CreateImageGenerationJobInput> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "job 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "kind", "kind", issues, { nonEmpty: true });
+  hasString(value, "targetId", "targetId", issues, { nonEmpty: true });
+  hasString(value, "prompt", "prompt", issues, { nonEmpty: true });
+  if (typeof value.kind === "string" && !["portrait", "expression", "cg"].includes(value.kind)) {
+    addSchemaIssue(issues, "kind", `지원하지 않는 이미지 생성 작업 종류입니다: ${value.kind}`);
+  }
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as CreateImageGenerationJobInput);
+}
+
+export function parseEventExpansionRequest(value: unknown): DtoParseResult<EventExpansionRequest> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "request 입력은 객체여야 합니다." }]);
+  }
+  ["projectDirectory", "baseProjectHash", "routeId", "afterSceneId", "heroineId", "userEvent"].forEach((key) => {
+    hasString(value, key, key, issues, { nonEmpty: key !== "userEvent" });
+  });
+  hasObject(value, "heroineContext", "heroineContext", issues);
+  hasObject(value, "constraints", "constraints", issues);
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as EventExpansionRequest);
+}
+
+function validatePatchOperation(operation: unknown, path: string, issues: ValidationIssue[]): void {
+  if (!isRecord(operation)) {
+    addSchemaIssue(issues, path, "패치 연산은 객체여야 합니다.");
+    return;
+  }
+  const type = operation.type;
+  if (typeof type !== "string") {
+    addSchemaIssue(issues, `${path}.type`, "문자열이어야 합니다.");
+    return;
+  }
+  if (!describeEventExpansionPolicy().allowedOperationTypes.includes(type as VnMakerProjectPatchOperation["type"])) {
+    addSchemaIssue(issues, `${path}.type`, `허용되지 않은 패치 연산입니다: ${type}`);
+    return;
+  }
+  if (type === "addScene" || type === "updateScene") {
+    const result = parseVnMakerScene(operation.scene);
+    result.issues.forEach((issue) => addSchemaIssue(issues, `${path}.scene.${issue.path}`, issue.message));
+  }
+  if (type === "addChoice" && !isRecord(operation.choice)) {
+    addSchemaIssue(issues, `${path}.choice`, "객체여야 합니다.");
+  }
+  if (type === "addAsset" && !isRecord(operation.asset)) {
+    addSchemaIssue(issues, `${path}.asset`, "객체여야 합니다.");
+  }
+  if (type === "addGenerationJob" && !isRecord(operation.job)) {
+    addSchemaIssue(issues, `${path}.job`, "객체여야 합니다.");
+  }
+}
+
+export function parseEventExpansionPlan(value: unknown): DtoParseResult<EventExpansionPlan> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "EventExpansionPlan은 객체여야 합니다." }]);
+  }
+  hasString(value, "summary", "summary", issues);
+  if (hasObject(value, "decision", "decision", issues)) {
+    const decision = value.decision as Record<string, unknown>;
+    hasNumber(decision, "sceneCount", "decision.sceneCount", issues);
+    hasNumber(decision, "choiceCount", "decision.choiceCount", issues);
+    hasNumber(decision, "cgCount", "decision.cgCount", issues);
+    hasNumber(decision, "newExpressionAssetCount", "decision.newExpressionAssetCount", issues);
+  }
+  if (hasObject(value, "patch", "patch", issues)) {
+    const patch = value.patch as Record<string, unknown>;
+    if (hasArray(patch, "operations", "patch.operations", issues)) {
+      (patch.operations as unknown[]).forEach((operation, index) => validatePatchOperation(operation, `patch.operations.${index}`, issues));
+    }
+  }
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as EventExpansionPlan);
+}
+
+export function describeEventExpansionPolicy(): EventExpansionPolicyDescription {
+  return {
+    allowedOperationTypes: ["addScene", "updateScene", "updateSceneLink", "addChoice", "addAsset", "addGenerationJob"],
+    forbiddenOperationSummary: [
+      "프로젝트 전체 재작성",
+      "히로인 추가",
+      "루트 추가",
+      "씬 삭제",
+      "Alpha 표정 에셋 추가"
+    ],
+    alphaTarget: {
+      sceneCount: 3,
+      choiceCount: 1,
+      cgCount: 1,
+      newExpressionAssetCount: 0
+    }
+  };
+}
+
+export function upsertProjectCharacter(project: VnMakerProject, character: VnMakerCharacter): VnMakerProject {
+  const nextProject = cloneProject(project);
+  const index = nextProject.characters.findIndex((item) => item.id === character.id);
+  const nextCharacter = JSON.parse(JSON.stringify(character)) as VnMakerCharacter;
+  if (index >= 0) {
+    nextProject.characters[index] = nextCharacter;
+  } else {
+    nextProject.characters.push(nextCharacter);
+  }
+  return nextProject;
+}
+
+export function upsertProjectScene(project: VnMakerProject, scene: VnMakerScene): VnMakerProject {
+  const nextProject = cloneProject(project);
+  const index = nextProject.scenes.findIndex((item) => item.id === scene.id);
+  const nextScene = JSON.parse(JSON.stringify(scene)) as VnMakerScene;
+  if (index >= 0) {
+    nextProject.scenes[index] = nextScene;
+  } else {
+    nextProject.scenes.push(nextScene);
+  }
+  return nextProject;
+}
+
+export function applyGenerationResultToProject(
+  project: VnMakerProject,
+  input: ApplyGenerationResultToProjectInput
+): VnMakerProject {
+  const nextProject = cloneProject(project);
+  const assetIndex = nextProject.assets.findIndex((asset) => asset.id === input.asset.id);
+  const jobIndex = nextProject.generationJobs.findIndex((job) => job.id === input.job.id);
+  const asset = JSON.parse(JSON.stringify(input.asset)) as VnMakerAsset;
+  const job = JSON.parse(JSON.stringify(input.job)) as VnMakerGenerationJob;
+
+  if (assetIndex >= 0) {
+    nextProject.assets[assetIndex] = asset;
+  } else {
+    nextProject.assets.push(asset);
+  }
+
+  if (jobIndex >= 0) {
+    nextProject.generationJobs[jobIndex] = job;
+  } else {
+    nextProject.generationJobs.push(job);
+  }
+
+  return nextProject;
 }
 
 function hashString(value: string): string {

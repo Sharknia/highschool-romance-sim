@@ -5,8 +5,12 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import {
   buildPlayerRuntimeScript,
   buildProjectHtml,
+  applyGenerationResultToProject,
   createPlayerRuntimeData,
   createStarterProject,
+  parseVnMakerProject,
+  upsertProjectCharacter,
+  upsertProjectScene,
   validateEventExpansionPlan,
   validateProject,
   type EventExpansionPlan,
@@ -344,20 +348,9 @@ function normalizeNullable(value: string | undefined): string | null {
 }
 
 function assertProjectSnapshot(project: VnMakerProject): void {
-  if (
-    !project
-    || typeof project !== "object"
-    || project.version !== "vn-maker/v1"
-    || typeof project.id !== "string"
-    || typeof project.title !== "string"
-    || !Array.isArray(project.characters)
-    || !Array.isArray(project.routes)
-    || !Array.isArray(project.scenes)
-    || !Array.isArray(project.assets)
-    || !Array.isArray(project.generationJobs)
-    || !project.settings
-  ) {
-    throw new Error("저장하려는 project 입력이 VnMakerProject 형식이 아닙니다.");
+  const parsed = parseVnMakerProject(project);
+  if (!parsed.ok) {
+    throw new Error(`저장하려는 project 입력이 VnMakerProject 형식이 아닙니다: ${parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join(", ")}`);
   }
 }
 
@@ -805,46 +798,17 @@ VALUES (
   }
 
   upsertCharacter(character: VnMakerCharacter): VnMakerProject {
-    const project = this.requireProject();
-    const index = project.characters.findIndex((item) => item.id === character.id);
-    if (index >= 0) {
-      project.characters[index] = character;
-    } else {
-      project.characters.push(character);
-    }
-    return this.saveProject(project);
+    return this.saveProject(upsertProjectCharacter(this.requireProject(), character));
   }
 
   upsertScene(scene: VnMakerScene): VnMakerProject {
-    const project = this.requireProject();
-    const index = project.scenes.findIndex((item) => item.id === scene.id);
-    if (index >= 0) {
-      project.scenes[index] = scene;
-    } else {
-      project.scenes.push(scene);
-    }
-    return this.saveProject(project);
+    return this.saveProject(upsertProjectScene(this.requireProject(), scene));
   }
 
   async storeGenerationResult(input: StoreGenerationResultInput): Promise<VnMakerProject> {
     const project = this.requireProject();
     const metadata = await fileMetadata(this.paths.projectDirectory, input);
-    const assetIndex = project.assets.findIndex((asset) => asset.id === input.asset.id);
-    const jobIndex = project.generationJobs.findIndex((job) => job.id === input.job.id);
-
-    if (assetIndex >= 0) {
-      project.assets[assetIndex] = input.asset;
-    } else {
-      project.assets.push(input.asset);
-    }
-
-    if (jobIndex >= 0) {
-      project.generationJobs[jobIndex] = input.job;
-    } else {
-      project.generationJobs.push(input.job);
-    }
-
-    const saved = this.saveProject(project);
+    const saved = this.saveProject(applyGenerationResultToProject(project, input));
     this.writeAssetMetadata(project.id, input.asset.id, metadata);
     this.writeGenerationJobMetadata(project.id, input.job.id, metadata);
     return saved;
