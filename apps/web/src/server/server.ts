@@ -8,6 +8,7 @@ import { createApiApp, defaultGeneratedAssetsDirectory } from "./handlers.js";
 const clientRoot = join(process.cwd(), "dist/client");
 const generatedAssetsRoot = process.env.VN_MAKER_GENERATED_DIR || defaultGeneratedAssetsDirectory();
 const port = Number(process.env.PORT || 5174);
+const apiOnly = process.env.VN_MAKER_API_ONLY === "1";
 
 const contentTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -71,7 +72,7 @@ export function createWebApp(): Hono {
 }
 
 if (process.argv[1]?.endsWith("server.js")) {
-  if (!existsSync(join(clientRoot, "index.html"))) {
+  if (!apiOnly && !existsSync(join(clientRoot, "index.html"))) {
     await readFile(join(clientRoot, "index.html")).catch(() => {
       throw new Error("client build가 없습니다. 먼저 npm run build -w @vn-maker/web 실행이 필요합니다.");
     });

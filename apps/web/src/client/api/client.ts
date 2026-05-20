@@ -4,13 +4,34 @@ export function isAuthFailure(result: ApiResult): boolean {
   return result.httpStatus === 401 || Boolean(result.error?.includes("OAuth 로그인이 필요"));
 }
 
+async function readApiJson<T extends ApiResult = ApiResult>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    return {
+      ok: false,
+      httpStatus: response.status,
+      error: `서버 응답이 비어 있습니다. API 서버가 실행 중인지 확인해주세요. (${response.status})`
+    } as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {
+      ok: false,
+      httpStatus: response.status,
+      error: `서버 응답을 JSON으로 읽을 수 없습니다. (${response.status}) ${text.slice(0, 180)}`
+    } as T;
+  }
+}
+
 export async function postJson<T extends ApiResult = ApiResult>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  const result = await response.json() as T;
+  const result = await readApiJson<T>(response);
 
   if (!response.ok && result.ok !== false) {
     return {
@@ -34,7 +55,7 @@ export async function postJson<T extends ApiResult = ApiResult>(path: string, bo
 export async function readCodexSession(): Promise<CodexSessionResult> {
   try {
     const response = await fetch("/api/codex/session");
-    const result = await response.json() as CodexSessionResult;
+    const result = await readApiJson<CodexSessionResult>(response);
 
     if (!response.ok || result.ok === false) {
       return {

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { build as esbuild } from "esbuild";
 
 const core = await import("../packages/engine-core/dist/index.js");
 const codexGeneration = await import("../packages/generation-codex/dist/index.js");
@@ -13,6 +15,7 @@ const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-regression-"));
 const projectDirectory = join(tempRoot, "TestGame.vnmaker");
 const starterOnlyProjectDirectory = join(tempRoot, "StarterOnly.vnmaker");
 const alphaDirectory = join(tempRoot, "AlphaHeroine.vnmaker");
+const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 
 const project = core.createStarterProject({
   id: "test-project",
@@ -428,5 +431,28 @@ assert.equal(cliSmoke.ok, true);
 assert.equal(cliSmoke.smoke.ok, true);
 
 alphaStore.close();
+
+await esbuild({
+  entryPoints: ["apps/web/src/client/api/client.ts"],
+  bundle: true,
+  platform: "browser",
+  format: "esm",
+  outfile: bundledClientApiPath
+});
+const clientApi = await import(pathToFileURL(bundledClientApiPath).href);
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => new Response("", {
+  status: 500,
+  headers: { "Content-Type": "text/plain" }
+});
+const emptyLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
+assert.equal(emptyLoginResponse.ok, false);
+assert.equal(emptyLoginResponse.httpStatus, 500);
+assert.match(emptyLoginResponse.error, /응답이 비어 있습니다|JSON/);
+globalThis.fetch = originalFetch;
+
+const webPackage = JSON.parse(readFileSync("apps/web/package.json", "utf8"));
+assert.equal(webPackage.scripts.dev, "node scripts/dev.mjs");
+assert.equal(existsSync("apps/web/scripts/dev.mjs"), true);
 
 await rm(tempRoot, { recursive: true, force: true });
