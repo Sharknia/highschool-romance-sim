@@ -50,6 +50,18 @@ TypeScript 타입 검사
 index.html의 VN_ENGINE_BUNDLE 영역에 번들 삽입
 ```
 
+## VN Maker Toolkit
+
+새 제작툴 구조는 `packages/engine-core`, `packages/cli`, `apps/web` 워크스페이스로 구성된다. 목표는 Codex가 외부에서 CLI로 호출하든, 웹앱 내부 API로 호출하든 같은 코어로 미연시 프로젝트를 생성, 검증, 빌드, 이미지 생성 작업화하는 것이다.
+
+```bash
+npm run test:maker
+npm run build -w @vn-maker/web
+node packages/cli/dist/index.js inspect
+```
+
+상세 구조와 CLI/API 계약은 [docs/vn-maker-toolkit.md](docs/vn-maker-toolkit.md)를 참고한다.
+
 ## 엔진 생성
 
 HTML 쪽 게임 데이터는 `imageAssets`, `gameState`, `characterAssetMap`, `scenes`, `elements`를 준비한 뒤 엔진을 생성한다.
