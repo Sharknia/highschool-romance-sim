@@ -3,6 +3,16 @@ export type ValidationSeverity = "error" | "warning";
 export type AssetKind = "background" | "portrait" | "expression" | "cg" | "audio" | "other";
 export type GenerationJobKind = "character" | "route" | "scene" | "dialogue" | "portrait" | "expression" | "cg";
 
+export const DEFAULT_EMOTION_TAGS = ["normal", "happy", "sad", "angry", "shy"] as const;
+
+export interface HeroineReuseRecord {
+  projectId: string;
+  projectTitle: string;
+  projectDirectory?: string;
+  snapshotCharacterId: string;
+  snapshotCreatedAt: string;
+}
+
 export interface VnMakerProject {
   version: VnMakerProjectVersion;
   id: string;
@@ -31,6 +41,9 @@ export interface HeroineProfile {
   appearance: string;
   defaultPortraitAssetId?: string;
   portraitAssetIds: string[];
+  expressionAssetIds: Record<string, string>;
+  tags: string[];
+  reuseHistory: HeroineReuseRecord[];
 }
 
 export interface CreateHeroineProfileInput {
@@ -42,6 +55,9 @@ export interface CreateHeroineProfileInput {
   appearance: string;
   defaultPortraitAssetId?: string;
   portraitAssetIds?: string[];
+  expressionAssetIds?: Record<string, string>;
+  tags?: string[];
+  reuseHistory?: HeroineReuseRecord[];
 }
 
 export interface VnMakerCharacter {
@@ -51,11 +67,15 @@ export interface VnMakerCharacter {
   profile: string;
   emotionTags: string[];
   portraitAssetIds: string[];
+  expressionAssetIds?: Record<string, string>;
   description?: string;
   personality?: string;
   speechStyle?: string;
   appearance?: string;
   defaultPortraitAssetId?: string;
+  sourceHeroineId?: string;
+  sourceHeroineName?: string;
+  sourceSnapshotCreatedAt?: string;
 }
 
 export interface VnMakerRoute {
@@ -133,6 +153,7 @@ export interface VnMakerGenerationJob {
   provider: "codex-text-adapter" | "image-generation-adapter" | "mock-adapter";
   status: "planned" | "running" | "completed" | "failed";
   outputAssetId?: string;
+  failureMessage?: string;
 }
 
 export interface ValidationIssue {
@@ -268,6 +289,18 @@ export interface ApplyGenerationResultToProjectInput {
   asset: VnMakerAsset;
 }
 
+export interface PlanExpressionAssetsInput {
+  heroineId: string;
+  tags: string[];
+}
+
+export interface ExpressionAssetPlanResult {
+  project: VnMakerProject;
+  tags: string[];
+  assets: VnMakerAsset[];
+  jobs: VnMakerGenerationJob[];
+}
+
 export interface PlayerRuntimeData {
   projectId: string;
   title: string;
@@ -314,6 +347,14 @@ function normalizeId(value: string): string {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.trim()))];
+}
+
+function normalizeTag(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9가-힣_-]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function uniqueTags(values: string[]): string[] {
+  return [...new Set(values.map(normalizeTag).filter(Boolean))];
 }
 
 function cloneProject(project: VnMakerProject): VnMakerProject {
@@ -420,6 +461,15 @@ export function parseHeroineProfileInput(value: unknown): DtoParseResult<CreateH
   if (value.portraitAssetIds !== undefined && !Array.isArray(value.portraitAssetIds)) {
     addSchemaIssue(issues, "portraitAssetIds", "배열이어야 합니다.");
   }
+  if (value.expressionAssetIds !== undefined && !isRecord(value.expressionAssetIds)) {
+    addSchemaIssue(issues, "expressionAssetIds", "객체여야 합니다.");
+  }
+  if (value.tags !== undefined && !Array.isArray(value.tags)) {
+    addSchemaIssue(issues, "tags", "배열이어야 합니다.");
+  }
+  if (value.reuseHistory !== undefined && !Array.isArray(value.reuseHistory)) {
+    addSchemaIssue(issues, "reuseHistory", "배열이어야 합니다.");
+  }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as CreateHeroineProfileInput);
 }
 
@@ -434,6 +484,9 @@ export function parseVnMakerCharacter(value: unknown): DtoParseResult<VnMakerCha
   hasString(value, "profile", "profile", issues);
   hasArray(value, "emotionTags", "emotionTags", issues);
   hasArray(value, "portraitAssetIds", "portraitAssetIds", issues);
+  if (value.expressionAssetIds !== undefined && !isRecord(value.expressionAssetIds)) {
+    addSchemaIssue(issues, "expressionAssetIds", "객체여야 합니다.");
+  }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerCharacter);
 }
 
@@ -598,6 +651,22 @@ export function applyGenerationResultToProject(
   return nextProject;
 }
 
+export function updateGenerationJobStatus(
+  project: VnMakerProject,
+  jobId: string,
+  status: VnMakerGenerationJob["status"],
+  failureMessage?: string
+): VnMakerProject {
+  const nextProject = cloneProject(project);
+  const job = nextProject.generationJobs.find((item) => item.id === jobId);
+  if (!job) {
+    throw new Error(`생성 작업을 찾을 수 없습니다: ${jobId}`);
+  }
+  job.status = status;
+  job.failureMessage = status === "failed" ? failureMessage || "생성 작업이 실패했습니다." : undefined;
+  return nextProject;
+}
+
 function hashString(value: string): string {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -650,6 +719,11 @@ export function createHeroineProfile(input: CreateHeroineProfileInput): HeroineP
     defaultPortraitAssetId,
     ...(input.portraitAssetIds || [])
   ]);
+  const expressionAssetIds = Object.fromEntries(
+    Object.entries(input.expressionAssetIds || {})
+      .map(([tag, assetId]) => [normalizeTag(tag), assetId.trim()])
+      .filter(([tag, assetId]) => tag && assetId)
+  );
 
   return {
     id,
@@ -659,7 +733,10 @@ export function createHeroineProfile(input: CreateHeroineProfileInput): HeroineP
     speechStyle: input.speechStyle.trim(),
     appearance: input.appearance.trim(),
     defaultPortraitAssetId,
-    portraitAssetIds
+    portraitAssetIds,
+    expressionAssetIds,
+    tags: uniqueTags(input.tags || []),
+    reuseHistory: input.reuseHistory || []
   };
 }
 
@@ -669,13 +746,17 @@ function heroineToCharacter(heroine: HeroineProfile): VnMakerCharacter {
     displayName: heroine.name,
     role: "메인 히로인",
     profile: heroine.description,
-    emotionTags: ["normal"],
+    emotionTags: uniqueTags(["normal", ...Object.keys(heroine.expressionAssetIds)]),
     portraitAssetIds: heroine.portraitAssetIds,
+    expressionAssetIds: { ...heroine.expressionAssetIds },
     description: heroine.description,
     personality: heroine.personality,
     speechStyle: heroine.speechStyle,
     appearance: heroine.appearance,
-    defaultPortraitAssetId: heroine.defaultPortraitAssetId
+    defaultPortraitAssetId: heroine.defaultPortraitAssetId,
+    sourceHeroineId: heroine.id,
+    sourceHeroineName: heroine.name,
+    sourceSnapshotCreatedAt: new Date().toISOString()
   };
 }
 
@@ -870,6 +951,65 @@ export function createImageGenerationJob(input: CreateImageGenerationJobInput): 
     provider: "image-generation-adapter",
     status: "planned",
     outputAssetId: input.outputAssetId
+  };
+}
+
+export function planExpressionAssetsForHeroine(
+  project: VnMakerProject,
+  input: PlanExpressionAssetsInput
+): ExpressionAssetPlanResult {
+  const nextProject = cloneProject(project);
+  const character = nextProject.characters.find((item) => item.id === input.heroineId);
+  if (!character) {
+    throw new Error(`프로젝트에 히로인 스냅샷이 없습니다: ${input.heroineId}`);
+  }
+
+  const tags = uniqueTags(input.tags);
+  character.expressionAssetIds = { ...(character.expressionAssetIds || {}) };
+  character.emotionTags = uniqueTags([...(character.emotionTags || []), ...tags]);
+
+  const assets: VnMakerAsset[] = [];
+  const jobs: VnMakerGenerationJob[] = [];
+  const appearance = character.appearance || character.profile || character.displayName;
+
+  for (const tag of tags) {
+    const assetId = `asset-${character.id}-expression-${tag}`;
+    const jobId = `job-${character.id}-expression-${tag}`;
+    character.expressionAssetIds[tag] = assetId;
+
+    const existingAsset = nextProject.assets.find((asset) => asset.id === assetId);
+    const asset: VnMakerAsset = existingAsset || {
+      id: assetId,
+      kind: "expression",
+      label: `${character.displayName} ${tag} 표정`,
+      source: "placeholder",
+      generationJobId: jobId
+    };
+    if (!existingAsset) {
+      nextProject.assets.push(asset);
+    }
+    assets.push(asset);
+
+    const existingJob = nextProject.generationJobs.find((job) => job.id === jobId);
+    const job = existingJob || createImageGenerationJob({
+      id: jobId,
+      kind: "expression",
+      targetId: `${character.id}:${tag}`,
+      outputAssetId: assetId,
+      prompt: `${character.displayName}, ${appearance}, ${tag} expression portrait, clean visual novel heroine asset, teen safe`,
+      style: "consistent visual novel expression sheet, transparent background, polished anime portrait"
+    });
+    if (!existingJob) {
+      nextProject.generationJobs.push(job);
+    }
+    jobs.push(job);
+  }
+
+  return {
+    project: nextProject,
+    tags,
+    assets,
+    jobs
   };
 }
 
@@ -1230,6 +1370,9 @@ export function createAssetManifest(project: VnMakerProject): AssetManifest {
   const assetMap = new Map(project.assets.map((asset) => [asset.id, asset]));
 
   project.characters.forEach((character) => character.portraitAssetIds.forEach((assetId) => requiredIds.add(assetId)));
+  project.characters.forEach((character) => {
+    Object.values(character.expressionAssetIds || {}).forEach((assetId) => requiredIds.add(assetId));
+  });
   project.scenes.forEach((scene) => {
     [scene.backgroundAssetId, scene.cgAssetId].filter(Boolean).forEach((assetId) => requiredIds.add(assetId!));
     scene.characters.forEach((character) => character.assetId && requiredIds.add(character.assetId));
@@ -1275,6 +1418,7 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
     .map((asset) => rewriteAsset(asset, options.assetPathRewrites))
     .filter((asset): asset is VnMakerAsset => Boolean(asset));
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
+  const characterMap = new Map(project.characters.map((character) => [character.id, character]));
   const issues = validateProject(project);
 
   return {
@@ -1288,10 +1432,18 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
       label: scene.label,
       speaker: scene.speaker,
       text: scene.text,
-      characters: scene.characters.map((character) => ({
-        ...character,
-        asset: character.assetId ? assetMap.get(character.assetId) : undefined
-      })),
+      characters: scene.characters.map((character) => {
+        const projectCharacter = characterMap.get(character.characterId);
+        const expressionAssetId = character.expression
+          ? projectCharacter?.expressionAssetIds?.[normalizeTag(character.expression)]
+          : undefined;
+        const fallbackAssetId = projectCharacter?.defaultPortraitAssetId || projectCharacter?.portraitAssetIds[0];
+        const assetId = character.assetId || expressionAssetId || fallbackAssetId;
+        return {
+          ...character,
+          asset: assetId ? assetMap.get(assetId) : undefined
+        };
+      }),
       choices: scene.choices,
       next: scene.next,
       backgroundAsset: scene.backgroundAssetId ? assetMap.get(scene.backgroundAssetId) : undefined,

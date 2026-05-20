@@ -109,11 +109,7 @@ class ApiServices {
     this.codex = options.codex || createDefaultCodexAdapter();
     this.useCases = createVnMakerUseCases({
       defaultProjectDirectory: options.projectDirectory || getDefaultProjectDirectory(),
-      eventText: options.eventText || (
-        this.codex.generateEventExpansionPlan
-          ? { generateEventExpansionPlan: (input) => this.codex.generateEventExpansionPlan!(input) }
-          : undefined
-      ),
+      eventText: options.eventText,
       image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) }
     });
   }
@@ -146,6 +142,10 @@ class ApiServices {
 
   saveHeroine(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.saveHeroine(body);
+  }
+
+  cloneHeroine(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.cloneHeroine(body);
   }
 
   deleteHeroine(body: unknown): Promise<Record<string, unknown>> {
@@ -200,8 +200,32 @@ class ApiServices {
     return this.useCases.createGenerationJob(body);
   }
 
+  planDefaultEmotionAssets(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.planDefaultEmotionAssets(body);
+  }
+
+  planExpressionAssets(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.planExpressionAssets(body);
+  }
+
+  listGenerationJobs(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listGenerationJobs(body);
+  }
+
+  runGenerationJobs(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.runGenerationJobs(body);
+  }
+
   generateImage(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.generateImage(body);
+  }
+
+  listPatchHistory(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listPatchHistory(body);
+  }
+
+  undoPatch(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.undoPatch(body);
   }
 }
 
@@ -219,6 +243,7 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
   app.post("/api/heroines/list", (context) => jsonBodyRoute(context, (body) => services.listHeroines(body)));
   app.post("/api/heroines/save", (context) => jsonBodyRoute(context, (body) => services.saveHeroine(body)));
+  app.post("/api/heroines/clone", (context) => jsonBodyRoute(context, (body) => services.cloneHeroine(body)));
   app.post("/api/heroines/delete", (context) => jsonBodyRoute(context, (body) => services.deleteHeroine(body)));
   app.post("/api/projects/from-heroine", (context) => jsonBodyRoute(context, (body) => services.createProjectFromHeroine(body)));
   app.post("/api/project/characters", (context) => jsonBodyRoute(context, (body) => services.saveCharacter(body)));
@@ -230,8 +255,14 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/export", (context) => jsonBodyRoute(context, (body) => services.exportProject(body)));
   app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body)));
   app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body)));
+  app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));
+  app.post("/api/events/undo", (context) => jsonBodyRoute(context, (body) => services.undoPatch(body)));
 
   app.post("/api/generation/jobs", (context) => jsonBodyRoute(context, (body) => services.createGenerationJob(body)));
+  app.post("/api/generation/jobs/list", (context) => jsonBodyRoute(context, (body) => services.listGenerationJobs(body)));
+  app.post("/api/generation/jobs/run", (context) => jsonBodyRoute(context, (body) => services.runGenerationJobs(body)));
+  app.post("/api/generation/default-emotions", (context) => jsonBodyRoute(context, (body) => services.planDefaultEmotionAssets(body)));
+  app.post("/api/generation/expression-tags", (context) => jsonBodyRoute(context, (body) => services.planExpressionAssets(body)));
   app.post("/api/generation/images", (context) => jsonBodyRoute(context, (body) => services.generateImage(body)));
 
   app.all("/api/*", () => jsonResponse({ ok: false, error: "알 수 없는 API 경로입니다." }, 404));

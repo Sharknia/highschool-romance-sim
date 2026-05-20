@@ -24,12 +24,19 @@ interface CliInput {
   scene?: VnMakerScene;
   heroine?: unknown;
   heroineId?: string;
+  sourceHeroineId?: string;
+  newId?: string;
+  tags?: string[] | string;
   request?: unknown;
   plan?: unknown;
+  patchHistoryId?: string;
   userEvent?: string;
   routeId?: string;
   afterSceneId?: string;
   startSceneId?: string;
+  jobIds?: string[];
+  retryFailed?: boolean;
+  replaceCompleted?: boolean;
   job?: unknown;
   image?: unknown;
   login?: {
@@ -67,9 +74,6 @@ function getProject(input: CliInput): VnMakerProject {
 }
 
 const useCases = createVnMakerUseCases({
-  eventText: {
-    generateEventExpansionPlan: (input) => sharedCodexAppServerClient.generateEventExpansionPlan(input)
-  },
   image: {
     generateImageAsset: (input) => sharedCodexAppServerClient.generateImageAsset(input)
   }
@@ -86,6 +90,7 @@ function printCapabilities(): void {
       "open-project",
       "list-heroines",
       "save-heroine",
+      "clone-heroine",
       "delete-heroine",
       "save-character",
       "save-scene",
@@ -99,6 +104,12 @@ function printCapabilities(): void {
       "export-web",
       "smoke-export",
       "create-image-job",
+      "plan-default-emotion-assets",
+      "plan-expression-assets",
+      "list-generation-jobs",
+      "run-generation-jobs",
+      "list-patch-history",
+      "undo-patch",
       "codex-auth-status",
       "codex-login",
       "codex-logout",
@@ -146,6 +157,11 @@ async function run(): Promise<void> {
 
   if (command === "save-heroine") {
     writeJson(await useCases.saveHeroine(input));
+    return;
+  }
+
+  if (command === "clone-heroine") {
+    writeJson(await useCases.cloneHeroine(input));
     return;
   }
 
@@ -236,6 +252,36 @@ async function run(): Promise<void> {
       return;
     }
     writeJson(await useCases.createGenerationJob({ ...input, ...(input.job && typeof input.job === "object" ? input.job : {}) }));
+    return;
+  }
+
+  if (command === "plan-default-emotion-assets") {
+    writeJson(await useCases.planDefaultEmotionAssets(input));
+    return;
+  }
+
+  if (command === "plan-expression-assets") {
+    writeJson(await useCases.planExpressionAssets(input));
+    return;
+  }
+
+  if (command === "list-generation-jobs") {
+    writeJson(await useCases.listGenerationJobs(input));
+    return;
+  }
+
+  if (command === "run-generation-jobs") {
+    writeJson(await useCases.runGenerationJobs(input));
+    return;
+  }
+
+  if (command === "list-patch-history") {
+    writeJson(await useCases.listPatchHistory(input));
+    return;
+  }
+
+  if (command === "undo-patch") {
+    writeJson(await useCases.undoPatch(input));
     return;
   }
 

@@ -9,6 +9,7 @@ import {
   createPlayerRuntimeData,
   createStarterProject,
   parseVnMakerProject,
+  updateGenerationJobStatus,
   upsertProjectCharacter,
   upsertProjectScene,
   validateEventExpansionPlan,
@@ -19,6 +20,8 @@ import {
   type PlayerRuntimeData,
   type ProjectPatchDescription,
   type CreateStarterProjectInput,
+  type EventExpansionValidationResult,
+  type HeroineReuseRecord,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -74,6 +77,45 @@ export interface ApplyEventExpansionResult {
   project: VnMakerProject;
   validation: ProjectValidationResult;
   diff: ProjectPatchDescription;
+  patchHistoryEntry: PatchHistoryEntry;
+}
+
+export type PatchHistoryStatus = "proposed" | "applied" | "failed";
+
+export interface PatchGenerationAttempt {
+  attempt: number;
+  ok: boolean;
+  failureKind?: "schema_invalid" | "engine_validation_failed" | "quality_rule_failed";
+  issues: string[];
+}
+
+export interface RecordPatchHistoryInput {
+  status: PatchHistoryStatus;
+  summary: string;
+  request?: EventExpansionRequest;
+  plan?: EventExpansionPlan;
+  rawOutput?: unknown;
+  attempts?: PatchGenerationAttempt[];
+  validation?: EventExpansionValidationResult | ProjectValidationResult;
+  diff?: ProjectPatchDescription;
+  beforeProject?: VnMakerProject;
+  afterProject?: VnMakerProject;
+}
+
+export interface PatchHistoryEntry {
+  id: string;
+  status: PatchHistoryStatus;
+  summary: string;
+  request?: EventExpansionRequest;
+  plan?: EventExpansionPlan;
+  rawOutput?: unknown;
+  attempts: PatchGenerationAttempt[];
+  validationIssues: ValidationIssue[];
+  diff?: ProjectPatchDescription;
+  beforeSummary?: string;
+  afterSummary?: string;
+  createdAt: string;
+  revertedAt?: string;
 }
 
 export interface WebExportResult {
@@ -119,6 +161,15 @@ interface CharacterRow {
   profile: string;
   emotion_tags_json: string;
   portrait_asset_ids_json: string;
+  expression_asset_ids_json: string | null;
+  description: string | null;
+  personality: string | null;
+  speech_style: string | null;
+  appearance: string | null;
+  default_portrait_asset_id: string | null;
+  source_heroine_id: string | null;
+  source_heroine_name: string | null;
+  source_snapshot_created_at: string | null;
   position: number;
 }
 
@@ -131,6 +182,9 @@ interface HeroineRow {
   appearance: string;
   default_portrait_asset_id: string | null;
   portrait_asset_ids_json: string;
+  expression_asset_ids_json: string | null;
+  tags_json: string | null;
+  reuse_history_json: string | null;
   position: number;
 }
 
@@ -184,9 +238,26 @@ interface GenerationJobRow {
   provider: VnMakerGenerationJob["provider"];
   status: VnMakerGenerationJob["status"];
   output_asset_id: string | null;
+  failure_message: string | null;
   prompt_hash: string | null;
   adapter: string | null;
   position: number;
+}
+
+interface PatchHistoryRow {
+  id: string;
+  status: PatchHistoryStatus;
+  summary: string;
+  request_json: string | null;
+  plan_json: string | null;
+  raw_output_json: string | null;
+  attempts_json: string | null;
+  validation_issues_json: string | null;
+  diff_json: string | null;
+  before_project_json: string | null;
+  after_project_json: string | null;
+  created_at: string;
+  reverted_at: string | null;
 }
 
 const migrations = [
@@ -321,6 +392,46 @@ CREATE TABLE IF NOT EXISTS heroine_library (
   updated_at TEXT NOT NULL
 );
 `
+  },
+  {
+    id: 3,
+    name: "beta_iteration_fields",
+    sql: `
+ALTER TABLE heroine_library ADD COLUMN expression_asset_ids_json TEXT;
+ALTER TABLE heroine_library ADD COLUMN tags_json TEXT;
+ALTER TABLE heroine_library ADD COLUMN reuse_history_json TEXT;
+
+ALTER TABLE characters ADD COLUMN expression_asset_ids_json TEXT;
+ALTER TABLE characters ADD COLUMN description TEXT;
+ALTER TABLE characters ADD COLUMN personality TEXT;
+ALTER TABLE characters ADD COLUMN speech_style TEXT;
+ALTER TABLE characters ADD COLUMN appearance TEXT;
+ALTER TABLE characters ADD COLUMN default_portrait_asset_id TEXT;
+ALTER TABLE characters ADD COLUMN source_heroine_id TEXT;
+ALTER TABLE characters ADD COLUMN source_heroine_name TEXT;
+ALTER TABLE characters ADD COLUMN source_snapshot_created_at TEXT;
+
+ALTER TABLE generation_jobs ADD COLUMN failure_message TEXT;
+
+CREATE TABLE IF NOT EXISTS patch_history (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  request_json TEXT,
+  plan_json TEXT,
+  raw_output_json TEXT,
+  attempts_json TEXT,
+  validation_issues_json TEXT NOT NULL,
+  diff_json TEXT,
+  before_project_json TEXT,
+  after_project_json TEXT,
+  created_at TEXT NOT NULL,
+  reverted_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_patch_history_project_created ON patch_history(project_id, created_at);
+`
   }
 ] as const;
 
@@ -363,7 +474,35 @@ function heroineFromRow(row: HeroineRow): HeroineProfile {
     speechStyle: row.speech_style,
     appearance: row.appearance,
     defaultPortraitAssetId: row.default_portrait_asset_id || undefined,
-    portraitAssetIds: parseJson<string[]>(row.portrait_asset_ids_json, [])
+    portraitAssetIds: parseJson<string[]>(row.portrait_asset_ids_json, []),
+    expressionAssetIds: parseJson<Record<string, string>>(row.expression_asset_ids_json, {}),
+    tags: parseJson<string[]>(row.tags_json, []),
+    reuseHistory: parseJson<HeroineReuseRecord[]>(row.reuse_history_json, [])
+  };
+}
+
+function summarizeProject(project: VnMakerProject): string {
+  return `씬 ${project.scenes.length}개, 선택지 ${project.scenes.reduce((total, scene) => total + scene.choices.length, 0)}개, 에셋 ${project.assets.length}개, 생성 작업 ${project.generationJobs.length}개`;
+}
+
+function patchHistoryEntryFromRow(row: PatchHistoryRow): PatchHistoryEntry {
+  const beforeProject = parseJson<VnMakerProject | null>(row.before_project_json, null);
+  const afterProject = parseJson<VnMakerProject | null>(row.after_project_json, null);
+
+  return {
+    id: row.id,
+    status: row.status,
+    summary: row.summary,
+    request: parseJson<EventExpansionRequest | undefined>(row.request_json, undefined),
+    plan: parseJson<EventExpansionPlan | undefined>(row.plan_json, undefined),
+    rawOutput: parseJson<unknown>(row.raw_output_json, undefined),
+    attempts: parseJson<PatchGenerationAttempt[]>(row.attempts_json, []),
+    validationIssues: parseJson<ValidationIssue[]>(row.validation_issues_json, []),
+    diff: parseJson<ProjectPatchDescription | undefined>(row.diff_json, undefined),
+    beforeSummary: beforeProject ? summarizeProject(beforeProject) : undefined,
+    afterSummary: afterProject ? summarizeProject(afterProject) : undefined,
+    createdAt: row.created_at,
+    revertedAt: row.reverted_at || undefined
   };
 }
 
@@ -481,7 +620,9 @@ WHERE project_id = ?
 `).get(project.id) as SettingsRow | undefined;
 
     const characters = this.db.prepare(`
-SELECT id, display_name, role, profile, emotion_tags_json, portrait_asset_ids_json, position
+SELECT id, display_name, role, profile, emotion_tags_json, portrait_asset_ids_json,
+  expression_asset_ids_json, description, personality, speech_style, appearance,
+  default_portrait_asset_id, source_heroine_id, source_heroine_name, source_snapshot_created_at, position
 FROM characters
 WHERE project_id = ?
 ORDER BY position ASC, id ASC
@@ -509,7 +650,7 @@ ORDER BY position ASC, id ASC
 `).all(project.id) as AssetRow[];
 
     const generationJobs = this.db.prepare(`
-SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, prompt_hash, adapter, position
+SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, failure_message, prompt_hash, adapter, position
 FROM generation_jobs
 WHERE project_id = ?
 ORDER BY position ASC, id ASC
@@ -526,7 +667,16 @@ ORDER BY position ASC, id ASC
         role: row.role,
         profile: row.profile,
         emotionTags: parseJson<string[]>(row.emotion_tags_json, []),
-        portraitAssetIds: parseJson<string[]>(row.portrait_asset_ids_json, [])
+        portraitAssetIds: parseJson<string[]>(row.portrait_asset_ids_json, []),
+        expressionAssetIds: parseJson<Record<string, string>>(row.expression_asset_ids_json, {}),
+        description: row.description || undefined,
+        personality: row.personality || undefined,
+        speechStyle: row.speech_style || undefined,
+        appearance: row.appearance || undefined,
+        defaultPortraitAssetId: row.default_portrait_asset_id || undefined,
+        sourceHeroineId: row.source_heroine_id || undefined,
+        sourceHeroineName: row.source_heroine_name || undefined,
+        sourceSnapshotCreatedAt: row.source_snapshot_created_at || undefined
       })),
       routes: routes.map((row): VnMakerRoute => ({
         id: row.id,
@@ -565,7 +715,8 @@ ORDER BY position ASC, id ASC
         style: row.style || undefined,
         provider: row.provider,
         status: row.status,
-        outputAssetId: row.output_asset_id || undefined
+        outputAssetId: row.output_asset_id || undefined,
+        failureMessage: row.failure_message || undefined
       })),
       settings: {
         defaultRouteId: settings?.default_route_id || "",
@@ -585,7 +736,8 @@ ORDER BY position ASC, id ASC
 
   listHeroines(): HeroineProfile[] {
     const rows = this.db.prepare(`
-SELECT id, name, description, personality, speech_style, appearance, default_portrait_asset_id, portrait_asset_ids_json, position
+SELECT id, name, description, personality, speech_style, appearance, default_portrait_asset_id,
+  portrait_asset_ids_json, expression_asset_ids_json, tags_json, reuse_history_json, position
 FROM heroine_library
 ORDER BY position ASC, id ASC
 `).all() as HeroineRow[];
@@ -599,11 +751,13 @@ ORDER BY position ASC, id ASC
     this.db.prepare(`
 INSERT INTO heroine_library (
   id, name, description, personality, speech_style, appearance,
-  default_portrait_asset_id, portrait_asset_ids_json, position, created_at, updated_at
+  default_portrait_asset_id, portrait_asset_ids_json, expression_asset_ids_json,
+  tags_json, reuse_history_json, position, created_at, updated_at
 )
 VALUES (
   @id, @name, @description, @personality, @speechStyle, @appearance,
-  @defaultPortraitAssetId, @portraitAssetIdsJson, @position, @now, @now
+  @defaultPortraitAssetId, @portraitAssetIdsJson, @expressionAssetIdsJson,
+  @tagsJson, @reuseHistoryJson, @position, @now, @now
 )
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
@@ -613,6 +767,9 @@ ON CONFLICT(id) DO UPDATE SET
   appearance = excluded.appearance,
   default_portrait_asset_id = excluded.default_portrait_asset_id,
   portrait_asset_ids_json = excluded.portrait_asset_ids_json,
+  expression_asset_ids_json = excluded.expression_asset_ids_json,
+  tags_json = excluded.tags_json,
+  reuse_history_json = excluded.reuse_history_json,
   position = excluded.position,
   updated_at = excluded.updated_at
 `).run({
@@ -624,10 +781,33 @@ ON CONFLICT(id) DO UPDATE SET
       appearance: heroine.appearance,
       defaultPortraitAssetId: heroine.defaultPortraitAssetId || null,
       portraitAssetIdsJson: json(heroine.portraitAssetIds),
+      expressionAssetIdsJson: json(heroine.expressionAssetIds),
+      tagsJson: json(heroine.tags),
+      reuseHistoryJson: json(heroine.reuseHistory),
       position: nextPosition,
       now
     });
     return heroine;
+  }
+
+  recordHeroineReuse(heroineId: string, project: VnMakerProject): HeroineProfile | null {
+    const heroine = this.listHeroines().find((item) => item.id === heroineId);
+    if (!heroine) {
+      return null;
+    }
+    const snapshot = project.characters.find((character) => character.sourceHeroineId === heroineId || character.id === heroineId);
+    const record: HeroineReuseRecord = {
+      projectId: project.id,
+      projectTitle: project.title,
+      projectDirectory: this.paths.projectDirectory,
+      snapshotCharacterId: snapshot?.id || heroineId,
+      snapshotCreatedAt: snapshot?.sourceSnapshotCreatedAt || new Date().toISOString()
+    };
+    const reuseHistory = [
+      record,
+      ...heroine.reuseHistory.filter((item) => item.projectId !== record.projectId)
+    ];
+    return this.saveHeroine({ ...heroine, reuseHistory });
   }
 
   deleteHeroine(heroineId: string): void {
@@ -678,8 +858,18 @@ ON CONFLICT(project_id) DO UPDATE SET
       this.db.prepare("DELETE FROM generation_jobs WHERE project_id = ?").run(project.id);
 
       const insertCharacter = this.db.prepare(`
-INSERT INTO characters (project_id, id, display_name, role, profile, emotion_tags_json, portrait_asset_ids_json, position)
-VALUES (@projectId, @id, @displayName, @role, @profile, @emotionTagsJson, @portraitAssetIdsJson, @position)
+INSERT INTO characters (
+  project_id, id, display_name, role, profile, emotion_tags_json, portrait_asset_ids_json,
+  expression_asset_ids_json, description, personality, speech_style, appearance,
+  default_portrait_asset_id, source_heroine_id, source_heroine_name, source_snapshot_created_at,
+  position
+)
+VALUES (
+  @projectId, @id, @displayName, @role, @profile, @emotionTagsJson, @portraitAssetIdsJson,
+  @expressionAssetIdsJson, @description, @personality, @speechStyle, @appearance,
+  @defaultPortraitAssetId, @sourceHeroineId, @sourceHeroineName, @sourceSnapshotCreatedAt,
+  @position
+)
 `);
       project.characters.forEach((character, position) => insertCharacter.run({
         projectId: project.id,
@@ -689,6 +879,15 @@ VALUES (@projectId, @id, @displayName, @role, @profile, @emotionTagsJson, @portr
         profile: character.profile,
         emotionTagsJson: json(character.emotionTags),
         portraitAssetIdsJson: json(character.portraitAssetIds),
+        expressionAssetIdsJson: json(character.expressionAssetIds || {}),
+        description: character.description || null,
+        personality: character.personality || null,
+        speechStyle: character.speechStyle || null,
+        appearance: character.appearance || null,
+        defaultPortraitAssetId: character.defaultPortraitAssetId || null,
+        sourceHeroineId: character.sourceHeroineId || null,
+        sourceHeroineName: character.sourceHeroineName || null,
+        sourceSnapshotCreatedAt: character.sourceSnapshotCreatedAt || null,
         position
       }));
 
@@ -767,11 +966,11 @@ VALUES (
       const insertJob = this.db.prepare(`
 INSERT INTO generation_jobs (
   project_id, id, kind, target_id, prompt, style, provider, status,
-  output_asset_id, prompt_hash, adapter, position, created_at, updated_at
+  output_asset_id, failure_message, prompt_hash, adapter, position, created_at, updated_at
 )
 VALUES (
   @projectId, @id, @kind, @targetId, @prompt, @style, @provider, @status,
-  @outputAssetId, @promptHash, @adapter, @position, @now, @now
+  @outputAssetId, @failureMessage, @promptHash, @adapter, @position, @now, @now
 )
 `);
       project.generationJobs.forEach((job, position) => {
@@ -786,6 +985,7 @@ VALUES (
           provider: job.provider,
           status: job.status,
           outputAssetId: normalizeNullable(job.outputAssetId),
+          failureMessage: normalizeNullable(job.failureMessage),
           promptHash: preserved?.prompt_hash || hashText(job.prompt),
           adapter: preserved?.adapter || job.provider,
           position,
@@ -814,6 +1014,10 @@ VALUES (
     return saved;
   }
 
+  markGenerationJobStatus(jobId: string, status: VnMakerGenerationJob["status"], failureMessage?: string): VnMakerProject {
+    return this.saveProject(updateGenerationJobStatus(this.requireProject(), jobId, status, failureMessage));
+  }
+
   validateAndStore(): ProjectValidationResult {
     const project = this.requireProject();
     const issues = validateProject(project);
@@ -832,15 +1036,35 @@ VALUES (
     const patchValidation = validateEventExpansionPlan(project, request, plan);
     if (!patchValidation.ok || !patchValidation.appliedProject) {
       this.saveValidationIssues(project.id, patchValidation.issues);
+      this.recordPatchHistory({
+        status: "failed",
+        summary: plan.summary || "패치 검증 실패",
+        request,
+        plan,
+        validation: patchValidation,
+        diff: patchValidation.diff,
+        beforeProject: project
+      });
       throw new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`);
     }
 
     const savedProject = this.saveProject(patchValidation.appliedProject);
     const validation = this.validateAndStore();
+    const patchHistoryEntry = this.recordPatchHistory({
+      status: "applied",
+      summary: plan.summary,
+      request,
+      plan,
+      validation,
+      diff: patchValidation.diff,
+      beforeProject: project,
+      afterProject: savedProject
+    });
     return {
       project: savedProject,
       validation,
-      diff: patchValidation.diff
+      diff: patchValidation.diff,
+      patchHistoryEntry
     };
   }
 
@@ -896,6 +1120,81 @@ WHERE project_id = ?
 ORDER BY id ASC
 `).all(project.id) as ValidationIssue[];
     return rows;
+  }
+
+  listPatchHistory(): PatchHistoryEntry[] {
+    const project = this.requireProject();
+    const rows = this.db.prepare(`
+SELECT id, status, summary, request_json, plan_json, raw_output_json, attempts_json,
+  validation_issues_json, diff_json, before_project_json, after_project_json,
+  created_at, reverted_at
+FROM patch_history
+WHERE project_id = ?
+ORDER BY created_at DESC, id DESC
+`).all(project.id) as PatchHistoryRow[];
+    return rows.map(patchHistoryEntryFromRow);
+  }
+
+  recordPatchHistory(input: RecordPatchHistoryInput): PatchHistoryEntry {
+    const project = this.requireProject();
+    const createdAt = nowIso();
+    const id = `patch-${createdAt.replace(/[^0-9]/g, "")}-${Math.random().toString(36).slice(2, 8)}`;
+    const validationIssues = input.validation?.issues || [];
+    this.db.prepare(`
+INSERT INTO patch_history (
+  id, project_id, status, summary, request_json, plan_json, raw_output_json,
+  attempts_json, validation_issues_json, diff_json, before_project_json,
+  after_project_json, created_at, reverted_at
+)
+VALUES (
+  @id, @projectId, @status, @summary, @requestJson, @planJson, @rawOutputJson,
+  @attemptsJson, @validationIssuesJson, @diffJson, @beforeProjectJson,
+  @afterProjectJson, @createdAt, NULL
+)
+`).run({
+      id,
+      projectId: project.id,
+      status: input.status,
+      summary: input.summary,
+      requestJson: input.request ? json(input.request) : null,
+      planJson: input.plan ? json(input.plan) : null,
+      rawOutputJson: input.rawOutput === undefined ? null : json(input.rawOutput),
+      attemptsJson: json(input.attempts || []),
+      validationIssuesJson: json(validationIssues),
+      diffJson: input.diff ? json(input.diff) : null,
+      beforeProjectJson: input.beforeProject ? json(input.beforeProject) : null,
+      afterProjectJson: input.afterProject ? json(input.afterProject) : null,
+      createdAt
+    });
+    return this.listPatchHistory().find((entry) => entry.id === id)!;
+  }
+
+  undoPatchHistory(patchHistoryId: string): VnMakerProject {
+    const project = this.requireProject();
+    const row = this.db.prepare(`
+SELECT id, status, summary, request_json, plan_json, raw_output_json, attempts_json,
+  validation_issues_json, diff_json, before_project_json, after_project_json,
+  created_at, reverted_at
+FROM patch_history
+WHERE project_id = ? AND id = ?
+`).get(project.id, patchHistoryId) as PatchHistoryRow | undefined;
+    if (!row) {
+      throw new Error(`패치 이력을 찾을 수 없습니다: ${patchHistoryId}`);
+    }
+    if (row.status !== "applied" || !row.before_project_json) {
+      throw new Error("적용된 패치만 되돌릴 수 있습니다.");
+    }
+    if (row.reverted_at) {
+      throw new Error("이미 되돌린 패치입니다.");
+    }
+
+    const beforeProject = parseJson<VnMakerProject | null>(row.before_project_json, null);
+    if (!beforeProject) {
+      throw new Error("되돌릴 프로젝트 스냅샷이 없습니다.");
+    }
+    const saved = this.saveProject(beforeProject);
+    this.db.prepare("UPDATE patch_history SET reverted_at = ? WHERE id = ?").run(nowIso(), patchHistoryId);
+    return saved;
   }
 
   importProjectSnapshot(project: VnMakerProject): VnMakerProject {
@@ -960,7 +1259,7 @@ WHERE project_id = ?
 
   private readGenerationJobMetadata(projectId: string): Map<string, GenerationJobRow> {
     const rows = this.db.prepare(`
-SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, prompt_hash, adapter, position
+SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, failure_message, prompt_hash, adapter, position
 FROM generation_jobs
 WHERE project_id = ?
 `).all(projectId) as GenerationJobRow[];

@@ -1,11 +1,13 @@
 import { join } from "node:path";
 import {
+  DEFAULT_EMOTION_TAGS,
   buildProjectHtml,
   createAssetManifest,
   createDeterministicEventExpansionPlan,
   createEventExpansionRequest,
   createHeroineProfile,
   createImageGenerationJob,
+  planExpressionAssetsForHeroine,
   createProjectFromHeroine,
   createStarterProject,
   parseCreateImageGenerationJobInput,
@@ -180,6 +182,70 @@ function generationJobInput(input: unknown): CreateImageGenerationJobInput {
   return requireParsed(parseCreateImageGenerationJobInput(candidate), "job");
 }
 
+function tagsFrom(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
+  }
+  if (typeof value === "string") {
+    return value.split(",").map((item) => item.trim());
+  }
+  return [];
+}
+
+function cloneHeroineProfile(source: HeroineProfile, input: unknown): HeroineProfile {
+  const record = asRecord(input);
+  const newId = typeof record.newId === "string" && record.newId.trim()
+    ? record.newId
+    : `${source.id}-copy`;
+  const name = typeof record.name === "string" && record.name.trim()
+    ? record.name
+    : `${source.name} 복제`;
+  return createHeroineProfile({
+    id: newId,
+    name,
+    description: typeof record.description === "string" ? record.description : source.description,
+    personality: typeof record.personality === "string" ? record.personality : source.personality,
+    speechStyle: typeof record.speechStyle === "string" ? record.speechStyle : source.speechStyle,
+    appearance: typeof record.appearance === "string" ? record.appearance : source.appearance,
+    defaultPortraitAssetId: typeof record.defaultPortraitAssetId === "string" ? record.defaultPortraitAssetId : `asset-${newId}-portrait`,
+    portraitAssetIds: [],
+    expressionAssetIds: {},
+    tags: tagsFrom(record.tags).length > 0 ? tagsFrom(record.tags) : source.tags,
+    reuseHistory: []
+  });
+}
+
+function filterAndSortHeroines(heroines: HeroineProfile[], input: unknown): HeroineProfile[] {
+  const record = asRecord(input);
+  const query = typeof record.query === "string" ? record.query.trim().toLowerCase() : "";
+  const tag = typeof record.tag === "string" ? record.tag.trim().toLowerCase() : "";
+  const sort = typeof record.sort === "string" ? record.sort : "position";
+  const filtered = heroines.filter((heroine) => {
+    const matchesQuery = !query || [
+      heroine.id,
+      heroine.name,
+      heroine.description,
+      heroine.personality,
+      heroine.speechStyle,
+      heroine.appearance,
+      ...heroine.tags
+    ].some((value) => value.toLowerCase().includes(query));
+    const matchesTag = !tag || heroine.tags.some((value) => value.toLowerCase() === tag);
+    return matchesQuery && matchesTag;
+  });
+
+  if (sort === "name-asc") {
+    return [...filtered].sort((left, right) => left.name.localeCompare(right.name, "ko"));
+  }
+  if (sort === "name-desc") {
+    return [...filtered].sort((left, right) => right.name.localeCompare(left.name, "ko"));
+  }
+  if (sort === "reuse-desc") {
+    return [...filtered].sort((left, right) => right.reuseHistory.length - left.reuseHistory.length);
+  }
+  return filtered;
+}
+
 async function withStore<T>(projectDirectory: string, operation: (store: ProjectStore) => Promise<T> | T): Promise<T> {
   const store = await openProjectStore(projectDirectory);
   try {
@@ -215,11 +281,12 @@ async function expandNaturalLanguageEvent(input: {
   adapter?: EventTextGenerationAdapter;
   maxAttempts?: number;
 }): Promise<
-  | { ok: true; plan: EventExpansionPlan; validation: EventExpansionValidationResult; attempts: EventTextGenerationAttempt[] }
-  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string }
+  | { ok: true; plan: EventExpansionPlan; validation: EventExpansionValidationResult; attempts: EventTextGenerationAttempt[]; rawOutput: unknown }
+  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown }
 > {
   const maxAttempts = input.maxAttempts ?? 3;
   const attempts: EventTextGenerationAttempt[] = [];
+  let rawOutput: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const candidate = input.adapter
@@ -230,6 +297,7 @@ async function expandNaturalLanguageEvent(input: {
           previousAttempts: attempts
         })
       : createDeterministicEventExpansionPlan(input.request);
+    rawOutput = candidate;
     const parsed = parseEventExpansionPlan(candidate);
 
     if (!parsed.ok) {
@@ -258,14 +326,16 @@ async function expandNaturalLanguageEvent(input: {
       ok: true,
       plan: parsed.value,
       validation,
-      attempts
+      attempts,
+      rawOutput
     };
   }
 
   return {
     ok: false,
     attempts,
-    error: attempts.at(-1)?.issues.join(", ") || "자연어 이벤트 생성에 실패했습니다."
+    error: attempts.at(-1)?.issues.join(", ") || "자연어 이벤트 생성에 실패했습니다.",
+    rawOutput
   };
 }
 
@@ -341,8 +411,15 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
 
     async createProjectFromHeroine(input: unknown) {
       const record = asRecord(input);
-      const heroine = requiredHeroine(input);
       const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
+      const existingStore = await ensureProjectStore(input, defaultProjectDirectory);
+      const heroine = record.heroine
+        ? requiredHeroine(input)
+        : existingStore.listHeroines().find((item) => item.id === record.heroineId);
+      existingStore.close();
+      if (!heroine) {
+        throw new InputValidationError("heroine 입력이 필요합니다.", [{ severity: "error", path: "heroineId", message: "히로인 라이브러리에서 찾을 수 없습니다." }]);
+      }
       const store = await createProjectWorkspace({
         projectDirectory,
         project: createProjectFromHeroine({
@@ -354,13 +431,15 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       });
       try {
         store.saveHeroine(heroine);
+        const project = store.requireProject();
+        store.recordHeroineReuse(heroine.id, project);
         const validation = store.validateAndStore();
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           heroine,
-          project: store.requireProject(),
+          project,
           validation
         };
       } finally {
@@ -385,7 +464,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async listHeroines(input: unknown) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        return { ok: true, projectDirectory: store.paths.projectDirectory, heroines: store.listHeroines() };
+        return { ok: true, projectDirectory: store.paths.projectDirectory, heroines: filterAndSortHeroines(store.listHeroines(), input) };
       } finally {
         store.close();
       }
@@ -395,6 +474,25 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const heroine = store.saveHeroine(requiredHeroine(input));
+        return { ok: true, projectDirectory: store.paths.projectDirectory, heroine, heroines: store.listHeroines() };
+      } finally {
+        store.close();
+      }
+    },
+
+    async cloneHeroine(input: unknown) {
+      const record = asRecord(input);
+      const sourceHeroineId = String(record.sourceHeroineId || "");
+      if (!sourceHeroineId) {
+        throw new InputValidationError("sourceHeroineId 입력이 필요합니다.", [{ severity: "error", path: "sourceHeroineId", message: "비어 있을 수 없습니다." }]);
+      }
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const source = store.listHeroines().find((heroine) => heroine.id === sourceHeroineId);
+        if (!source) {
+          throw new InputValidationError("복제할 히로인을 찾을 수 없습니다.", [{ severity: "error", path: "sourceHeroineId", message: "라이브러리에 존재하지 않습니다." }]);
+        }
+        const heroine = store.saveHeroine(cloneHeroineProfile(source, input));
         return { ok: true, projectDirectory: store.paths.projectDirectory, heroine, heroines: store.listHeroines() };
       } finally {
         store.close();
@@ -517,8 +615,28 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         });
         const result = await expandNaturalLanguageEvent({ project, request, adapter: options.eventText });
         if (!result.ok) {
+          store.recordPatchHistory({
+            status: "failed",
+            summary: "자연어 이벤트 생성 실패",
+            request,
+            rawOutput: result.rawOutput,
+            attempts: result.attempts,
+            validation: { ok: false, issues: [{ severity: "error", path: "eventText", message: result.error }] }
+          });
           return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error };
         }
+        store.recordPatchHistory({
+          status: "proposed",
+          summary: result.plan.summary,
+          request,
+          plan: result.plan,
+          rawOutput: result.rawOutput,
+          attempts: result.attempts,
+          validation: result.validation,
+          diff: result.validation.diff,
+          beforeProject: project,
+          afterProject: result.validation.appliedProject
+        });
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
@@ -526,7 +644,8 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           plan: result.plan,
           validation: result.validation,
           diff: result.validation.diff,
-          attempts: result.attempts
+          attempts: result.attempts,
+          rawOutput: result.rawOutput
         };
       } finally {
         store.close();
@@ -591,6 +710,120 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       }
     },
 
+    async planDefaultEmotionAssets(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const heroineId = String(asRecord(input).heroineId || project.routes[0]?.heroineId || project.characters[0]?.id || "");
+        const result = planExpressionAssetsForHeroine(project, { heroineId, tags: [...DEFAULT_EMOTION_TAGS] });
+        const savedProject = store.saveProject(result.project);
+        return { ok: true, projectDirectory: store.paths.projectDirectory, ...result, project: savedProject };
+      } finally {
+        store.close();
+      }
+    },
+
+    async planExpressionAssets(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const record = asRecord(input);
+        const heroineId = String(record.heroineId || project.routes[0]?.heroineId || project.characters[0]?.id || "");
+        const tags = tagsFrom(record.tags);
+        if (tags.length === 0) {
+          throw new InputValidationError("tags 입력이 필요합니다.", [{ severity: "error", path: "tags", message: "하나 이상의 태그가 필요합니다." }]);
+        }
+        const result = planExpressionAssetsForHeroine(project, { heroineId, tags });
+        const savedProject = store.saveProject(result.project);
+        return { ok: true, projectDirectory: store.paths.projectDirectory, ...result, project: savedProject };
+      } finally {
+        store.close();
+      }
+    },
+
+    async listGenerationJobs(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const status = typeof record.status === "string" ? record.status : "";
+        const assetMap = new Map(project.assets.map((asset) => [asset.id, asset]));
+        const jobs = project.generationJobs
+          .filter((job) => !status || job.status === status)
+          .map((job) => ({
+            ...job,
+            asset: job.outputAssetId ? assetMap.get(job.outputAssetId) : undefined
+          }));
+        return { ok: true, projectDirectory: store.paths.projectDirectory, jobs };
+      } finally {
+        store.close();
+      }
+    },
+
+    async runGenerationJobs(input: unknown) {
+      if (!options.image) {
+        throw new Error("이미지 생성 adapter가 설정되지 않았습니다.");
+      }
+      const record = asRecord(input);
+      const jobIds = Array.isArray(record.jobIds) ? record.jobIds.map((item) => String(item)) : [];
+      const retryFailed = Boolean(record.retryFailed);
+      const replaceCompleted = Boolean(record.replaceCompleted);
+      if (jobIds.length === 0) {
+        throw new InputValidationError("jobIds 입력이 필요합니다.", [{ severity: "error", path: "jobIds", message: "하나 이상의 생성 작업이 필요합니다." }]);
+      }
+
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      const jobs: VnMakerGenerationJob[] = [];
+      const assets: VnMakerAsset[] = [];
+      const errors: string[] = [];
+      try {
+        for (const jobId of jobIds) {
+          const currentProject = store.requireProject();
+          const currentJob = currentProject.generationJobs.find((job) => job.id === jobId);
+          if (!currentJob) {
+            errors.push(`생성 작업을 찾을 수 없습니다: ${jobId}`);
+            continue;
+          }
+          if (currentJob.status === "completed" && !replaceCompleted) {
+            jobs.push(currentJob);
+            continue;
+          }
+          if (currentJob.status === "failed" && !retryFailed) {
+            jobs.push(currentJob);
+            continue;
+          }
+
+          try {
+            store.markGenerationJobStatus(jobId, "running");
+            const generationInput = selectGenerationInput(store.requireProject(), store, { ...record, jobId });
+            const result = await options.image.generateImageAsset(generationInput);
+            const savedProject = await store.storeGenerationResult(result);
+            const savedJob = savedProject.generationJobs.find((job) => job.id === result.job.id) || result.job;
+            jobs.push(savedJob);
+            assets.push(result.asset);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const failedProject = store.markGenerationJobStatus(jobId, "failed", message);
+            const failedJob = failedProject.generationJobs.find((job) => job.id === jobId);
+            if (failedJob) {
+              jobs.push(failedJob);
+            }
+            errors.push(message);
+          }
+        }
+        return {
+          ok: errors.length === 0,
+          projectDirectory: store.paths.projectDirectory,
+          jobs,
+          assets,
+          errors,
+          project: store.requireProject()
+        };
+      } finally {
+        store.close();
+      }
+    },
+
     async generateImage(input: unknown) {
       if (!options.image) {
         throw new Error("이미지 생성 adapter가 설정되지 않았습니다.");
@@ -599,9 +832,43 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       try {
         const project = store.requireProject();
         const generationInput = selectGenerationInput(project, store, input);
-        const result = await options.image.generateImageAsset(generationInput);
-        const savedProject = await store.storeGenerationResult(result);
-        return { ok: true, projectDirectory: store.paths.projectDirectory, project: savedProject, ...result };
+        try {
+          if (generationInput.jobId) {
+            store.markGenerationJobStatus(generationInput.jobId, "running");
+          }
+          const result = await options.image.generateImageAsset(generationInput);
+          const savedProject = await store.storeGenerationResult(result);
+          return { ok: true, projectDirectory: store.paths.projectDirectory, project: savedProject, ...result };
+        } catch (error) {
+          if (generationInput.jobId) {
+            store.markGenerationJobStatus(generationInput.jobId, "failed", error instanceof Error ? error.message : String(error));
+          }
+          throw error;
+        }
+      } finally {
+        store.close();
+      }
+    },
+
+    async listPatchHistory(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        return { ok: true, projectDirectory: store.paths.projectDirectory, entries: store.listPatchHistory() };
+      } finally {
+        store.close();
+      }
+    },
+
+    async undoPatch(input: unknown) {
+      const patchHistoryId = String(asRecord(input).patchHistoryId || "");
+      if (!patchHistoryId) {
+        throw new InputValidationError("patchHistoryId 입력이 필요합니다.", [{ severity: "error", path: "patchHistoryId", message: "비어 있을 수 없습니다." }]);
+      }
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.undoPatchHistory(patchHistoryId);
+        const validation = store.validateAndStore();
+        return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation, entries: store.listPatchHistory() };
       } finally {
         store.close();
       }
