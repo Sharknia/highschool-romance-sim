@@ -1,4 +1,4 @@
-import { CheckCircle2, Code2, ImagePlus, LogOut, RefreshCw, Sparkles } from "lucide-react";
+import { CheckCircle2, Code2, Database, ImagePlus, LogOut, RefreshCw, Save, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { ApiResult, ImagePreviewResult } from "../api/types";
 import { describeSession, useAuth } from "../auth/AuthProvider";
@@ -49,10 +49,18 @@ function isHttpFailure(result: unknown): result is ApiResult {
   );
 }
 
+function projectPayloadFromEditor(projectJson: string): { project?: unknown; starter?: unknown } {
+  const parsed = JSON.parse(projectJson) as Record<string, unknown>;
+  return parsed.version === "vn-maker/v1"
+    ? { project: parsed }
+    : { starter: parsed.starter || parsed };
+}
+
 export function WorkspacePage() {
   const { logout, postAuthedJson, refreshSession, session } = useAuth();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
-  const [prompt, setPrompt] = useState("하루 루트의 첫 장면을 달달하게 확장하고, 교실 배경과 하루 포트레이트 생성 작업을 만들어줘.");
+  const [projectDirectory, setProjectDirectory] = useState("");
+  const [prompt, setPrompt] = useState("하루 루트의 첫 장면을 달달하게 확장하고,\n교실 배경과 하루 포트레이트 생성 작업을 만들어줘.");
   const [result, setResult] = useState("{}");
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState("작업 대기 중");
@@ -64,6 +72,15 @@ export function WorkspacePage() {
       if (isHttpFailure(actionResult)) {
         throw new Error(actionResult.error || `${label} 요청이 실패했습니다.`);
       }
+      if (actionResult && typeof actionResult === "object") {
+        const record = actionResult as ApiResult;
+        if (typeof record.projectDirectory === "string") {
+          setProjectDirectory(record.projectDirectory);
+        }
+        if (record.project) {
+          setProjectJson(JSON.stringify(record.project, null, 2));
+        }
+      }
       setResult(formatResult(actionResult));
       setWorkspaceStatus(`${label} 완료`);
     } catch (error) {
@@ -74,29 +91,51 @@ export function WorkspacePage() {
 
   async function createStarterProject(): Promise<void> {
     await runAction("샘플 프로젝트 생성", async () => {
-      const response = await postAuthedJson<ApiResult>("/api/project/starter", { starter: starterProject });
-      setProjectJson(JSON.stringify(response.project, null, 2));
-      return response;
+      return postAuthedJson<ApiResult>("/api/project/starter", { projectDirectory: projectDirectory || undefined, starter: starterProject });
     });
+  }
+
+  async function openProject(): Promise<void> {
+    await runAction("프로젝트 열기", async () => postAuthedJson<ApiResult>("/api/project/open", {
+      projectDirectory: projectDirectory || undefined
+    }));
   }
 
   async function validateProject(): Promise<void> {
     await runAction("프로젝트 검증", async () => {
-      const project = JSON.parse(projectJson);
-      return postAuthedJson<ApiResult>("/api/project/validate", { project });
+      return postAuthedJson<ApiResult>("/api/project/validate", {
+        projectDirectory: projectDirectory || undefined,
+        ...projectPayloadFromEditor(projectJson)
+      });
     });
   }
 
   async function buildProject(): Promise<void> {
     await runAction("프로젝트 빌드", async () => {
-      const project = JSON.parse(projectJson);
-      return truncateArtifactHtml(await postAuthedJson<ApiResult>("/api/project/build", { project }));
+      return truncateArtifactHtml(await postAuthedJson<ApiResult>("/api/project/build", {
+        projectDirectory: projectDirectory || undefined,
+        ...projectPayloadFromEditor(projectJson)
+      }));
+    });
+  }
+
+  async function saveFirstScene(): Promise<void> {
+    await runAction("현재 첫 씬 저장", async () => {
+      const payload = projectPayloadFromEditor(projectJson);
+      const project = payload.project as { scenes?: unknown[] } | undefined;
+      const scene = project?.scenes?.[0];
+      if (!scene) {
+        throw new Error("저장할 첫 씬이 없습니다.");
+      }
+      return postAuthedJson<ApiResult>("/api/project/scenes", { projectDirectory: projectDirectory || undefined, ...payload, scene });
     });
   }
 
   async function createImageJob(): Promise<void> {
     setPreviewSrc(null);
     await runAction("이미지 작업 생성", async () => postAuthedJson<ApiResult>("/api/generation/jobs", {
+      projectDirectory: projectDirectory || undefined,
+      ...projectPayloadFromEditor(projectJson),
       kind: "cg",
       targetId: "scene-opening",
       prompt,
@@ -108,6 +147,8 @@ export function WorkspacePage() {
     setPreviewSrc(null);
     await runAction("이미지 생성", async () => {
       const response = await postAuthedJson<ApiResult & ImagePreviewResult>("/api/generation/images", {
+        projectDirectory: projectDirectory || undefined,
+        ...projectPayloadFromEditor(projectJson),
         kind: "cg",
         targetId: "scene-opening",
         prompt,
@@ -136,9 +177,17 @@ export function WorkspacePage() {
       <main className="workspace-layout">
         <aside className="side-column">
           <Panel eyebrow="Prompt" title="자연어 제작 지시">
-            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+            <input
+              aria-label="프로젝트 디렉터리"
+              className="project-path-input"
+              onChange={(event) => setProjectDirectory(event.target.value)}
+              placeholder="프로젝트 디렉터리 자동 생성"
+              value={projectDirectory}
+            />
+            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} wrap="soft" />
             <div className="button-row">
               <Button icon={<Sparkles size={17} />} onClick={() => void createStarterProject()} variant="primary">샘플 프로젝트 생성</Button>
+              <Button icon={<Database size={17} />} onClick={() => void openProject()}>프로젝트 열기</Button>
               <Button icon={<ImagePlus size={17} />} onClick={() => void createImageJob()}>이미지 작업 생성</Button>
               <Button icon={<ImagePlus size={17} />} onClick={() => void generateImage()}>실제 이미지 생성</Button>
             </div>
@@ -150,13 +199,14 @@ export function WorkspacePage() {
             actions={(
               <>
                 <Button icon={<CheckCircle2 size={17} />} onClick={() => void validateProject()} variant="primary">검증</Button>
+                <Button icon={<Save size={17} />} onClick={() => void saveFirstScene()}>씬 저장</Button>
                 <Button icon={<Code2 size={17} />} onClick={() => void buildProject()}>HTML 빌드</Button>
               </>
             )}
             eyebrow="Project"
             title="프로젝트 JSON"
           >
-            <textarea className="project-editor" value={projectJson} onChange={(event) => setProjectJson(event.target.value)} />
+            <textarea className="project-editor" value={projectJson} onChange={(event) => setProjectJson(event.target.value)} wrap="soft" />
           </Panel>
 
           <Panel eyebrow="Result" title="결과">

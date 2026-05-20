@@ -6,13 +6,13 @@
   ],
   "scripts": {
     "typecheck:legacy": "npx tsc --noEmit",
-    "typecheck": "npm run typecheck:legacy && npm run build -w @vn-maker/engine-core && npm run typecheck -w @vn-maker/generation-codex && npm run typecheck -w @vn-maker/cli && npm run typecheck -w @vn-maker/web",
+    "typecheck": "npm run typecheck:legacy && npm run build -w @vn-maker/engine-core && npm run typecheck -w @vn-maker/project-store && npm run typecheck -w @vn-maker/generation-codex && npm run typecheck -w @vn-maker/cli && npm run typecheck -w @vn-maker/web",
     "test:engine": "npm run build:engine && node tests/engine-regression.test.mjs",
     "test:maker": "npm run build:maker && node tests/vn-maker-regression.test.mjs",
     "build:engine": "npx esbuild src/engine/index.ts --bundle --format=iife --global-name=VisualNovelEngine --target=es2018 --outfile=dist/visual-novel-engine.js",
     "build:html": "node scripts/embed-engine.mjs",
     "build:legacy": "npm run typecheck:legacy && npm run build:engine && npm run build:html",
-    "build:maker": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/generation-codex && npm run build -w @vn-maker/cli && npm run build -w @vn-maker/web",
+    "build:maker": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/project-store && npm run build -w @vn-maker/generation-codex && npm run build -w @vn-maker/cli && npm run build -w @vn-maker/web",
     "build": "npm run build:legacy && npm run build:maker"
   },
   "devDependencies": {

@@ -12,8 +12,11 @@
     "start": "node dist/server/server.js"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.3",
     "@vn-maker/engine-core": "0.1.0",
     "@vn-maker/generation-codex": "0.1.0",
+    "@vn-maker/project-store": "^0.1.0",
+    "hono": "^4.12.21",
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

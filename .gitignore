@@ -5,3 +5,5 @@ node_modules/
 dist/
 generated-assets/
 apps/web/generated-assets/
+workspace/
+apps/web/workspace/

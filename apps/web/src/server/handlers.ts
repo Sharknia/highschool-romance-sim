@@ -1,12 +1,21 @@
+import { Hono, type Context } from "hono";
 import {
   buildProjectHtml,
+  createAssetManifest,
   createImageGenerationJob,
   createStarterProject,
-  type CreateStarterProjectInput,
-  validateProject,
   type CreateImageGenerationJobInput,
-  type VnMakerProject
+  type CreateStarterProjectInput,
+  type VnMakerCharacter,
+  type VnMakerProject,
+  type VnMakerScene
 } from "@vn-maker/engine-core";
+import {
+  createProjectWorkspace,
+  openProjectStore,
+  resolveProjectWorkspacePaths,
+  type ProjectStore
+} from "@vn-maker/project-store";
 import {
   sharedCodexAppServerClient,
   type CodexImageGenerationInput,
@@ -35,6 +44,7 @@ export interface CodexGenerationAdapter {
 }
 
 export interface ApiHandlerOptions {
+  projectDirectory?: string;
   generatedAssetsDirectory?: string;
   codex?: CodexGenerationAdapter;
 }
@@ -45,16 +55,60 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-function getProject(body: unknown): VnMakerProject {
-  const record = asRecord(body);
-  if (!record.project) {
-    throw new Error("project 입력이 필요합니다.");
-  }
-  return record.project as VnMakerProject;
+function getDefaultProjectDirectory(): string {
+  return process.env.VN_MAKER_PROJECT_DIR || join(process.cwd(), "workspace", "Default.vnmaker");
 }
 
-function getOptionalStarter(value: unknown): CreateStarterProjectInput | undefined {
-  return value && typeof value === "object" ? value as CreateStarterProjectInput : undefined;
+function getProjectDirectory(body: unknown, fallback?: string): string {
+  const record = asRecord(body);
+  return typeof record.projectDirectory === "string" && record.projectDirectory.trim()
+    ? record.projectDirectory
+    : fallback || getDefaultProjectDirectory();
+}
+
+function isVnMakerProject(value: unknown): value is VnMakerProject {
+  const record = asRecord(value);
+  return record.version === "vn-maker/v1"
+    && typeof record.id === "string"
+    && typeof record.title === "string"
+    && Array.isArray(record.characters)
+    && Array.isArray(record.routes)
+    && Array.isArray(record.scenes)
+    && Array.isArray(record.assets)
+    && Array.isArray(record.generationJobs)
+    && Boolean(record.settings);
+}
+
+function getProject(body: unknown): VnMakerProject | undefined {
+  const record = asRecord(body);
+  return isVnMakerProject(record.project) ? record.project : undefined;
+}
+
+function getStarter(body: unknown): CreateStarterProjectInput | undefined {
+  const record = asRecord(body);
+  if (record.starter && typeof record.starter === "object") {
+    return record.starter as CreateStarterProjectInput;
+  }
+  const projectRecord = asRecord(record.project);
+  return projectRecord.starter && typeof projectRecord.starter === "object"
+    ? projectRecord.starter as CreateStarterProjectInput
+    : undefined;
+}
+
+function getCharacter(body: unknown): VnMakerCharacter {
+  const record = asRecord(body);
+  if (!record.character || typeof record.character !== "object") {
+    throw new Error("character 입력이 필요합니다.");
+  }
+  return record.character as VnMakerCharacter;
+}
+
+function getScene(body: unknown): VnMakerScene {
+  const record = asRecord(body);
+  if (!record.scene || typeof record.scene !== "object") {
+    throw new Error("scene 입력이 필요합니다.");
+  }
+  return record.scene as VnMakerScene;
 }
 
 function createGenerationJobInput(body: unknown): CreateImageGenerationJobInput {
@@ -93,89 +147,286 @@ function createDefaultCodexAdapter(): CodexGenerationAdapter {
   };
 }
 
-function createErrorResponse(error: unknown, status = 400): ApiResponse {
-  return {
+function statusForError(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("OAuth 로그인이 필요") ? 401 : 400;
+}
+
+async function readRequestJson(context: { req: { json(): Promise<unknown> } }): Promise<unknown> {
+  try {
+    return await context.req.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function jsonResponse(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body, null, 2), {
     status,
-    body: {
+    headers: { "Content-Type": "application/json; charset=utf-8" }
+  });
+}
+
+async function jsonRoute(operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<Response> {
+  try {
+    return jsonResponse(await operation());
+  } catch (error) {
+    return jsonResponse({
       ok: false,
       error: error instanceof Error ? error.message : String(error)
+    }, statusForError(error));
+  }
+}
+
+async function jsonBodyRoute(
+  context: Context,
+  operation: (body: unknown) => Promise<Record<string, unknown>> | Record<string, unknown>
+): Promise<Response> {
+  const body = await readRequestJson(context);
+  return jsonRoute(() => operation(body));
+}
+
+async function withStore<T>(
+  projectDirectory: string,
+  operation: (store: ProjectStore) => Promise<T> | T
+): Promise<T> {
+  const store = await openProjectStore(projectDirectory);
+  try {
+    return await operation(store);
+  } finally {
+    store.close();
+  }
+}
+
+async function ensureProjectStore(body: unknown, fallbackDirectory?: string): Promise<ProjectStore> {
+  const projectDirectory = getProjectDirectory(body, fallbackDirectory);
+  const store = await openProjectStore(projectDirectory);
+  const project = getProject(body);
+  if (project) {
+    store.saveProject(project);
+    return store;
+  }
+  if (!store.getProject()) {
+    store.saveProject(createStarterProject(getStarter(body)));
+  }
+  return store;
+}
+
+class ApiServices {
+  private readonly codex: CodexGenerationAdapter;
+  private readonly projectDirectory: string;
+
+  constructor(options: ApiHandlerOptions = {}) {
+    this.codex = options.codex || createDefaultCodexAdapter();
+    this.projectDirectory = options.projectDirectory || getDefaultProjectDirectory();
+  }
+
+  async readCodexSession(): Promise<Record<string, unknown>> {
+    const session = await this.codex.readSession(false);
+    return {
+      ok: true,
+      ...session,
+      note: "Codex app-server의 ChatGPT managed OAuth 상태를 조회한다. OpenAI API key 입력은 사용하지 않는다."
+    };
+  }
+
+  async startLogin(body: unknown): Promise<Record<string, unknown>> {
+    const record = asRecord(body);
+    return { ok: true, login: await this.codex.startLogin(getLoginFlow(record.flow)) };
+  }
+
+  async logout(): Promise<Record<string, unknown>> {
+    await this.codex.logout();
+    return { ok: true };
+  }
+
+  async createProject(body: unknown): Promise<Record<string, unknown>> {
+    const projectDirectory = getProjectDirectory(body, this.projectDirectory);
+    const store = await createProjectWorkspace({
+      projectDirectory,
+      starter: getStarter(body),
+      project: getProject(body)
+    });
+    try {
+      const validation = store.validateAndStore();
+      return {
+        ok: true,
+        projectDirectory: store.paths.projectDirectory,
+        paths: store.paths,
+        project: store.requireProject(),
+        validation
+      };
+    } finally {
+      store.close();
     }
-  };
+  }
+
+  async openProject(body: unknown): Promise<Record<string, unknown>> {
+    const projectDirectory = getProjectDirectory(body, this.projectDirectory);
+    return withStore(projectDirectory, (store) => {
+      const project = store.requireProject();
+      return {
+        ok: true,
+        projectDirectory: store.paths.projectDirectory,
+        paths: store.paths,
+        project,
+        validation: store.validateAndStore()
+      };
+    });
+  }
+
+  async saveCharacter(body: unknown): Promise<Record<string, unknown>> {
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      const project = store.upsertCharacter(getCharacter(body));
+      const validation = store.validateAndStore();
+      return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation };
+    } finally {
+      store.close();
+    }
+  }
+
+  async saveScene(body: unknown): Promise<Record<string, unknown>> {
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      const project = store.upsertScene(getScene(body));
+      const validation = store.validateAndStore();
+      return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation };
+    } finally {
+      store.close();
+    }
+  }
+
+  async validateProject(body: unknown): Promise<Record<string, unknown>> {
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      const validation = store.validateAndStore();
+      return {
+        ok: validation.ok,
+        projectDirectory: store.paths.projectDirectory,
+        issues: validation.issues,
+        project: store.requireProject()
+      };
+    } finally {
+      store.close();
+    }
+  }
+
+  async createManifest(body: unknown): Promise<Record<string, unknown>> {
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      return {
+        ok: true,
+        projectDirectory: store.paths.projectDirectory,
+        manifest: createAssetManifest(store.requireProject())
+      };
+    } finally {
+      store.close();
+    }
+  }
+
+  async buildProject(body: unknown): Promise<Record<string, unknown>> {
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      return {
+        ok: true,
+        projectDirectory: store.paths.projectDirectory,
+        artifact: buildProjectHtml(store.requireProject())
+      };
+    } finally {
+      store.close();
+    }
+  }
+
+  async createGenerationJob(body: unknown): Promise<Record<string, unknown>> {
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      const job = createImageGenerationJob(createGenerationJobInput(body));
+      const project = store.requireProject();
+      const index = project.generationJobs.findIndex((item) => item.id === job.id);
+      if (index >= 0) {
+        project.generationJobs[index] = job;
+      } else {
+        project.generationJobs.push(job);
+      }
+      const savedProject = store.saveProject(project);
+      return { ok: true, projectDirectory: store.paths.projectDirectory, job, project: savedProject };
+    } finally {
+      store.close();
+    }
+  }
+
+  async generateImage(body: unknown): Promise<Record<string, unknown>> {
+    const record = asRecord(body);
+    const store = await ensureProjectStore(body, this.projectDirectory);
+    try {
+      const result = await this.codex.generateImageAsset({
+        kind: getImageKind(record.kind),
+        targetId: String(record.targetId || "scene-opening"),
+        prompt: String(record.prompt || ""),
+        style: String(record.style || "soft visual novel, clean anime, production-ready"),
+        model: typeof record.model === "string" ? record.model : null,
+        jobId: typeof record.jobId === "string" ? record.jobId : undefined,
+        outputAssetId: typeof record.outputAssetId === "string" ? record.outputAssetId : undefined,
+        outputDirectory: store.paths.generatedAssetsDirectory,
+        publicPathPrefix: "/generated-assets",
+        cwd: store.paths.projectDirectory
+      });
+      const project = await store.storeGenerationResult(result);
+      return { ok: true, projectDirectory: store.paths.projectDirectory, project, ...result };
+    } finally {
+      store.close();
+    }
+  }
+}
+
+export function createApiApp(options: ApiHandlerOptions = {}): Hono {
+  const services = new ApiServices(options);
+  const app = new Hono();
+
+  app.get("/api/codex/session", () => jsonRoute(() => services.readCodexSession()));
+  app.post("/api/codex/login", (context) => jsonBodyRoute(context, (body) => services.startLogin(body)));
+  app.post("/api/codex/logout", () => jsonRoute(() => services.logout()));
+
+  app.post("/api/projects", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
+  app.post("/api/projects/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
+  app.post("/api/project/starter", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
+  app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
+  app.post("/api/project/characters", (context) => jsonBodyRoute(context, (body) => services.saveCharacter(body)));
+  app.post("/api/project/scenes", (context) => jsonBodyRoute(context, (body) => services.saveScene(body)));
+  app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body)));
+  app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
+  app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));
+
+  app.post("/api/generation/jobs", (context) => jsonBodyRoute(context, (body) => services.createGenerationJob(body)));
+  app.post("/api/generation/images", (context) => jsonBodyRoute(context, (body) => services.generateImage(body)));
+
+  app.all("/api/*", () => jsonResponse({ ok: false, error: "알 수 없는 API 경로입니다." }, 404));
+  app.all("/api", () => jsonResponse({ ok: false, error: "알 수 없는 API 경로입니다." }, 404));
+
+  return app;
 }
 
 export function createApiRequestHandler(options: ApiHandlerOptions = {}) {
-  const generatedAssetsDirectory = options.generatedAssetsDirectory || process.env.VN_MAKER_GENERATED_DIR || join(process.cwd(), "generated-assets");
-  const codex = options.codex || createDefaultCodexAdapter();
+  const app = createApiApp(options);
 
   return async function handleApiRequestWithOptions(request: ApiRequest): Promise<ApiResponse> {
-    try {
-      if (request.method === "GET" && request.path === "/api/codex/session") {
-        const session = await codex.readSession(false);
-        return {
-          status: 200,
-          body: {
-            ok: true,
-            ...session,
-            note: "Codex app-server의 ChatGPT managed OAuth 상태를 조회한다. OpenAI API key 입력은 사용하지 않는다."
-          }
-        };
-      }
-
-      if (request.method !== "POST") {
-        return { status: 405, body: { ok: false, error: "지원하지 않는 메서드입니다." } };
-      }
-
-      if (request.path === "/api/codex/login") {
-        const body = asRecord(request.body);
-        const login = await codex.startLogin(getLoginFlow(body.flow));
-        return { status: 200, body: { ok: true, login } };
-      }
-
-      if (request.path === "/api/codex/logout") {
-        await codex.logout();
-        return { status: 200, body: { ok: true } };
-      }
-
-      if (request.path === "/api/project/starter") {
-        const body = asRecord(request.body);
-        return { status: 200, body: { ok: true, project: createStarterProject(getOptionalStarter(body.starter)) } };
-      }
-
-      if (request.path === "/api/project/validate") {
-        const issues = validateProject(getProject(request.body));
-        return { status: 200, body: { ok: issues.every((issue) => issue.severity !== "error"), issues } };
-      }
-
-      if (request.path === "/api/project/build") {
-        return { status: 200, body: { ok: true, artifact: buildProjectHtml(getProject(request.body)) } };
-      }
-
-      if (request.path === "/api/generation/jobs") {
-        return { status: 200, body: { ok: true, job: createImageGenerationJob(createGenerationJobInput(request.body)) } };
-      }
-
-      if (request.path === "/api/generation/images") {
-        const body = asRecord(request.body);
-        const result = await codex.generateImageAsset({
-          kind: getImageKind(body.kind),
-          targetId: String(body.targetId || "scene-opening"),
-          prompt: String(body.prompt || ""),
-          style: String(body.style || "soft visual novel, clean anime, production-ready"),
-          model: typeof body.model === "string" ? body.model : null,
-          outputDirectory: generatedAssetsDirectory,
-          publicPathPrefix: "/generated-assets"
-        });
-
-        return { status: 200, body: { ok: true, ...result } };
-      }
-
-      return { status: 404, body: { ok: false, error: "알 수 없는 API 경로입니다." } };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const status = message.includes("OAuth 로그인이 필요") ? 401 : 400;
-      return createErrorResponse(error, status);
+    if (request.method !== "GET" && request.method !== "POST") {
+      return { status: 405, body: { ok: false, error: "지원하지 않는 메서드입니다." } };
     }
+
+    const response = await app.request(`http://127.0.0.1${request.path}`, {
+      method: request.method,
+      headers: request.method === "POST" ? { "Content-Type": "application/json" } : undefined,
+      body: request.method === "POST" ? JSON.stringify(request.body ?? {}) : undefined
+    });
+    const body = await response.json() as Record<string, unknown>;
+    return { status: response.status, body };
   };
 }
 
 export const handleApiRequest = createApiRequestHandler();
+
+export function defaultGeneratedAssetsDirectory(projectDirectory = getDefaultProjectDirectory()): string {
+  return resolveProjectWorkspacePaths(projectDirectory).generatedAssetsDirectory;
+}

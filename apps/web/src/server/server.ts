@@ -1,89 +1,73 @@
-import { createReadStream, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, extname, join, normalize } from "node:path";
-import { handleApiRequest } from "./handlers.js";
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { createApiApp, defaultGeneratedAssetsDirectory } from "./handlers.js";
 
 const clientRoot = join(process.cwd(), "dist/client");
-const generatedAssetsRoot = process.env.VN_MAKER_GENERATED_DIR || join(process.cwd(), "generated-assets");
+const generatedAssetsRoot = process.env.VN_MAKER_GENERATED_DIR || defaultGeneratedAssetsDirectory();
 const port = Number(process.env.PORT || 5174);
 
 const contentTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml"
 };
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  return raw ? JSON.parse(raw) : undefined;
+async function fileResponse(filePath: string, fallbackContentType = "application/octet-stream"): Promise<Response> {
+  const payload = await readFile(filePath);
+  return new Response(payload, {
+    status: 200,
+    headers: { "Content-Type": contentTypes[extname(filePath)] || fallbackContentType }
+  });
 }
 
-async function sendJson(response: ServerResponse, status: number, body: unknown): Promise<void> {
-  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(body, null, 2));
+function notFound(message = "Not found"): Response {
+  return new Response(message, {
+    status: 404,
+    headers: { "Content-Type": "text/plain; charset=utf-8" }
+  });
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
+export function createWebApp(): Hono {
+  const app = new Hono();
+  app.route("/", createApiApp());
 
-  if (url.pathname === "/favicon.ico") {
-    response.writeHead(204);
-    response.end();
-    return;
-  }
+  app.get("/favicon.ico", () => new Response(null, { status: 204 }));
 
-  if (url.pathname.startsWith("/api/")) {
-    const apiResponse = await handleApiRequest({
-      method: request.method || "GET",
-      path: url.pathname,
-      body: request.method === "POST" ? await readJsonBody(request) : undefined
-    });
-    await sendJson(response, apiResponse.status, apiResponse.body);
-    return;
-  }
-
-  if (url.pathname.startsWith("/generated-assets/")) {
-    const filePath = join(generatedAssetsRoot, basename(url.pathname));
+  app.get("/generated-assets/:file", async (context) => {
+    const filePath = join(generatedAssetsRoot, basename(context.req.param("file")));
     if (!filePath.startsWith(generatedAssetsRoot) || !existsSync(filePath)) {
-      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Generated asset not found");
-      return;
+      return notFound("Generated asset not found");
+    }
+    return fileResponse(filePath, "image/png");
+  });
+
+  app.get("*", async (context) => {
+    const url = new URL(context.req.url);
+    const safePath = normalize(url.pathname === "/" ? "/index.html" : url.pathname).replace(/^(\.\.(\/|\\|$))+/, "");
+    const filePath = join(clientRoot, safePath);
+
+    if (filePath.startsWith(clientRoot) && existsSync(filePath)) {
+      return fileResponse(filePath);
     }
 
-    response.writeHead(200, { "Content-Type": contentTypes[extname(filePath)] || "image/png" });
-    createReadStream(filePath).pipe(response);
-    return;
-  }
-
-  const safePath = normalize(url.pathname === "/" ? "/index.html" : url.pathname).replace(/^(\.\.(\/|\\|$))+/, "");
-  const filePath = join(clientRoot, safePath);
-
-  if (!filePath.startsWith(clientRoot) || !existsSync(filePath)) {
     const indexPath = join(clientRoot, "index.html");
-    const method = request.method || "GET";
-    if ((method === "GET" || method === "HEAD") && !extname(url.pathname) && existsSync(indexPath)) {
-      response.writeHead(200, { "Content-Type": contentTypes[".html"] });
-      if (method === "HEAD") {
-        response.end();
-      } else {
-        createReadStream(indexPath).pipe(response);
-      }
-      return;
+    if (!extname(url.pathname) && existsSync(indexPath)) {
+      return fileResponse(indexPath, contentTypes[".html"]);
     }
 
-    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    response.end("Not found");
-    return;
-  }
+    return notFound();
+  });
 
-  response.writeHead(200, { "Content-Type": contentTypes[extname(filePath)] || "application/octet-stream" });
-  createReadStream(filePath).pipe(response);
+  return app;
 }
 
 if (process.argv[1]?.endsWith("server.js")) {
@@ -93,12 +77,11 @@ if (process.argv[1]?.endsWith("server.js")) {
     });
   }
 
-  createServer((request, response) => {
-    handleRequest(request, response).catch((error: unknown) => {
-      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-    });
-  }).listen(port, "127.0.0.1", () => {
+  serve({
+    fetch: createWebApp().fetch,
+    hostname: "127.0.0.1",
+    port
+  }, () => {
     process.stdout.write(`VN Maker web app listening on http://127.0.0.1:${port}\n`);
   });
 }

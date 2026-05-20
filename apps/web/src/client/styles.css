@@ -152,6 +152,7 @@ a {
 
 .button {
   min-height: 38px;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -163,6 +164,7 @@ a {
   background: #24221e;
   cursor: pointer;
   white-space: nowrap;
+  text-align: center;
 }
 
 .button:hover:not(:disabled) {
@@ -254,6 +256,7 @@ a {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(280px, 380px) 1fr;
+  overflow-x: hidden;
 }
 
 .side-column {
@@ -278,6 +281,7 @@ a {
   border-radius: 8px;
   padding: 14px;
   background: #191814;
+  overflow: hidden;
 }
 
 .panel-header {
@@ -304,6 +308,19 @@ textarea {
   color: #f4efe6;
   background: #0f0f0d;
   line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.project-path-input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #f4efe6;
+  background: #0f0f0d;
 }
 
 .project-editor {
@@ -377,11 +394,34 @@ pre {
   }
 
   .button {
-    flex: 1 1 150px;
+    flex: 1 1 100%;
+    white-space: normal;
   }
 
   .topbar-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .brand-row,
+  .topbar-status {
+    width: 100%;
+  }
+
+  .topbar-status {
+    max-width: 100%;
+  }
+
+  .topbar-actions .button {
+    flex-basis: 100%;
+  }
+
+  .panel-header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .panel-actions {
+    width: 100%;
   }
 }

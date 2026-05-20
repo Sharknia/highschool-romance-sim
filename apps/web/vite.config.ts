@@ -10,7 +10,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:5174"
+      "/api": "http://127.0.0.1:5174",
+      "/generated-assets": "http://127.0.0.1:5174"
     }
   }
 });
