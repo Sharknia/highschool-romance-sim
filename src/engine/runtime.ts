@@ -1,4 +1,5 @@
 import type {
+  BacklogEntry,
   CharacterMemoryTags,
   CharacterRouteState,
   Choice,
@@ -7,6 +8,7 @@ import type {
   FlagSet,
   GameState,
   RuntimeOptions,
+  SaveSlot,
   ScheduleConfig,
   Scene,
   SceneMap
@@ -29,6 +31,17 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
   const affinityMax = options.affinityMax ?? 5;
   const routeStatMax = options.routeStatMax ?? 9;
   const initialState = clonePlain(state);
+  let backlog: BacklogEntry[] = [];
+  let lastBacklogSignature = "";
+
+  function getBacklogSignature(entry: BacklogEntry): string {
+    return [entry.sceneId, entry.speaker, entry.text].join("\u0000");
+  }
+
+  function updateLastBacklogSignature(): void {
+    const lastEntry = backlog[backlog.length - 1];
+    lastBacklogSignature = lastEntry ? getBacklogSignature(lastEntry) : "";
+  }
 
   function clampAffinity(value: number): number {
     return Math.max(0, Math.min(affinityMax, value));
@@ -411,6 +424,7 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
 
   function resetState(): void {
     replaceObjectContents(state as unknown as Record<string, unknown>, initialState as unknown as Record<string, unknown>);
+    clearBacklog();
   }
 
   function debugSnapshot(): DebugSnapshot {
@@ -423,6 +437,69 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
     });
   }
 
+  function recordBacklogEntry(
+    sceneId: string,
+    scene: Scene,
+    renderedLine?: Partial<Pick<BacklogEntry, "label" | "speaker" | "text">>
+  ): BacklogEntry | null {
+    const text = renderedLine?.text ?? resolveValue(scene.text);
+
+    if (!String(text).trim()) {
+      return null;
+    }
+
+    const entry: BacklogEntry = {
+      sceneId,
+      label: renderedLine?.label ?? resolveValue(scene.label),
+      speaker: renderedLine?.speaker ?? resolveValue(scene.speaker),
+      text,
+      characterNames: (scene.characters || []).map((character) => character.name),
+      createdAt: Date.now()
+    };
+    const signature = getBacklogSignature(entry);
+
+    // 같은 장면을 다시 렌더링할 때 같은 대사가 중복 저장되지 않게 막는다.
+    if (signature === lastBacklogSignature) {
+      return null;
+    }
+
+    backlog.push(entry);
+    backlog = backlog.slice(-200);
+    lastBacklogSignature = signature;
+
+    return clonePlain(entry);
+  }
+
+  function getBacklog(): BacklogEntry[] {
+    return clonePlain(backlog);
+  }
+
+  function clearBacklog(): void {
+    backlog = [];
+    lastBacklogSignature = "";
+  }
+
+  function createSaveSlot(id = "quick", label = "빠른 저장"): SaveSlot {
+    return {
+      id,
+      label,
+      savedAt: new Date().toISOString(),
+      sceneId: state.currentSceneId,
+      state: clonePlain(state),
+      backlog: getBacklog()
+    };
+  }
+
+  function restoreSaveSlot(saveSlot: SaveSlot): void {
+    if (!saveSlot || !saveSlot.state || !saveSlot.sceneId) {
+      throw new Error("유효하지 않은 저장 슬롯입니다.");
+    }
+
+    replaceObjectContents(state as unknown as Record<string, unknown>, saveSlot.state as unknown as Record<string, unknown>);
+    backlog = clonePlain(saveSlot.backlog || []);
+    updateLastBacklogSignature();
+  }
+
   return {
     state,
     scenes: scenes as SceneMap,
@@ -430,11 +507,16 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
     applySceneHud,
     applySceneMetadata,
     applySceneUnlocks,
+    clearBacklog,
+    createSaveSlot,
     ensureCharacterRoute,
     getNextSceneId,
+    getBacklog,
     getResolvedScene,
     meetsCondition,
+    recordBacklogEntry,
     resetState,
+    restoreSaveSlot,
     resolveValue,
     debugSnapshot
   };

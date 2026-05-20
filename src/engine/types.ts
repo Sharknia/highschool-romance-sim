@@ -113,6 +113,10 @@ export interface CharacterState {
   active?: boolean;
 }
 
+export interface CharacterAssetMap {
+  [characterName: string]: Record<string, string>;
+}
+
 export interface SceneVariant extends Partial<Scene> {
   when?: Condition;
 }
@@ -153,4 +157,35 @@ export interface DebugSnapshot {
   route: RouteState;
   schedule: ScheduleState;
   characterRoutes: Record<string, CharacterRouteState>;
+}
+
+export interface BacklogEntry {
+  sceneId: string;
+  label: string;
+  speaker: string;
+  text: string;
+  characterNames: string[];
+  createdAt: number;
+}
+
+export interface SaveSlot {
+  id: string;
+  label: string;
+  savedAt: string;
+  sceneId: string;
+  state: GameState;
+  backlog: BacklogEntry[];
+}
+
+export interface SceneValidationIssue {
+  severity: "error" | "warning";
+  sceneId: string;
+  field: string;
+  message: string;
+}
+
+export interface VisualNovelProjectDefinition {
+  scenes: SceneMap;
+  imageAssets?: Record<string, string>;
+  characterAssetMap?: CharacterAssetMap;
 }

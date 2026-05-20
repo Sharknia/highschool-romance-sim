@@ -1,4 +1,5 @@
 assets/
 .playwright-cli/
+.playwright-mcp/
 node_modules/
 dist/
