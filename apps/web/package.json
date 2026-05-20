@@ -12,7 +12,8 @@
     "start": "node dist/server/server.js"
   },
   "dependencies": {
-    "@vn-maker/engine-core": "0.1.0"
+    "@vn-maker/engine-core": "0.1.0",
+    "@vn-maker/generation-codex": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

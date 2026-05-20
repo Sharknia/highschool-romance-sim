@@ -5,7 +5,7 @@ interface ApiResult {
   [key: string]: unknown;
 }
 
-const app = document.querySelector<HTMLMainElement>("#app");
+const app = document.querySelector<HTMLElement>("#app");
 
 if (!app) {
   throw new Error("앱 루트를 찾을 수 없습니다.");
@@ -21,7 +21,13 @@ app.innerHTML = `
   <section class="shell">
     <header class="topbar">
       <h1>VN Maker</h1>
-      <span id="authStatus" class="status">Codex auth: 확인 전</span>
+      <div class="auth-box">
+        <button id="browserLoginButton" type="button">Codex 로그인</button>
+        <button id="deviceLoginButton" type="button">디바이스 코드</button>
+        <button id="refreshAuthButton" type="button">상태 갱신</button>
+        <button id="logoutButton" type="button">로그아웃</button>
+        <span id="authStatus" class="status">Codex OAuth: 확인 전</span>
+      </div>
     </header>
     <div class="workspace">
       <aside class="panel">
@@ -31,6 +37,7 @@ app.innerHTML = `
           <div class="button-row">
             <button id="createStarterButton" class="primary" type="button">샘플 프로젝트 생성</button>
             <button id="createJobButton" type="button">이미지 작업 생성</button>
+            <button id="generateImageButton" type="button">실제 이미지 생성</button>
           </div>
         </section>
       </aside>
@@ -45,6 +52,7 @@ app.innerHTML = `
         </section>
         <section class="card">
           <h2>결과</h2>
+          <div id="previewArea" class="preview-area"></div>
           <pre id="resultOutput">{}</pre>
         </section>
       </section>
@@ -56,9 +64,27 @@ const projectEditor = document.querySelector<HTMLTextAreaElement>("#projectEdito
 const resultOutput = document.querySelector<HTMLPreElement>("#resultOutput")!;
 const authStatus = document.querySelector<HTMLSpanElement>("#authStatus")!;
 const promptInput = document.querySelector<HTMLTextAreaElement>("#promptInput")!;
+const previewArea = document.querySelector<HTMLDivElement>("#previewArea")!;
 
 function showResult(result: unknown): void {
-  resultOutput.textContent = JSON.stringify(result, null, 2);
+  resultOutput.textContent = JSON.stringify(result, (key, value) => {
+    if ((key === "b64Json" || key === "dataUrl" || key === "result") && typeof value === "string" && value.length > 160) {
+      return `${value.slice(0, 160)}... (${value.length} chars)`;
+    }
+    return value;
+  }, 2);
+}
+
+function showImagePreview(src?: string): void {
+  previewArea.innerHTML = "";
+  if (!src) {
+    return;
+  }
+
+  const image = document.createElement("img");
+  image.alt = "생성 이미지 미리보기";
+  image.src = src;
+  previewArea.append(image);
 }
 
 async function postJson(path: string, body: unknown): Promise<ApiResult> {
@@ -72,11 +98,42 @@ async function postJson(path: string, body: unknown): Promise<ApiResult> {
 
 async function refreshAuthStatus(): Promise<void> {
   const response = await fetch("/api/codex/session");
-  const result = await response.json() as { connected: boolean; mode: string };
+  const result = await response.json() as { connected: boolean; mode: string | null; account?: { email?: string; planType?: string | null } };
+  const plan = result.account?.planType ? `/${result.account.planType}` : "";
   authStatus.textContent = result.connected
-    ? `Codex auth: ${result.mode}`
-    : "Codex auth: 서버 어댑터 필요";
+    ? `Codex OAuth: ${result.mode}${plan}`
+    : "Codex OAuth: 로그인 필요";
 }
+
+async function startCodexLogin(flow: "browser" | "device"): Promise<void> {
+  const result = await postJson("/api/codex/login", { flow });
+  const login = result.login as { authUrl?: string; verificationUrl?: string; userCode?: string } | undefined;
+
+  if (login?.authUrl) {
+    window.open(login.authUrl, "_blank", "noopener,noreferrer");
+  }
+
+  showResult(result);
+  await refreshAuthStatus();
+}
+
+document.querySelector("#browserLoginButton")?.addEventListener("click", async () => {
+  await startCodexLogin("browser");
+});
+
+document.querySelector("#deviceLoginButton")?.addEventListener("click", async () => {
+  await startCodexLogin("device");
+});
+
+document.querySelector("#refreshAuthButton")?.addEventListener("click", async () => {
+  await refreshAuthStatus();
+});
+
+document.querySelector("#logoutButton")?.addEventListener("click", async () => {
+  const result = await postJson("/api/codex/logout", {});
+  showResult(result);
+  await refreshAuthStatus();
+});
 
 document.querySelector("#createStarterButton")?.addEventListener("click", async () => {
   const result = await postJson("/api/project/starter", { starter: starterProject });
@@ -102,12 +159,29 @@ document.querySelector("#buildButton")?.addEventListener("click", async () => {
 });
 
 document.querySelector("#createJobButton")?.addEventListener("click", async () => {
+  showImagePreview();
   showResult(await postJson("/api/generation/jobs", {
     kind: "cg",
     targetId: "scene-opening",
     prompt: promptInput.value,
     style: "soft visual novel, clean anime, production-ready"
   }));
+});
+
+document.querySelector("#generateImageButton")?.addEventListener("click", async () => {
+  showImagePreview();
+  const result = await postJson("/api/generation/images", {
+    kind: "cg",
+    targetId: "scene-opening",
+    prompt: promptInput.value,
+    style: "soft visual novel, clean anime, production-ready"
+  });
+
+  const image = result.image as { dataUrl?: string; uri?: string } | undefined;
+  const asset = result.asset as { uri?: string } | undefined;
+  showImagePreview(image?.dataUrl || image?.uri || asset?.uri);
+  showResult(result);
+  await refreshAuthStatus();
 });
 
 projectEditor.value = JSON.stringify({ starter: starterProject }, null, 2);

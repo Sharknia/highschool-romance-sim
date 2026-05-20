@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
 const core = await import("../packages/engine-core/dist/index.js");
+const codexGeneration = await import("../packages/generation-codex/dist/index.js");
 const webHandlers = await import("../apps/web/dist/server/handlers.js");
 
 const project = core.createStarterProject({
@@ -70,3 +71,82 @@ const apiJob = await webHandlers.handleApiRequest({
 });
 assert.equal(apiJob.status, 200);
 assert.equal(apiJob.body.job.kind, "cg");
+
+const sampleImageBase64 = Buffer.from("fake image").toString("base64");
+const codexImageResult = await codexGeneration.createCodexImageAssetResult(
+  {
+    kind: "cg",
+    targetId: "scene-opening",
+    prompt: "sunset classroom confession cg",
+    style: "soft visual novel cg"
+  },
+  {
+    id: "codex-image-item",
+    type: "imageGeneration",
+    result: sampleImageBase64,
+    status: "completed",
+    revisedPrompt: "revised sunset classroom confession cg",
+    savedPath: null
+  }
+);
+assert.equal(codexImageResult.job.status, "completed");
+assert.equal(codexImageResult.asset.source, "generated");
+assert.match(codexImageResult.image.dataUrl, /^data:image\/png;base64,/);
+
+const mockCodex = {
+  async readSession() {
+    return {
+      connected: true,
+      mode: "chatgpt",
+      account: { type: "chatgpt", email: "maker@example.com", planType: "pro" },
+      requiresOpenaiAuth: true,
+      capabilities: { imageGeneration: true, namespaceTools: true, webSearch: true }
+    };
+  },
+  async startLogin(flow) {
+    return flow === "device"
+      ? { type: "chatgptDeviceCode", loginId: "login-device", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" }
+      : { type: "chatgpt", loginId: "login-browser", authUrl: "https://chatgpt.com/auth" };
+  },
+  async logout() {
+    return undefined;
+  },
+  async generateImageAsset(input) {
+    return codexGeneration.createCodexImageAssetResult(input, {
+      id: "mock-image",
+      type: "imageGeneration",
+      result: sampleImageBase64,
+      status: "completed",
+      revisedPrompt: null,
+      savedPath: null
+    });
+  }
+};
+
+const mockApi = webHandlers.createApiRequestHandler({ codex: mockCodex });
+const apiSession = await mockApi({ method: "GET", path: "/api/codex/session" });
+assert.equal(apiSession.status, 200);
+assert.equal(apiSession.body.connected, true);
+assert.equal(apiSession.body.mode, "chatgpt");
+
+const apiLogin = await mockApi({
+  method: "POST",
+  path: "/api/codex/login",
+  body: { flow: "device" }
+});
+assert.equal(apiLogin.status, 200);
+assert.equal(apiLogin.body.login.userCode, "ABCD-1234");
+
+const apiImage = await mockApi({
+  method: "POST",
+  path: "/api/generation/images",
+  body: {
+    kind: "cg",
+    targetId: "scene-opening",
+    prompt: "sunset classroom confession cg",
+    style: "soft visual novel cg"
+  }
+});
+assert.equal(apiImage.status, 200);
+assert.equal(apiImage.body.job.status, "completed");
+assert.match(apiImage.body.image.dataUrl, /^data:image\/png;base64,/);

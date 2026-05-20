@@ -3,3 +3,5 @@ assets/
 .playwright-mcp/
 node_modules/
 dist/
+generated-assets/
+apps/web/generated-assets/

@@ -52,12 +52,15 @@ index.html의 VN_ENGINE_BUNDLE 영역에 번들 삽입
 
 ## VN Maker Toolkit
 
-새 제작툴 구조는 `packages/engine-core`, `packages/cli`, `apps/web` 워크스페이스로 구성된다. 목표는 Codex가 외부에서 CLI로 호출하든, 웹앱 내부 API로 호출하든 같은 코어로 미연시 프로젝트를 생성, 검증, 빌드, 이미지 생성 작업화하는 것이다.
+새 제작툴 구조는 `packages/engine-core`, `packages/generation-codex`, `packages/cli`, `apps/web` 워크스페이스로 구성된다. 목표는 Codex가 외부에서 CLI로 호출하든, 웹앱 내부 API로 호출하든 같은 코어로 미연시 프로젝트를 생성, 검증, 빌드, 이미지 생성 작업화하는 것이다.
+
+웹앱의 생성 경로는 OpenAI API key 입력이 아니라 Codex app-server의 ChatGPT managed OAuth를 사용한다. `Codex 로그인` 버튼은 `account/login/start`의 ChatGPT 브라우저 플로우를, `디바이스 코드` 버튼은 device-code 플로우를 시작한다. 실제 이미지 생성은 Codex app-server가 `imageGeneration` 기능을 제공하고 OAuth 로그인이 연결되어 있을 때 실행된다.
 
 ```bash
 npm run test:maker
 npm run build -w @vn-maker/web
 node packages/cli/dist/index.js inspect
+node packages/cli/dist/index.js codex-auth-status
 ```
 
 상세 구조와 CLI/API 계약은 [docs/vn-maker-toolkit.md](docs/vn-maker-toolkit.md)를 참고한다.

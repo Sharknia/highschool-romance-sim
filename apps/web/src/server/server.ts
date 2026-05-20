@@ -1,10 +1,11 @@
 import { createReadStream, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { basename, extname, join, normalize } from "node:path";
 import { handleApiRequest } from "./handlers.js";
 
 const clientRoot = join(process.cwd(), "dist/client");
+const generatedAssetsRoot = process.env.VN_MAKER_GENERATED_DIR || join(process.cwd(), "generated-assets");
 const port = Number(process.env.PORT || 5174);
 
 const contentTypes: Record<string, string> = {
@@ -44,6 +45,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       body: request.method === "POST" ? await readJsonBody(request) : undefined
     });
     await sendJson(response, apiResponse.status, apiResponse.body);
+    return;
+  }
+
+  if (url.pathname.startsWith("/generated-assets/")) {
+    const filePath = join(generatedAssetsRoot, basename(url.pathname));
+    if (!filePath.startsWith(generatedAssetsRoot) || !existsSync(filePath)) {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Generated asset not found");
+      return;
+    }
+
+    response.writeHead(200, { "Content-Type": contentTypes[extname(filePath)] || "image/png" });
+    createReadStream(filePath).pipe(response);
     return;
   }
 

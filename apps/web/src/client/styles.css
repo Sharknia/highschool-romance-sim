@@ -45,6 +45,14 @@ input {
   font-size: 0.9rem;
 }
 
+.auth-box {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(280px, 380px) 1fr;
@@ -93,6 +101,10 @@ button {
   cursor: pointer;
 }
 
+.auth-box button {
+  padding-inline: 10px;
+}
+
 button.primary {
   background: #2dd4bf;
   color: #082f49;
@@ -123,6 +135,18 @@ pre {
   border: 1px solid #1f2937;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.preview-area {
+  display: grid;
+  margin-bottom: 12px;
+}
+
+.preview-area img {
+  width: min(420px, 100%);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #020617;
 }
 
 @media (max-width: 760px) {
