@@ -1,10 +1,19 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
+  buildPlayerRuntimeScript,
+  buildProjectHtml,
+  createPlayerRuntimeData,
   createStarterProject,
+  validateEventExpansionPlan,
   validateProject,
+  type EventExpansionPlan,
+  type EventExpansionRequest,
+  type HeroineProfile,
+  type PlayerRuntimeData,
+  type ProjectPatchDescription,
   type CreateStarterProjectInput,
   type ValidationIssue,
   type VnMakerAsset,
@@ -57,6 +66,35 @@ export interface ProjectValidationResult {
   issues: ValidationIssue[];
 }
 
+export interface ApplyEventExpansionResult {
+  project: VnMakerProject;
+  validation: ProjectValidationResult;
+  diff: ProjectPatchDescription;
+}
+
+export interface WebExportResult {
+  outputDirectory: string;
+  indexPath: string;
+  projectDataPath: string;
+  runtimeScriptPath: string;
+  assetPathRewrites: Record<string, string>;
+}
+
+export interface WebExportSmokeTestResult {
+  ok: boolean;
+  checks: {
+    indexHtml: boolean;
+    runtimeScript: boolean;
+    projectData: boolean;
+    firstScene: boolean;
+    portrait: boolean;
+    choice: boolean;
+    choiceNavigation: boolean;
+    cg: boolean;
+  };
+  issues: string[];
+}
+
 interface ProjectRow {
   id: string;
   version: string;
@@ -76,6 +114,18 @@ interface CharacterRow {
   role: string;
   profile: string;
   emotion_tags_json: string;
+  portrait_asset_ids_json: string;
+  position: number;
+}
+
+interface HeroineRow {
+  id: string;
+  name: string;
+  description: string;
+  personality: string;
+  speech_style: string;
+  appearance: string;
+  default_portrait_asset_id: string | null;
   portrait_asset_ids_json: string;
   position: number;
 }
@@ -248,6 +298,25 @@ CREATE INDEX IF NOT EXISTS idx_assets_project_kind ON assets(project_id, kind);
 CREATE INDEX IF NOT EXISTS idx_generation_jobs_project_status ON generation_jobs(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_validation_issues_project ON validation_issues(project_id);
 `
+  },
+  {
+    id: 2,
+    name: "heroine_library",
+    sql: `
+CREATE TABLE IF NOT EXISTS heroine_library (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  personality TEXT NOT NULL,
+  speech_style TEXT NOT NULL,
+  appearance TEXT NOT NULL,
+  default_portrait_asset_id TEXT,
+  portrait_asset_ids_json TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`
   }
 ] as const;
 
@@ -290,6 +359,19 @@ function assertProjectSnapshot(project: VnMakerProject): void {
   ) {
     throw new Error("저장하려는 project 입력이 VnMakerProject 형식이 아닙니다.");
   }
+}
+
+function heroineFromRow(row: HeroineRow): HeroineProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    personality: row.personality,
+    speechStyle: row.speech_style,
+    appearance: row.appearance,
+    defaultPortraitAssetId: row.default_portrait_asset_id || undefined,
+    portraitAssetIds: parseJson<string[]>(row.portrait_asset_ids_json, [])
+  };
 }
 
 function statementList(sql: string): string[] {
@@ -506,6 +588,57 @@ ORDER BY position ASC, id ASC
       throw new Error("프로젝트 저장소가 비어 있습니다. 먼저 프로젝트를 생성하거나 가져와야 합니다.");
     }
     return project;
+  }
+
+  listHeroines(): HeroineProfile[] {
+    const rows = this.db.prepare(`
+SELECT id, name, description, personality, speech_style, appearance, default_portrait_asset_id, portrait_asset_ids_json, position
+FROM heroine_library
+ORDER BY position ASC, id ASC
+`).all() as HeroineRow[];
+    return rows.map(heroineFromRow);
+  }
+
+  saveHeroine(heroine: HeroineProfile): HeroineProfile {
+    const now = nowIso();
+    const position = this.listHeroines().findIndex((item) => item.id === heroine.id);
+    const nextPosition = position >= 0 ? position : this.listHeroines().length;
+    this.db.prepare(`
+INSERT INTO heroine_library (
+  id, name, description, personality, speech_style, appearance,
+  default_portrait_asset_id, portrait_asset_ids_json, position, created_at, updated_at
+)
+VALUES (
+  @id, @name, @description, @personality, @speechStyle, @appearance,
+  @defaultPortraitAssetId, @portraitAssetIdsJson, @position, @now, @now
+)
+ON CONFLICT(id) DO UPDATE SET
+  name = excluded.name,
+  description = excluded.description,
+  personality = excluded.personality,
+  speech_style = excluded.speech_style,
+  appearance = excluded.appearance,
+  default_portrait_asset_id = excluded.default_portrait_asset_id,
+  portrait_asset_ids_json = excluded.portrait_asset_ids_json,
+  position = excluded.position,
+  updated_at = excluded.updated_at
+`).run({
+      id: heroine.id,
+      name: heroine.name,
+      description: heroine.description,
+      personality: heroine.personality,
+      speechStyle: heroine.speechStyle,
+      appearance: heroine.appearance,
+      defaultPortraitAssetId: heroine.defaultPortraitAssetId || null,
+      portraitAssetIdsJson: json(heroine.portraitAssetIds),
+      position: nextPosition,
+      now
+    });
+    return heroine;
+  }
+
+  deleteHeroine(heroineId: string): void {
+    this.db.prepare("DELETE FROM heroine_library WHERE id = ?").run(heroineId);
   }
 
   saveProject(project: VnMakerProject): VnMakerProject {
@@ -727,6 +860,69 @@ VALUES (
     };
   }
 
+  applyEventExpansionPlan(
+    request: EventExpansionRequest,
+    plan: EventExpansionPlan
+  ): ApplyEventExpansionResult {
+    const project = this.requireProject();
+    const patchValidation = validateEventExpansionPlan(project, request, plan);
+    if (!patchValidation.ok || !patchValidation.appliedProject) {
+      this.saveValidationIssues(project.id, patchValidation.issues);
+      throw new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`);
+    }
+
+    const savedProject = this.saveProject(patchValidation.appliedProject);
+    const validation = this.validateAndStore();
+    return {
+      project: savedProject,
+      validation,
+      diff: patchValidation.diff
+    };
+  }
+
+  previewProject(startSceneId?: string): PlayerRuntimeData {
+    return createPlayerRuntimeData(this.requireProject(), { startSceneId });
+  }
+
+  async exportWebPlayer(outputDirectory?: string): Promise<{ export: WebExportResult; smoke: WebExportSmokeTestResult }> {
+    const project = this.requireProject();
+    const validation = this.validateAndStore();
+    if (!validation.ok) {
+      throw new Error(`검증 실패 프로젝트는 export할 수 없습니다: ${validation.issues.map((issue) => issue.message).join(", ")}`);
+    }
+
+    const exportDirectory = outputDirectory
+      ? resolve(outputDirectory)
+      : join(this.paths.exportsDirectory, `${project.id}-web`);
+    const assetPathRewrites = await this.copyExportAssets(exportDirectory);
+    const runtime = createPlayerRuntimeData(project, { assetPathRewrites });
+    const artifact = buildProjectHtml(project, {
+      projectDataPath: "./project-data.json",
+      runtimeScriptPath: "./runtime/player.js",
+      assetPathRewrites
+    });
+    const indexPath = join(exportDirectory, "index.html");
+    const projectDataPath = join(exportDirectory, "project-data.json");
+    const runtimeScriptPath = join(exportDirectory, "runtime", "player.js");
+
+    await mkdir(dirname(runtimeScriptPath), { recursive: true });
+    await writeFile(indexPath, artifact.html, "utf8");
+    await writeFile(projectDataPath, JSON.stringify(runtime, null, 2), "utf8");
+    await writeFile(runtimeScriptPath, buildPlayerRuntimeScript(), "utf8");
+
+    const exportResult: WebExportResult = {
+      outputDirectory: exportDirectory,
+      indexPath,
+      projectDataPath,
+      runtimeScriptPath,
+      assetPathRewrites
+    };
+    return {
+      export: exportResult,
+      smoke: await smokeTestWebExport(exportDirectory)
+    };
+  }
+
   readValidationIssues(): ValidationIssue[] {
     const project = this.requireProject();
     const rows = this.db.prepare(`
@@ -750,6 +946,31 @@ ORDER BY id ASC
     await mkdir(dirname(destinationPath), { recursive: true });
     await this.db.backup(destinationPath);
     return destinationPath;
+  }
+
+  private async copyExportAssets(exportDirectory: string): Promise<Record<string, string>> {
+    const project = this.requireProject();
+    const metadata = this.readAssetMetadata(project.id);
+    const rewrites: Record<string, string> = {};
+
+    for (const asset of project.assets) {
+      const row = metadata.get(asset.id);
+      const sourceRelativePath = row?.relative_path;
+      if (!sourceRelativePath) {
+        continue;
+      }
+
+      const sourcePath = resolve(this.paths.projectDirectory, sourceRelativePath);
+      const bucket = asset.source === "generated" ? "generated" : "source";
+      const fileName = basename(sourcePath);
+      const targetRelativePath = join("assets", bucket, fileName);
+      const targetPath = join(exportDirectory, targetRelativePath);
+      await mkdir(dirname(targetPath), { recursive: true });
+      await copyFile(sourcePath, targetPath);
+      rewrites[asset.id] = `./${targetRelativePath.replaceAll("\\", "/")}`;
+    }
+
+    return rewrites;
   }
 
   private saveValidationIssues(projectId: string, issues: ValidationIssue[]): void {
@@ -821,6 +1042,64 @@ WHERE project_id = @projectId AND id = @jobId
       updatedAt: nowIso()
     });
   }
+}
+
+export async function smokeTestWebExport(outputDirectory: string): Promise<WebExportSmokeTestResult> {
+  const checks = {
+    indexHtml: false,
+    runtimeScript: false,
+    projectData: false,
+    firstScene: false,
+    portrait: false,
+    choice: false,
+    choiceNavigation: false,
+    cg: false
+  };
+  const issues: string[] = [];
+
+  try {
+    const [indexHtml, runtimeScript, projectDataRaw] = await Promise.all([
+      readFile(join(outputDirectory, "index.html"), "utf8"),
+      readFile(join(outputDirectory, "runtime", "player.js"), "utf8"),
+      readFile(join(outputDirectory, "project-data.json"), "utf8")
+    ]);
+    checks.indexHtml = indexHtml.includes("vn-player");
+    checks.runtimeScript = runtimeScript.includes("VN_MAKER_RUNTIME");
+    checks.projectData = projectDataRaw.includes("startSceneId");
+
+    const runtime = JSON.parse(projectDataRaw) as PlayerRuntimeData;
+    const scenes = runtime.scenes || [];
+    const sceneMap = new Map(scenes.map((scene) => [scene.id, scene]));
+    const firstScene = sceneMap.get(runtime.startSceneId);
+    checks.firstScene = Boolean(firstScene);
+    checks.portrait = Boolean(firstScene?.characters.some((character) => character.asset?.kind === "portrait" && character.asset.uri));
+
+    for (const scene of scenes) {
+      if (scene.cgAsset?.uri) {
+        checks.cg = true;
+      }
+      for (const choice of scene.choices) {
+        checks.choice = true;
+        if (sceneMap.has(choice.next)) {
+          checks.choiceNavigation = true;
+        }
+      }
+    }
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : String(error));
+  }
+
+  Object.entries(checks).forEach(([name, ok]) => {
+    if (!ok) {
+      issues.push(`export smoke check failed: ${name}`);
+    }
+  });
+
+  return {
+    ok: issues.length === 0,
+    checks,
+    issues
+  };
 }
 
 export async function openProjectStore(projectDirectory: string): Promise<ProjectStore> {

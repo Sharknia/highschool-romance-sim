@@ -2,10 +2,16 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
+  createDeterministicEventExpansionPlan,
   createImageGenerationJob,
+  validateEventExpansionPlan,
   type AssetKind,
+  type EventExpansionPlan,
+  type EventExpansionRequest,
   type VnMakerAsset,
-  type VnMakerGenerationJob
+  type VnMakerGenerationJob,
+  type VnMakerProject,
+  type EventExpansionValidationResult
 } from "@vn-maker/engine-core";
 
 type JsonObject = Record<string, unknown>;
@@ -68,6 +74,16 @@ interface CodexImageGenerationItem {
   status: string;
 }
 
+interface CodexTextGenerationItem {
+  id?: string;
+  type?: string;
+  text?: string;
+  result?: string;
+  content?: unknown;
+  message?: unknown;
+  status?: string;
+}
+
 interface CodexItemCompletedParams {
   threadId: string;
   turnId: string;
@@ -120,6 +136,42 @@ export interface GeneratedCodexImageAssetResult {
     item: CodexImageGenerationItem;
   };
 }
+
+export interface EventTextGenerationAttempt {
+  attempt: number;
+  ok: boolean;
+  failureKind?: "schema_invalid" | "engine_validation_failed" | "quality_rule_failed";
+  issues: string[];
+}
+
+export interface EventTextGenerationAdapter {
+  generateEventExpansionPlan(input: {
+    project: VnMakerProject;
+    request: EventExpansionRequest;
+    attempt: number;
+    previousAttempts: EventTextGenerationAttempt[];
+  }): Promise<EventExpansionPlan | unknown>;
+}
+
+export interface ExpandNaturalLanguageEventInput {
+  project: VnMakerProject;
+  request: EventExpansionRequest;
+  adapter?: EventTextGenerationAdapter;
+  maxAttempts?: number;
+}
+
+export type ExpandNaturalLanguageEventResult =
+  | {
+      ok: true;
+      plan: EventExpansionPlan;
+      validation: EventExpansionValidationResult;
+      attempts: EventTextGenerationAttempt[];
+    }
+  | {
+      ok: false;
+      attempts: EventTextGenerationAttempt[];
+      error: string;
+    };
 
 export interface CodexAppServerClientOptions {
   codexBinary?: string;
@@ -278,6 +330,148 @@ export async function createCodexImageAssetResult(
   };
 }
 
+function isEventExpansionPlan(value: unknown): value is EventExpansionPlan {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const decision = record.decision && typeof record.decision === "object" ? record.decision as Record<string, unknown> : {};
+  const patch = record.patch && typeof record.patch === "object" ? record.patch as Record<string, unknown> : {};
+  return typeof record.summary === "string"
+    && typeof decision.sceneCount === "number"
+    && typeof decision.choiceCount === "number"
+    && typeof decision.cgCount === "number"
+    && typeof decision.newExpressionAssetCount === "number"
+    && Array.isArray(patch.operations);
+}
+
+function classifyValidationFailure(validation: EventExpansionValidationResult): EventTextGenerationAttempt["failureKind"] {
+  return validation.issues.some((issue) => issue.path.startsWith("decision") || issue.path.includes("newExpressionAssetCount"))
+    ? "quality_rule_failed"
+    : "engine_validation_failed";
+}
+
+function extractTextFromUnknown(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractTextFromUnknown(item));
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return [
+      ...extractTextFromUnknown(record.text),
+      ...extractTextFromUnknown(record.result),
+      ...extractTextFromUnknown(record.content),
+      ...extractTextFromUnknown(record.message)
+    ];
+  }
+  return [];
+}
+
+function extractEventPlanJson(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = (fenced?.[1] || trimmed).trim();
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  const json = firstBrace >= 0 && lastBrace > firstBrace
+    ? candidate.slice(firstBrace, lastBrace + 1)
+    : candidate;
+  return JSON.parse(json);
+}
+
+function createEventExpansionPrompt(
+  project: VnMakerProject,
+  request: EventExpansionRequest,
+  attempt: number,
+  previousAttempts: EventTextGenerationAttempt[]
+): string {
+  const route = project.routes.find((item) => item.id === request.routeId);
+  const afterScene = project.scenes.find((scene) => scene.id === request.afterSceneId);
+  return [
+    "You are generating a small validated patch for a Korean teen-safe visual novel maker.",
+    "Return JSON only. Do not use markdown.",
+    "The JSON must match EventExpansionPlan with summary, decision, and patch.operations.",
+    "Allowed operation types: addScene, updateScene, updateSceneLink, addChoice, addAsset, addGenerationJob.",
+    "Do not rewrite the whole project, add heroines, add routes, delete scenes, add expression assets, or exceed constraints.",
+    `Attempt: ${attempt}`,
+    `Previous failures: ${JSON.stringify(previousAttempts, null, 2)}`,
+    `Project summary: ${JSON.stringify({
+      id: project.id,
+      title: project.title,
+      heroine: request.heroineContext,
+      route,
+      afterScene,
+      sceneIds: project.scenes.map((scene) => scene.id),
+      assetIds: project.assets.map((asset) => asset.id),
+      generationJobIds: project.generationJobs.map((job) => job.id)
+    }, null, 2)}`,
+    `EventExpansionRequest: ${JSON.stringify(request, null, 2)}`,
+    "The Alpha target is sceneCount 3, choiceCount 1, cgCount 1 when constraints allow it."
+  ].join("\n\n");
+}
+
+const deterministicEventTextAdapter: EventTextGenerationAdapter = {
+  async generateEventExpansionPlan({ request }) {
+    return createDeterministicEventExpansionPlan(request);
+  }
+};
+
+export async function expandNaturalLanguageEvent(
+  input: ExpandNaturalLanguageEventInput
+): Promise<ExpandNaturalLanguageEventResult> {
+  const adapter = input.adapter || deterministicEventTextAdapter;
+  const maxAttempts = input.maxAttempts ?? 3;
+  const attempts: EventTextGenerationAttempt[] = [];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const candidate = await adapter.generateEventExpansionPlan({
+      project: input.project,
+      request: input.request,
+      attempt,
+      previousAttempts: attempts
+    });
+
+    if (!isEventExpansionPlan(candidate)) {
+      attempts.push({
+        attempt,
+        ok: false,
+        failureKind: "schema_invalid",
+        issues: ["생성 결과가 EventExpansionPlan 스키마와 일치하지 않습니다."]
+      });
+      continue;
+    }
+
+    const validation = validateEventExpansionPlan(input.project, input.request, candidate);
+    if (!validation.ok) {
+      attempts.push({
+        attempt,
+        ok: false,
+        failureKind: classifyValidationFailure(validation),
+        issues: validation.issues.map((issue) => `${issue.path}: ${issue.message}`)
+      });
+      continue;
+    }
+
+    attempts.push({
+      attempt,
+      ok: true,
+      issues: []
+    });
+    return {
+      ok: true,
+      plan: candidate,
+      validation,
+      attempts
+    };
+  }
+
+  return {
+    ok: false,
+    attempts,
+    error: attempts.at(-1)?.issues.join(", ") || "자연어 이벤트 생성에 실패했습니다."
+  };
+}
+
 export class CodexAppServerClient {
   private readonly codexBinary: string;
   private readonly cwd: string;
@@ -354,6 +548,34 @@ export class CodexAppServerClient {
     const threadId = threadResponse.thread.id;
     const imageItem = await this.runImageGenerationTurn(threadId, input);
     return createCodexImageAssetResult(input, imageItem);
+  }
+
+  async generateEventExpansionPlan(input: {
+    project: VnMakerProject;
+    request: EventExpansionRequest;
+    attempt: number;
+    previousAttempts: EventTextGenerationAttempt[];
+  }): Promise<EventExpansionPlan> {
+    const session = await this.readSession(true);
+    if (!session.connected) {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+
+    await this.connect();
+    const threadResponse = await this.request<CodexThreadStartResponse>("thread/start", {
+      ephemeral: true,
+      cwd: input.request.projectDirectory || this.cwd,
+      sandbox: "read-only",
+      model: null
+    });
+    const threadId = threadResponse.thread.id;
+    const text = await this.runTextGenerationTurn(threadId, createEventExpansionPrompt(
+      input.project,
+      input.request,
+      input.attempt,
+      input.previousAttempts
+    ), input.request.projectDirectory || this.cwd);
+    return extractEventPlanJson(text) as EventExpansionPlan;
   }
 
   close(): void {
@@ -448,6 +670,56 @@ export class CodexAppServerClient {
         {
           type: "text",
           text: createImagePrompt(input)
+        }
+      ]
+    });
+
+    return completed;
+  }
+
+  private async runTextGenerationTurn(threadId: string, text: string, cwd: string): Promise<string> {
+    const textItems: string[] = [];
+    const completed = new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        dispose();
+        reject(new Error("Codex 텍스트 생성 시간이 초과되었습니다."));
+      }, this.turnTimeoutMs);
+
+      const dispose = this.onNotification((notification) => {
+        if (notification.method === "item/completed") {
+          const params = notification.params as CodexItemCompletedParams | undefined;
+          if (params?.threadId === threadId && params.item?.type !== "imageGeneration") {
+            const item = params.item as unknown as CodexTextGenerationItem;
+            textItems.push(...extractTextFromUnknown(item));
+          }
+        }
+
+        if (notification.method === "turn/completed") {
+          const params = notification.params as unknown as CodexTurnCompletedParams | undefined;
+          if (params?.threadId !== threadId) {
+            return;
+          }
+
+          clearTimeout(timeout);
+          dispose();
+          const output = textItems.join("\n").trim();
+          if (output) {
+            resolve(output);
+            return;
+          }
+          reject(new Error(`Codex turn이 ${params.turn.status} 상태로 끝났지만 텍스트 결과가 없습니다.`));
+        }
+      });
+    });
+
+    await this.request("turn/start", {
+      threadId,
+      cwd,
+      model: null,
+      input: [
+        {
+          type: "text",
+          text
         }
       ]
     });

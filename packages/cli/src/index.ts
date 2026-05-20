@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import {
+  expandNaturalLanguageEvent,
   sharedCodexAppServerClient,
   type CodexImageGenerationInput
 } from "@vn-maker/generation-codex";
 import {
   buildProjectHtml,
   createAssetManifest,
+  createEventExpansionRequest,
+  createHeroineProfile,
   createImageGenerationJob,
+  createProjectFromHeroine,
   createStarterProject,
   validateProject,
+  type EventExpansionPlan,
+  type EventExpansionRequest,
   type CreateImageGenerationJobInput,
+  type CreateHeroineProfileInput,
   type VnMakerCharacter,
   type VnMakerProject,
   type VnMakerScene
@@ -18,6 +25,7 @@ import {
 import {
   createProjectWorkspace,
   openProjectStore,
+  smokeTestWebExport,
   type ProjectStore
 } from "@vn-maker/project-store";
 
@@ -27,6 +35,14 @@ interface CliInput {
   outputPath?: string;
   character?: VnMakerCharacter;
   scene?: VnMakerScene;
+  heroine?: CreateHeroineProfileInput;
+  heroineId?: string;
+  request?: EventExpansionRequest;
+  plan?: EventExpansionPlan;
+  userEvent?: string;
+  routeId?: string;
+  afterSceneId?: string;
+  startSceneId?: string;
   job?: CreateImageGenerationJobInput;
   image?: CodexImageGenerationInput;
   login?: {
@@ -108,13 +124,22 @@ function printCapabilities(): void {
       "inspect",
       "create-starter",
       "create-project",
+      "create-project-from-heroine",
       "open-project",
+      "list-heroines",
+      "save-heroine",
+      "delete-heroine",
       "save-character",
       "save-scene",
       "validate-store",
       "validate",
       "manifest",
       "build-html",
+      "expand-event",
+      "approve-event",
+      "preview",
+      "export-web",
+      "smoke-export",
       "create-image-job",
       "codex-auth-status",
       "codex-login",
@@ -161,6 +186,36 @@ async function run(): Promise<void> {
     return;
   }
 
+  if (command === "create-project-from-heroine") {
+    if (!input.heroine) {
+      throw new Error("heroine 입력이 필요합니다.");
+    }
+    const heroine = createHeroineProfile(input.heroine);
+    const store = await createProjectWorkspace({
+      projectDirectory: requireProjectDirectory(input),
+      project: createProjectFromHeroine({
+        id: input.starter?.id,
+        title: input.starter?.title,
+        premise: input.starter?.premise,
+        heroine
+      })
+    });
+    try {
+      store.saveHeroine(heroine);
+      writeJson({
+        ok: true,
+        projectDirectory: store.paths.projectDirectory,
+        paths: store.paths,
+        heroine,
+        project: store.requireProject(),
+        validation: store.validateAndStore()
+      });
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
   if (command === "open-project") {
     await withProjectStore(input, (store) => {
       writeJson({
@@ -169,6 +224,43 @@ async function run(): Promise<void> {
         paths: store.paths,
         project: store.requireProject(),
         validation: store.validateAndStore()
+      });
+    });
+    return;
+  }
+
+  if (command === "list-heroines") {
+    await withProjectStore(input, (store) => {
+      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, heroines: store.listHeroines() });
+    });
+    return;
+  }
+
+  if (command === "save-heroine") {
+    if (!input.heroine) {
+      throw new Error("heroine 입력이 필요합니다.");
+    }
+    const store = await ensureProjectStore(input);
+    try {
+      const heroine = store.saveHeroine(createHeroineProfile(input.heroine));
+      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, heroine, heroines: store.listHeroines() });
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (command === "delete-heroine") {
+    if (!input.heroineId) {
+      throw new Error("heroineId 입력이 필요합니다.");
+    }
+    await withProjectStore(input, (store) => {
+      store.deleteHeroine(input.heroineId!);
+      writeJson({
+        ok: true,
+        projectDirectory: store.paths.projectDirectory,
+        heroines: store.listHeroines(),
+        project: store.requireProject()
       });
     });
     return;
@@ -258,6 +350,68 @@ async function run(): Promise<void> {
       writeFileSync(input.outputPath, artifact.html, "utf8");
     }
     writeJson({ ok: true, artifact });
+    return;
+  }
+
+  if (command === "expand-event") {
+    const store = await ensureProjectStore(input);
+    try {
+      const project = store.requireProject();
+      const route = project.routes.find((item) => item.id === input.routeId) || project.routes[0];
+      if (!route) {
+        throw new Error("이벤트를 추가할 루트가 없습니다.");
+      }
+      const request = input.request || createEventExpansionRequest(project, {
+        projectDirectory: store.paths.projectDirectory,
+        routeId: route.id,
+        afterSceneId: input.afterSceneId || route.entrySceneId,
+        heroineId: input.heroineId || route.heroineId,
+        userEvent: input.userEvent || ""
+      });
+      const result = await expandNaturalLanguageEvent({ project, request });
+      writeJson({ projectDirectory: store.paths.projectDirectory, request, ...result });
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (command === "approve-event") {
+    if (!input.request || !input.plan) {
+      throw new Error("request와 plan 입력이 필요합니다.");
+    }
+    const store = await ensureProjectStore(input);
+    try {
+      const result = store.applyEventExpansionPlan(input.request, input.plan);
+      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, ...result });
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (command === "preview") {
+    await withProjectStore(input, (store) => {
+      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, runtime: store.previewProject(input.startSceneId) });
+    });
+    return;
+  }
+
+  if (command === "export-web") {
+    const store = await ensureProjectStore(input);
+    try {
+      writeJson({ ok: true, projectDirectory: store.paths.projectDirectory, ...(await store.exportWebPlayer(input.outputPath)) });
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (command === "smoke-export") {
+    if (!input.outputPath) {
+      throw new Error("outputPath 입력이 필요합니다.");
+    }
+    writeJson({ ok: true, smoke: await smokeTestWebExport(input.outputPath) });
     return;
   }
 
