@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "build:engine": "npx esbuild src/engine/index.ts --bundle --format=iife --global-name=VisualNovelEngine --target=es2018 --outfile=dist/visual-novel-engine.js",
+    "build:html": "node scripts/embed-engine.mjs",
+    "build": "npm run typecheck && npm run build:engine && npm run build:html"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}
