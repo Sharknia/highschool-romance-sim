@@ -1,6 +1,5 @@
 import { CheckCircle2, Code2, ImagePlus, LogOut, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
-import { postJson } from "../api/client";
 import type { ApiResult, ImagePreviewResult } from "../api/types";
 import { describeSession, useAuth } from "../auth/AuthProvider";
 import { AppShell, Button, Panel, StatusBanner } from "../components/ui";
@@ -51,7 +50,7 @@ function isHttpFailure(result: unknown): result is ApiResult {
 }
 
 export function WorkspacePage() {
-  const { logout, refreshSession, session } = useAuth();
+  const { logout, postAuthedJson, refreshSession, session } = useAuth();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
   const [prompt, setPrompt] = useState("하루 루트의 첫 장면을 달달하게 확장하고, 교실 배경과 하루 포트레이트 생성 작업을 만들어줘.");
   const [result, setResult] = useState("{}");
@@ -75,7 +74,7 @@ export function WorkspacePage() {
 
   async function createStarterProject(): Promise<void> {
     await runAction("샘플 프로젝트 생성", async () => {
-      const response = await postJson<ApiResult>("/api/project/starter", { starter: starterProject });
+      const response = await postAuthedJson<ApiResult>("/api/project/starter", { starter: starterProject });
       setProjectJson(JSON.stringify(response.project, null, 2));
       return response;
     });
@@ -84,20 +83,20 @@ export function WorkspacePage() {
   async function validateProject(): Promise<void> {
     await runAction("프로젝트 검증", async () => {
       const project = JSON.parse(projectJson);
-      return postJson<ApiResult>("/api/project/validate", { project });
+      return postAuthedJson<ApiResult>("/api/project/validate", { project });
     });
   }
 
   async function buildProject(): Promise<void> {
     await runAction("프로젝트 빌드", async () => {
       const project = JSON.parse(projectJson);
-      return truncateArtifactHtml(await postJson<ApiResult>("/api/project/build", { project }));
+      return truncateArtifactHtml(await postAuthedJson<ApiResult>("/api/project/build", { project }));
     });
   }
 
   async function createImageJob(): Promise<void> {
     setPreviewSrc(null);
-    await runAction("이미지 작업 생성", async () => postJson<ApiResult>("/api/generation/jobs", {
+    await runAction("이미지 작업 생성", async () => postAuthedJson<ApiResult>("/api/generation/jobs", {
       kind: "cg",
       targetId: "scene-opening",
       prompt,
@@ -108,7 +107,7 @@ export function WorkspacePage() {
   async function generateImage(): Promise<void> {
     setPreviewSrc(null);
     await runAction("이미지 생성", async () => {
-      const response = await postJson<ApiResult & ImagePreviewResult>("/api/generation/images", {
+      const response = await postAuthedJson<ApiResult & ImagePreviewResult>("/api/generation/images", {
         kind: "cg",
         targetId: "scene-opening",
         prompt,

@@ -11,7 +11,7 @@ export interface CodexSessionResult extends ApiResult {
   account?: {
     email?: string;
     planType?: string | null;
-  };
+  } | null;
 }
 
 export interface CodexLoginStart {

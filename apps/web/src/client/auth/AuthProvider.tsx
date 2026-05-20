@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { logoutCodex, readCodexSession } from "../api/client";
-import type { CodexSessionResult } from "../api/types";
+import { isAuthFailure, logoutCodex, postJson, readCodexSession } from "../api/client";
+import type { ApiResult, CodexSessionResult } from "../api/types";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 
@@ -8,43 +8,96 @@ interface AuthContextValue {
   status: AuthStatus;
   session: CodexSessionResult | null;
   refreshSession: () => Promise<CodexSessionResult>;
+  postAuthedJson: <T extends ApiResult = ApiResult>(path: string, body: unknown) => Promise<T>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const sessionRefreshIntervalMs = 15000;
 
 function getStatus(session: CodexSessionResult): AuthStatus {
   return session.connected ? "authenticated" : "anonymous";
+}
+
+function createAnonymousSession(error?: string): CodexSessionResult {
+  return {
+    ok: false,
+    connected: false,
+    mode: null,
+    account: null,
+    error
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<CodexSessionResult | null>(null);
   const [status, setStatus] = useState<AuthStatus>("checking");
 
-  const refreshSession = useCallback(async () => {
-    const nextSession = await readCodexSession();
+  const applySession = useCallback((nextSession: CodexSessionResult) => {
     setSession(nextSession);
     setStatus(getStatus(nextSession));
-    return nextSession;
   }, []);
 
+  const markAnonymous = useCallback((error?: string) => {
+    applySession(createAnonymousSession(error));
+  }, [applySession]);
+
+  const refreshSession = useCallback(async () => {
+    const nextSession = await readCodexSession();
+    applySession(nextSession);
+    return nextSession;
+  }, [applySession]);
+
+  const postAuthedJson = useCallback(async <T extends ApiResult = ApiResult>(path: string, body: unknown): Promise<T> => {
+    const result = await postJson<T>(path, body);
+    if (isAuthFailure(result)) {
+      markAnonymous(result.error || "Codex OAuth 로그인이 필요합니다.");
+    }
+    return result;
+  }, [markAnonymous]);
+
   const logout = useCallback(async () => {
-    await logoutCodex();
-    const nextSession = await refreshSession();
-    setSession(nextSession);
-    setStatus("anonymous");
-  }, [refreshSession]);
+    try {
+      await logoutCodex();
+    } finally {
+      markAnonymous();
+    }
+  }, [markAnonymous]);
 
   useEffect(() => {
     void refreshSession();
+  }, [refreshSession]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refreshSession();
+    }, sessionRefreshIntervalMs);
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshSession();
+      }
+    };
+
+    window.addEventListener("focus", refreshSession);
+    window.addEventListener("pageshow", refreshSession);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshSession);
+      window.removeEventListener("pageshow", refreshSession);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [refreshSession]);
 
   const value = useMemo<AuthContextValue>(() => ({
     status,
     session,
     refreshSession,
+    postAuthedJson,
     logout
-  }), [logout, refreshSession, session, status]);
+  }), [logout, postAuthedJson, refreshSession, session, status]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

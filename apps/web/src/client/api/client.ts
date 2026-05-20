@@ -1,5 +1,9 @@
 import type { ApiResult, CodexLoginResponse, CodexSessionResult } from "./types";
 
+export function isAuthFailure(result: ApiResult): boolean {
+  return result.httpStatus === 401 || Boolean(result.error?.includes("OAuth 로그인이 필요"));
+}
+
 export async function postJson<T extends ApiResult = ApiResult>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
