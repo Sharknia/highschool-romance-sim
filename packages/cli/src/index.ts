@@ -8,6 +8,7 @@ import {
   createAssetManifest,
   createImageGenerationJob,
   createStarterProject,
+  parseVnMakerProject,
   validateProject,
   type VnMakerCharacter,
   type VnMakerProject,
@@ -54,21 +55,15 @@ function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-function isVnMakerProject(value: unknown): value is VnMakerProject {
-  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  return record.version === "vn-maker/v1"
-    && typeof record.id === "string"
-    && typeof record.title === "string"
-    && Array.isArray(record.characters)
-    && Array.isArray(record.routes)
-    && Array.isArray(record.scenes)
-    && Array.isArray(record.assets)
-    && Array.isArray(record.generationJobs)
-    && Boolean(record.settings);
-}
-
 function getProject(input: CliInput): VnMakerProject {
-  return isVnMakerProject(input.project) ? input.project : createStarterProject(input.starter);
+  if (input.project === undefined) {
+    return createStarterProject(input.starter);
+  }
+  const parsed = parseVnMakerProject(input.project);
+  if (!parsed.ok) {
+    throw new Error(`project 입력이 올바르지 않습니다: ${parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join(", ")}`);
+  }
+  return parsed.value;
 }
 
 const useCases = createVnMakerUseCases({
