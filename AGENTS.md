@@ -5,6 +5,8 @@
 ## 제품 기준
 
 이 저장소의 현재 목표는 GitHub Pages용 단일 HTML 게임이 아니라 **미연시 제작 프로그램**이다.
+최종 패키징 목표는 로컬 데스크톱형 웹 앱이며, Electron/Tauri 스타일의 로컬 앱 구조를 지향한다.
+다만 현재는 구현과 테스트를 쉽게 하기 위해 Electron/Tauri 패키징 단계까지는 진행하지 않는다.
 GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거 레거시 부산물로 취급한다.
 새 기능 판단 기준은 `VN Maker Core + CLI + Web App + Codex OAuth + 생성 어댑터` 구조다.
 
@@ -24,6 +26,7 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 - 이미지 생성은 기본적으로 Codex app-server의 ChatGPT OAuth와 `imageGeneration` 경로를 사용한다.
 - 웹앱과 CLI는 같은 core와 같은 생성 어댑터를 공유해야 한다.
 - 생성 결과는 가능하면 프로젝트 에셋/작업 결과와 연결되는 형태로 설계한다.
+- 디자인은 나중에 다듬되, UX 흐름은 처음부터 유려하게 만들고 UI 코드는 쉽게 갈아입힐 수 있게 설계한다.
 
 ## 검증
 
