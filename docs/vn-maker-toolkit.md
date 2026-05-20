@@ -2,6 +2,8 @@
 
 VN Maker Toolkit은 미연시 플레이 페이지가 아니라, Codex와 이미지 생성 모델을 활용해 미연시를 제작하는 도구 레이어다.
 
+DB, 백엔드 프레임워크, 앱 패키징 결정은 [architecture-decisions.md](architecture-decisions.md)에 기록한다.
+
 ## 목표
 
 - Codex가 외부에서 CLI로 엔진을 호출할 수 있다.
