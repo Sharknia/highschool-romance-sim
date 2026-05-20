@@ -2,6 +2,7 @@ export type FlagSet = Record<string, boolean>;
 export type NumericMap = Record<string, number>;
 export type CharacterMemoryTags = Record<string, FlagSet>;
 export type CharacterStageMap = Record<string, string>;
+export type MaybePromise<T> = T | Promise<T>;
 
 export type Resolvable<T> = T | ((state: GameState) => T);
 
@@ -149,6 +150,7 @@ export interface RuntimeOptions {
   scenes: SceneMap;
   affinityMax?: number;
   routeStatMax?: number;
+  platform?: VisualNovelPlatformOptions;
 }
 
 export interface DebugSnapshot {
@@ -175,6 +177,45 @@ export interface SaveSlot {
   sceneId: string;
   state: GameState;
   backlog: BacklogEntry[];
+}
+
+export interface VisualNovelSaveStorage {
+  save(saveSlot: SaveSlot): MaybePromise<SaveSlot>;
+  load(slotId: string): MaybePromise<SaveSlot | null>;
+  list(): MaybePromise<SaveSlot[]>;
+  remove(slotId: string): MaybePromise<void>;
+}
+
+export interface VisualNovelLogger {
+  error(...data: unknown[]): void;
+  warn(...data: unknown[]): void;
+  info(...data: unknown[]): void;
+}
+
+export interface VisualNovelKeyValueStorage {
+  readonly length: number;
+  getItem(key: string): string | null;
+  key(index: number): string | null;
+  removeItem(key: string): void;
+  setItem(key: string, value: string): void;
+}
+
+export interface VisualNovelPlatform {
+  now(): number;
+  createSaveTimestamp(): string;
+  setTimeout(callback: () => void, delayMs: number): unknown;
+  logger: VisualNovelLogger;
+  alert(message: string): void;
+  createElement?: (tagName: string) => unknown;
+  getStorage?: () => VisualNovelKeyValueStorage | null;
+}
+
+export type VisualNovelPlatformOptions = Partial<VisualNovelPlatform>;
+
+export interface LocalStorageSaveStorageOptions {
+  storageKey: string;
+  storage?: VisualNovelKeyValueStorage;
+  platform?: VisualNovelPlatformOptions;
 }
 
 export interface SceneValidationIssue {

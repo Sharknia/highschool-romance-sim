@@ -13,6 +13,7 @@ import type {
   Scene,
   SceneMap
 } from "./types";
+import { createDefaultVisualNovelPlatform } from "./platform";
 
 function clonePlain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -30,6 +31,7 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
   const { state, scenes } = options;
   const affinityMax = options.affinityMax ?? 5;
   const routeStatMax = options.routeStatMax ?? 9;
+  const platform = createDefaultVisualNovelPlatform(options.platform);
   const initialState = clonePlain(state);
   let backlog: BacklogEntry[] = [];
   let lastBacklogSignature = "";
@@ -454,7 +456,7 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
       speaker: renderedLine?.speaker ?? resolveValue(scene.speaker),
       text,
       characterNames: (scene.characters || []).map((character) => character.name),
-      createdAt: Date.now()
+      createdAt: platform.now()
     };
     const signature = getBacklogSignature(entry);
 
@@ -483,7 +485,7 @@ export function createVisualNovelRuntime(options: RuntimeOptions) {
     return {
       id,
       label,
-      savedAt: new Date().toISOString(),
+      savedAt: platform.createSaveTimestamp(),
       sceneId: state.currentSceneId,
       state: clonePlain(state),
       backlog: getBacklog()
