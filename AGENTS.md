@@ -34,6 +34,9 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 
 - 변경 후 최소 `npm run typecheck`, 관련 테스트, 필요한 경우 실제 CLI/API 호출을 실행한다.
 - 웹 UI 변경은 브라우저로 데스크톱/모바일 폭을 확인한다.
+- 완료 전 사용자가 실행할 명령으로 앱을 띄우고 새 기능의 happy path를 1회 실제 수행한다.
+  - mock 검증은 `목 테스트`로만 보고하며 실제 연동 성공처럼 쓰지 않는다.
+  - 프론트 API 호출은 빈/비JSON/5xx 응답을 안전하게 처리한다.
 - 커밋/푸시 전 `git diff --check`와 `git status`를 확인한다.
 
 ## 보고
