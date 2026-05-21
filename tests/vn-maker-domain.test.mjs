@@ -41,6 +41,67 @@ const invalidPlan = core.parseEventExpansionPlan({
 assert.equal(invalidPlan.ok, false);
 assert.equal(invalidPlan.issues.some((issue) => issue.path === "decision.sceneCount"), true);
 
+const malformedChoicePlan = core.parseEventExpansionPlan({
+  summary: "선택지 schema가 깨진 패치",
+  decision: {
+    sceneCount: 0,
+    choiceCount: 1,
+    cgCount: 0,
+    newExpressionAssetCount: 0
+  },
+  patch: {
+    operations: [
+      {
+        type: "addChoice",
+        sceneId: "scene-opening",
+        choice: { id: 1, text: "잘못된 선택지", next: "scene-ending" }
+      }
+    ]
+  }
+});
+assert.equal(malformedChoicePlan.ok, false);
+assert.equal(malformedChoicePlan.issues.some((issue) => issue.path === "patch.operations.0.choice.id"), true);
+
+const malformedAssetPlan = core.parseEventExpansionPlan({
+  summary: "에셋 schema가 깨진 패치",
+  decision: {
+    sceneCount: 0,
+    choiceCount: 0,
+    cgCount: 1,
+    newExpressionAssetCount: 0
+  },
+  patch: {
+    operations: [
+      {
+        type: "addAsset",
+        asset: { id: "asset-bad", kind: "not-real", label: "잘못된 에셋" }
+      }
+    ]
+  }
+});
+assert.equal(malformedAssetPlan.ok, false);
+assert.equal(malformedAssetPlan.issues.some((issue) => issue.path === "patch.operations.0.asset.kind"), true);
+
+const malformedJobPlan = core.parseEventExpansionPlan({
+  summary: "생성 작업 schema가 깨진 패치",
+  decision: {
+    sceneCount: 0,
+    choiceCount: 0,
+    cgCount: 0,
+    newExpressionAssetCount: 0
+  },
+  patch: {
+    operations: [
+      {
+        type: "addGenerationJob",
+        job: { id: "job-bad", kind: "cg", targetId: "scene-opening", prompt: "bad", provider: "mock-adapter", status: "queued" }
+      }
+    ]
+  }
+});
+assert.equal(malformedJobPlan.ok, false);
+assert.equal(malformedJobPlan.issues.some((issue) => issue.path === "patch.operations.0.job.status"), true);
+
 const secondCharacter = {
   id: "mira",
   displayName: "미라",
@@ -99,3 +160,179 @@ assert.equal(starter.generationJobs.some((job) => job.id === "job-domain-cg"), f
 const policy = core.describeEventExpansionPolicy();
 assert.equal(policy.allowedOperationTypes.includes("addScene"), true);
 assert.equal(policy.alphaTarget.sceneCount, 3);
+
+function createManualBranchProject(overrides = {}) {
+  const project = core.createStarterProject({
+    id: "manual-branch-test",
+    title: "수동 분기 테스트",
+    premise: "분기별 엔딩 도달 검증"
+  });
+
+  const branchProject = {
+    ...project,
+    routes: [
+      {
+        ...project.routes[0],
+        entrySceneId: "scene-opening"
+      }
+    ],
+    scenes: [
+      {
+        id: "scene-opening",
+        label: "분기 시작",
+        speaker: "나",
+        text: "하루와 문화제를 준비한다.",
+        backgroundAssetId: "asset-classroom-bg",
+        characters: [{ characterId: "haru", expression: "normal", assetId: "asset-haru-portrait", position: "center" }],
+        choices: [
+          { id: "choice-good", text: "솔직히 고백한다", next: "scene-good-ending" },
+          { id: "choice-normal", text: "함께 전시를 마무리한다", next: "scene-normal-ending" }
+        ]
+      },
+      {
+        id: "scene-good-ending",
+        label: "굿 엔딩",
+        speaker: "하루",
+        text: "내년 문화제도 같이 만들자.",
+        backgroundAssetId: "asset-classroom-bg",
+        characters: [{ characterId: "haru", expression: "happy", assetId: "asset-haru-portrait", position: "center" }],
+        choices: [],
+        ending: { id: "ending-good", title: "문화제의 약속", kind: "good" }
+      },
+      {
+        id: "scene-normal-ending",
+        label: "노멀 엔딩",
+        speaker: "하루",
+        text: "오늘은 여기까지지만, 우리는 계속 만들 수 있어.",
+        backgroundAssetId: "asset-classroom-bg",
+        characters: [{ characterId: "haru", expression: "normal", assetId: "asset-haru-portrait", position: "center" }],
+        choices: [],
+        ending: { id: "ending-normal", title: "다음 작품으로", kind: "normal" }
+      }
+    ]
+  };
+
+  return {
+    ...branchProject,
+    ...overrides,
+    routes: overrides.routes || branchProject.routes,
+    scenes: overrides.scenes || branchProject.scenes
+  };
+}
+
+function issueCodes(issues) {
+  return issues.map((issue) => issue.code || issue.message);
+}
+
+const manualBranchProject = createManualBranchProject();
+assert.equal(typeof core.analyzeRouteGraph, "function");
+const branchAnalysis = core.analyzeRouteGraph(manualBranchProject);
+assert.deepEqual(branchAnalysis.reachableEndingIds.sort(), ["ending-good", "ending-normal"]);
+assert.deepEqual(branchAnalysis.uncoveredTerminalSceneIds, []);
+assert.deepEqual(branchAnalysis.missingTargets, []);
+assert.deepEqual(branchAnalysis.cyclesWithoutEndingPath, []);
+assert.equal(branchAnalysis.issues.filter((issue) => issue.severity === "error").length, 0);
+assert.deepEqual(core.validateProject(manualBranchProject).filter((issue) => issue.severity === "error"), []);
+
+const parsedEndingScene = core.parseVnMakerScene(manualBranchProject.scenes[1]);
+assert.equal(parsedEndingScene.ok, true);
+assert.equal(parsedEndingScene.value.ending.title, "문화제의 약속");
+
+const runtimeWithEnding = core.createPlayerRuntimeData(manualBranchProject);
+assert.equal(runtimeWithEnding.scenes.find((scene) => scene.id === "scene-good-ending").ending.title, "문화제의 약속");
+
+const uncoveredBranchProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-normal-ending" ? { ...scene, ending: undefined } : scene)
+});
+const uncoveredAnalysis = core.analyzeRouteGraph(uncoveredBranchProject);
+assert.deepEqual(uncoveredAnalysis.uncoveredTerminalSceneIds, ["scene-normal-ending"]);
+assert.equal(issueCodes(uncoveredAnalysis.issues).includes("uncovered-terminal"), true);
+assert.equal(core.validateProject(uncoveredBranchProject).some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
+
+const endingWithNextProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-good-ending" ? { ...scene, next: "scene-normal-ending" } : scene)
+});
+const endingNextAnalysis = core.analyzeRouteGraph(endingWithNextProject);
+assert.equal(issueCodes(endingNextAnalysis.issues).includes("ending-has-outgoing"), true);
+
+const endingWithChoicesProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-good-ending"
+    ? { ...scene, choices: [{ id: "choice-after-ending", text: "계속한다", next: "scene-normal-ending" }] }
+    : scene)
+});
+const endingChoicesAnalysis = core.analyzeRouteGraph(endingWithChoicesProject);
+assert.equal(issueCodes(endingChoicesAnalysis.issues).includes("ending-has-outgoing"), true);
+
+const mixedOutgoingProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-opening" ? { ...scene, next: "scene-good-ending" } : scene)
+});
+const mixedOutgoingAnalysis = core.analyzeRouteGraph(mixedOutgoingProject);
+assert.equal(issueCodes(mixedOutgoingAnalysis.issues).includes("mixed-outgoing"), true);
+
+const cycleProject = createManualBranchProject({
+  scenes: [
+    {
+      ...manualBranchProject.scenes[0],
+      choices: [
+        { id: "choice-cycle", text: "계속 반복한다", next: "scene-cycle-a" }
+      ]
+    },
+    {
+      id: "scene-cycle-a",
+      label: "순환 A",
+      speaker: "하루",
+      text: "다시 처음으로 돌아가는 기분이다.",
+      characters: [],
+      choices: [],
+      next: "scene-cycle-b"
+    },
+    {
+      id: "scene-cycle-b",
+      label: "순환 B",
+      speaker: "나",
+      text: "끝나지 않는 준비가 이어진다.",
+      characters: [],
+      choices: [],
+      next: "scene-cycle-a"
+    }
+  ]
+});
+const cycleAnalysis = core.analyzeRouteGraph(cycleProject);
+assert.equal(issueCodes(cycleAnalysis.issues).includes("cycle-without-ending-path"), true);
+assert.equal(cycleAnalysis.cyclesWithoutEndingPath.length, 1);
+
+const duplicateChoiceProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-opening"
+    ? { ...scene, choices: [...scene.choices, { id: "choice-good", text: "다시 고백한다", next: "scene-good-ending" }] }
+    : scene)
+});
+assert.equal(issueCodes(core.analyzeRouteGraph(duplicateChoiceProject).issues).includes("duplicate-choice-id"), true);
+
+const emptyChoiceTextProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-opening"
+    ? { ...scene, choices: scene.choices.map((choice) => choice.id === "choice-good" ? { ...choice, text: "   " } : choice) }
+    : scene)
+});
+assert.equal(issueCodes(core.analyzeRouteGraph(emptyChoiceTextProject).issues).includes("empty-choice-text"), true);
+assert.equal(core.parseVnMakerScene(emptyChoiceTextProject.scenes[0]).issues.some((issue) => issue.path === "choices.0.text"), true);
+
+const duplicateEndingProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.ending ? { ...scene, ending: { ...scene.ending, id: "ending-shared" } } : scene)
+});
+assert.equal(issueCodes(core.analyzeRouteGraph(duplicateEndingProject).issues).includes("duplicate-ending-id"), true);
+
+const missingTargetProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-opening"
+    ? { ...scene, choices: scene.choices.map((choice) => choice.id === "choice-normal" ? { ...choice, next: "scene-missing-ending" } : choice) }
+    : scene)
+});
+const missingTargetAnalysis = core.analyzeRouteGraph(missingTargetProject);
+assert.equal(issueCodes(missingTargetAnalysis.issues).includes("missing-target"), true);
+assert.deepEqual(missingTargetAnalysis.missingTargets, [{ sourceSceneId: "scene-opening", targetSceneId: "scene-missing-ending", edgeType: "choice", choiceId: "choice-normal" }]);
+
+const invalidEndingParse = core.parseVnMakerScene({
+  ...manualBranchProject.scenes[1],
+  ending: { id: "ending-invalid", title: "잘못된 엔딩", kind: "special" }
+});
+assert.equal(invalidEndingParse.ok, false);
+assert.equal(invalidEndingParse.issues.some((issue) => issue.path === "ending.kind"), true);

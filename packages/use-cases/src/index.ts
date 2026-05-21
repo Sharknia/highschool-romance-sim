@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   DEFAULT_EMOTION_TAGS,
+  analyzeRouteGraph,
   buildProjectHtml,
   createAssetManifest,
   createDeterministicEventExpansionPlan,
@@ -29,9 +30,11 @@ import {
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
+  type VnMakerChoice,
   type VnMakerGenerationJob,
   type VnMakerProject,
-  type VnMakerScene
+  type VnMakerScene,
+  type VnMakerSceneEnding
 } from "@vn-maker/engine-core";
 import {
   createProjectWorkspace,
@@ -105,7 +108,7 @@ export interface ExpandNaturalLanguageEventInput {
 
 export type ExpandNaturalLanguageEventResult =
   | { ok: true; plan: EventExpansionPlan; validation: EventExpansionValidationResult; attempts: EventTextGenerationAttempt[]; rawOutput: unknown }
-  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown };
+  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown; validation?: EventExpansionValidationResult };
 
 export class InputValidationError extends Error {
   readonly issues: ValidationIssue[];
@@ -203,6 +206,136 @@ function tagsFrom(value: unknown): string[] {
   return [];
 }
 
+function slugId(value: string, fallback: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "") || fallback;
+}
+
+function uniqueSceneId(project: VnMakerProject, seed: string): string {
+  const used = new Set(project.scenes.map((scene) => scene.id));
+  const base = slugId(seed, "scene-new").startsWith("scene-")
+    ? slugId(seed, "scene-new")
+    : `scene-${slugId(seed, "new")}`;
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`scene id를 생성할 수 없습니다: ${base}`);
+}
+
+function uniqueChoiceId(scene: VnMakerScene, seed: string): string {
+  const used = new Set(scene.choices.map((choice) => choice.id));
+  const base = slugId(seed, "choice-new").startsWith("choice-")
+    ? slugId(seed, "choice-new")
+    : `choice-${scene.id}-${slugId(seed, "new")}`;
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`choice id를 생성할 수 없습니다: ${base}`);
+}
+
+function uniqueEndingId(project: VnMakerProject, sceneId: string): string {
+  const used = new Set(project.scenes.flatMap((scene) => scene.ending?.id ? [scene.ending.id] : []));
+  const base = `ending-${slugId(sceneId.replace(/^scene-/, ""), "scene")}`;
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`ending id를 생성할 수 없습니다: ${base}`);
+}
+
+function projectClone(project: VnMakerProject): VnMakerProject {
+  return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+}
+
+function manualInputError(message: string, path: string, sceneIds?: string[], choiceIds?: string[]): InputValidationError {
+  return new InputValidationError(message, [{ severity: "error", path, message }].map((issue) => ({
+    ...issue,
+    sceneIds,
+    choiceIds
+  } as ValidationIssue)));
+}
+
+function sceneFromInput(project: VnMakerProject, inputScene: unknown): VnMakerScene {
+  const record = asRecord(inputScene);
+  const candidate = {
+    ...record,
+    id: typeof record.id === "string" && record.id.trim()
+      ? record.id.trim()
+      : uniqueSceneId(project, String(record.label || record.text || "scene-new")),
+    label: typeof record.label === "string" ? record.label : "새 장면",
+    speaker: typeof record.speaker === "string" ? record.speaker : "",
+    text: typeof record.text === "string" ? record.text : "",
+    characters: Array.isArray(record.characters) ? record.characters : [],
+    choices: Array.isArray(record.choices) ? record.choices : []
+  };
+  if (project.scenes.some((scene) => scene.id === candidate.id)) {
+    candidate.id = uniqueSceneId(project, candidate.id);
+  }
+  return requireParsed(parseVnMakerScene(candidate), "scene");
+}
+
+function endingFromInput(project: VnMakerProject, sceneId: string, inputEnding: unknown): VnMakerSceneEnding | undefined {
+  if (inputEnding === null) {
+    return undefined;
+  }
+  const record = asRecord(inputEnding);
+  const candidate = {
+    id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : uniqueEndingId(project, sceneId),
+    title: typeof record.title === "string" ? record.title : "새 엔딩",
+    kind: typeof record.kind === "string" ? record.kind : "normal"
+  };
+  const parsed = parseVnMakerScene({
+    id: sceneId,
+    label: "ending validation",
+    speaker: "",
+    text: "",
+    characters: [],
+    choices: [],
+    ending: candidate
+  });
+  if (!parsed.ok) {
+    throw new InputValidationError("ending 입력이 올바르지 않습니다.", parsed.issues.map((issue) => ({
+      ...issue,
+      path: issue.path.replace(/^ending/, "ending")
+    })));
+  }
+  return candidate as VnMakerSceneEnding;
+}
+
+function manualMutationResult(store: ProjectStore, project: VnMakerProject, selectedSceneId: string) {
+  const savedProject = store.saveProject(project);
+  const validation = store.validateAndStore();
+  const routeGraphAnalysis = analyzeRouteGraph(savedProject);
+  return {
+    ok: true,
+    projectDirectory: store.paths.projectDirectory,
+    project: savedProject,
+    validation,
+    routeGraphAnalysis,
+    selectedSceneId
+  };
+}
+
 function cloneHeroineProfile(source: HeroineProfile, input: unknown): HeroineProfile {
   const record = asRecord(input);
   const newId = typeof record.newId === "string" && record.newId.trim()
@@ -286,22 +419,47 @@ function classifyValidationFailure(validation: EventExpansionValidationResult): 
     : "engine_validation_failed";
 }
 
+function isRecoverableEventTextSchemaError(error: unknown): boolean {
+  return error instanceof SyntaxError;
+}
+
+function eventTextErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function expandNaturalLanguageEvent(
   input: ExpandNaturalLanguageEventInput
 ): Promise<ExpandNaturalLanguageEventResult> {
   const maxAttempts = input.maxAttempts ?? 3;
   const attempts: EventTextGenerationAttempt[] = [];
   let rawOutput: unknown;
+  let lastValidation: EventExpansionValidationResult | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const candidate = input.adapter
-      ? await input.adapter.generateEventExpansionPlan({
-          project: input.project,
-          request: input.request,
-          attempt,
-          previousAttempts: attempts
-        })
-      : createDeterministicEventExpansionPlan(input.request);
+    let candidate: unknown;
+    try {
+      candidate = input.adapter
+        ? await input.adapter.generateEventExpansionPlan({
+            project: input.project,
+            request: input.request,
+            attempt,
+            previousAttempts: attempts
+          })
+        : createDeterministicEventExpansionPlan(input.request);
+    } catch (error) {
+      if (!isRecoverableEventTextSchemaError(error)) {
+        throw error;
+      }
+      const message = eventTextErrorMessage(error);
+      rawOutput = { error: message };
+      attempts.push({
+        attempt,
+        ok: false,
+        failureKind: "schema_invalid",
+        issues: [`eventText: ${message}`]
+      });
+      continue;
+    }
     rawOutput = candidate;
     const parsed = parseEventExpansionPlan(candidate);
 
@@ -317,6 +475,7 @@ export async function expandNaturalLanguageEvent(
 
     const validation = validateEventExpansionPlan(input.project, input.request, parsed.value);
     if (!validation.ok) {
+      lastValidation = validation;
       attempts.push({
         attempt,
         ok: false,
@@ -340,7 +499,8 @@ export async function expandNaturalLanguageEvent(
     ok: false,
     attempts,
     error: attempts.at(-1)?.issues.join(", ") || "자연어 이벤트 생성에 실패했습니다.",
-    rawOutput
+    rawOutput,
+    validation: lastValidation
   };
 }
 
@@ -566,6 +726,153 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       }
     },
 
+    async insertManualScene(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = projectClone(store.requireProject());
+        const route = project.routes[0];
+        if (!route) {
+          throw manualInputError("프로젝트에 route가 없습니다.", "routes");
+        }
+
+        const link = asRecord(record.link);
+        const linkType = typeof link.type === "string" ? link.type : "none";
+        if (!["none", "next", "choice"].includes(linkType)) {
+          throw manualInputError("link.type은 none, next, choice 중 하나여야 합니다.", "link.type");
+        }
+        if (linkType !== "none" && typeof record.sourceSceneId !== "string") {
+          throw manualInputError("sourceSceneId 입력이 필요합니다.", "sourceSceneId");
+        }
+
+        const sourceScene = typeof record.sourceSceneId === "string"
+          ? project.scenes.find((scene) => scene.id === record.sourceSceneId)
+          : undefined;
+        if (linkType !== "none" && !sourceScene) {
+          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [String(record.sourceSceneId || "")]);
+        }
+        if (sourceScene?.ending) {
+          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+        }
+
+        const scene = sceneFromInput(project, record.scene);
+        if (linkType === "next" && sourceScene) {
+          if (sourceScene.choices.length > 0) {
+            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          if (sourceScene.next && link.preservePreviousNext === true && !scene.ending && !scene.next) {
+            scene.next = sourceScene.next;
+          }
+          sourceScene.next = scene.id;
+        }
+        if (linkType === "choice" && sourceScene) {
+          if (sourceScene.next) {
+            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+          if (!choiceText) {
+            throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id]);
+          }
+          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+            ? link.choiceId.trim()
+            : uniqueChoiceId(sourceScene, choiceText);
+          const choice: VnMakerChoice = { id: choiceId, text: choiceText, next: scene.id };
+          sourceScene.choices.push(choice);
+        }
+
+        project.scenes.push(scene);
+        return manualMutationResult(store, project, scene.id);
+      } finally {
+        store.close();
+      }
+    },
+
+    async linkManualScene(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = projectClone(store.requireProject());
+        const sourceSceneId = String(record.sourceSceneId || "");
+        const targetSceneId = String(record.targetSceneId || "");
+        const sourceScene = project.scenes.find((scene) => scene.id === sourceSceneId);
+        const targetScene = project.scenes.find((scene) => scene.id === targetSceneId);
+        if (!sourceScene) {
+          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [sourceSceneId]);
+        }
+        if (!targetScene) {
+          throw manualInputError("연결할 target scene을 찾을 수 없습니다.", "targetSceneId", [targetSceneId]);
+        }
+        if (sourceScene.ending) {
+          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+        }
+
+        const link = asRecord(record.link);
+        const linkType = typeof link.type === "string" ? link.type : "next";
+        if (linkType === "next") {
+          if (sourceScene.choices.length > 0) {
+            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          sourceScene.next = targetScene.id;
+        } else if (linkType === "choice") {
+          if (sourceScene.next) {
+            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+            ? link.choiceId.trim()
+            : uniqueChoiceId(sourceScene, choiceText || targetScene.label);
+          const existingChoice = sourceScene.choices.find((choice) => choice.id === choiceId);
+          if (existingChoice) {
+            existingChoice.next = targetScene.id;
+            if (choiceText) {
+              existingChoice.text = choiceText;
+            }
+          } else {
+            if (!choiceText) {
+              throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id], [choiceId]);
+            }
+            sourceScene.choices.push({ id: choiceId, text: choiceText, next: targetScene.id });
+          }
+        } else {
+          throw manualInputError("link.type은 next 또는 choice여야 합니다.", "link.type", [sourceScene.id]);
+        }
+
+        return manualMutationResult(store, project, targetScene.id);
+      } finally {
+        store.close();
+      }
+    },
+
+    async setSceneEnding(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = projectClone(store.requireProject());
+        const sceneId = String(record.sceneId || "");
+        const scene = project.scenes.find((item) => item.id === sceneId);
+        if (!scene) {
+          throw manualInputError("엔딩을 설정할 scene을 찾을 수 없습니다.", "sceneId", [sceneId]);
+        }
+
+        if (record.ending === null) {
+          scene.ending = undefined;
+          return manualMutationResult(store, project, scene.id);
+        }
+
+        if ((scene.next || scene.choices.length > 0) && record.clearOutgoing !== true) {
+          throw manualInputError("엔딩으로 지정하려면 다음 장면이나 선택지를 제거해야 합니다.", "clearOutgoing", [scene.id]);
+        }
+        if (record.clearOutgoing === true) {
+          scene.next = undefined;
+          scene.choices = [];
+        }
+        scene.ending = endingFromInput(project, scene.id, record.ending);
+        return manualMutationResult(store, project, scene.id);
+      } finally {
+        store.close();
+      }
+    },
+
     async validateProject(input: unknown) {
       const projectInput = asRecord(input).project;
       if (projectInput !== undefined) {
@@ -628,10 +935,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         if (!route) {
           throw new Error("이벤트를 추가할 루트가 없습니다.");
         }
+        const afterSceneId = typeof record.afterSceneId === "string" && record.afterSceneId ? record.afterSceneId : route.entrySceneId;
+        const afterScene = project.scenes.find((scene) => scene.id === afterSceneId);
+        if (afterScene?.ending) {
+          throw new InputValidationError("엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다.", [{
+            severity: "error",
+            path: "afterSceneId",
+            message: "엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다."
+          }]);
+        }
         const request = createEventExpansionRequest(project, {
           projectDirectory: store.paths.projectDirectory,
           routeId: route.id,
-          afterSceneId: typeof record.afterSceneId === "string" && record.afterSceneId ? record.afterSceneId : route.entrySceneId,
+          afterSceneId,
           heroineId: typeof record.heroineId === "string" && record.heroineId ? record.heroineId : route.heroineId,
           userEvent: String(record.userEvent || record.prompt || ""),
           constraints: record.constraints && typeof record.constraints === "object"
@@ -640,15 +956,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         });
         const result = await expandNaturalLanguageEvent({ project, request, adapter: options.eventText });
         if (!result.ok) {
+          const validation = result.validation || {
+            ok: false,
+            issues: [{ severity: "error" as const, path: "eventText", message: result.error }]
+          };
           store.recordPatchHistory({
             status: "failed",
             summary: "자연어 이벤트 생성 실패",
             request,
             rawOutput: result.rawOutput,
             attempts: result.attempts,
-            validation: { ok: false, issues: [{ severity: "error", path: "eventText", message: result.error }] }
+            validation
           });
-          return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error };
+          return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error, validation };
         }
         const patchHistoryEntry = store.recordPatchHistory({
           status: "proposed",
@@ -694,8 +1014,16 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
+        const project = store.requireProject();
         const runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined);
-        return { ok: true, projectDirectory: store.paths.projectDirectory, runtime };
+        const routeGraphAnalysis = analyzeRouteGraph(project, typeof record.routeId === "string" ? record.routeId : undefined);
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          runtime,
+          validation: runtime.validation,
+          routeGraphAnalysis
+        };
       } finally {
         store.close();
       }

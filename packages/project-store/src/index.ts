@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
+  analyzeRouteGraph,
   buildPlayerRuntimeScript,
   buildProjectHtml,
   applyGenerationResultToProject,
@@ -138,8 +139,13 @@ export interface WebExportSmokeTestResult {
     choice: boolean;
     choiceNavigation: boolean;
     cg: boolean;
+    branchEndingCoverage: boolean;
+    endingMetadata: boolean;
   };
   issues: string[];
+  reachableEndingIds?: string[];
+  uncoveredTerminalSceneIds?: string[];
+  cyclesWithoutEndingPath?: string[][];
 }
 
 interface ProjectRow {
@@ -209,6 +215,7 @@ interface SceneRow {
   characters_json: string;
   choices_json: string;
   next_scene_id: string | null;
+  ending_json: string | null;
   condition_json: string | null;
   memory_tags_json: string | null;
   position: number;
@@ -433,6 +440,13 @@ CREATE TABLE IF NOT EXISTS patch_history (
 
 CREATE INDEX IF NOT EXISTS idx_patch_history_project_created ON patch_history(project_id, created_at);
 `
+  },
+  {
+    id: 4,
+    name: "scene_level_ending",
+    sql: `
+ALTER TABLE scenes ADD COLUMN ending_json TEXT;
+`
   }
 ] as const;
 
@@ -511,6 +525,16 @@ function statementList(sql: string): string[] {
   return sql.split(";").map((statement) => statement.trim()).filter(Boolean);
 }
 
+function columnExists(db: Database.Database, tableName: string, columnName: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === columnName);
+}
+
+function shouldSkipMigrationStatement(db: Database.Database, statement: string): boolean {
+  const addColumn = statement.match(/^ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+ADD COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\b/i);
+  return Boolean(addColumn && columnExists(db, addColumn[1], addColumn[2]));
+}
+
 export function resolveProjectWorkspacePaths(projectDirectory: string): ProjectWorkspacePaths {
   const root = isAbsolute(projectDirectory) ? projectDirectory : resolve(projectDirectory);
   const assetsDirectory = join(root, "assets");
@@ -555,6 +579,9 @@ CREATE TABLE IF NOT EXISTS migrations (
 
     const runMigration = db.transaction(() => {
       for (const statement of statementList(migration.sql)) {
+        if (shouldSkipMigrationStatement(db, statement)) {
+          continue;
+        }
         db.prepare(statement).run();
       }
       insertMigration.run(migration.id, migration.name, nowIso());
@@ -637,7 +664,7 @@ ORDER BY position ASC, id ASC
 `).all(project.id) as RouteRow[];
 
     const scenes = this.db.prepare(`
-SELECT id, label, speaker, text, background_asset_id, cg_asset_id, characters_json, choices_json, next_scene_id, condition_json, memory_tags_json, position
+SELECT id, label, speaker, text, background_asset_id, cg_asset_id, characters_json, choices_json, next_scene_id, ending_json, condition_json, memory_tags_json, position
 FROM scenes
 WHERE project_id = ?
 ORDER BY position ASC, id ASC
@@ -697,6 +724,7 @@ ORDER BY position ASC, id ASC
         characters: parseJson<VnMakerScene["characters"]>(row.characters_json, []),
         choices: parseJson<VnMakerScene["choices"]>(row.choices_json, []),
         next: row.next_scene_id || undefined,
+        ending: parseJson<VnMakerScene["ending"] | undefined>(row.ending_json, undefined),
         condition: parseJson<VnMakerScene["condition"] | undefined>(row.condition_json, undefined),
         memoryTags: parseJson<VnMakerScene["memoryTags"] | undefined>(row.memory_tags_json, undefined)
       })),
@@ -910,11 +938,11 @@ VALUES (@projectId, @id, @title, @heroineId, @summary, @entrySceneId, @endingsJs
       const insertScene = this.db.prepare(`
 INSERT INTO scenes (
   project_id, id, label, speaker, text, background_asset_id, cg_asset_id,
-  characters_json, choices_json, next_scene_id, condition_json, memory_tags_json, position
+  characters_json, choices_json, next_scene_id, ending_json, condition_json, memory_tags_json, position
 )
 VALUES (
   @projectId, @id, @label, @speaker, @text, @backgroundAssetId, @cgAssetId,
-  @charactersJson, @choicesJson, @nextSceneId, @conditionJson, @memoryTagsJson, @position
+  @charactersJson, @choicesJson, @nextSceneId, @endingJson, @conditionJson, @memoryTagsJson, @position
 )
 `);
       project.scenes.forEach((scene, position) => insertScene.run({
@@ -928,6 +956,7 @@ VALUES (
         charactersJson: json(scene.characters),
         choicesJson: json(scene.choices),
         nextSceneId: normalizeNullable(scene.next),
+        endingJson: scene.ending ? json(scene.ending) : null,
         conditionJson: scene.condition ? json(scene.condition) : null,
         memoryTagsJson: scene.memoryTags ? json(scene.memoryTags) : null,
         position
@@ -1345,9 +1374,14 @@ export async function smokeTestWebExport(outputDirectory: string): Promise<WebEx
     portrait: false,
     choice: false,
     choiceNavigation: false,
-    cg: false
+    cg: false,
+    branchEndingCoverage: false,
+    endingMetadata: false
   };
   const issues: string[] = [];
+  let reachableEndingIds: string[] = [];
+  let uncoveredTerminalSceneIds: string[] = [];
+  let cyclesWithoutEndingPath: string[][] = [];
 
   try {
     const [indexHtml, runtimeScript, projectDataRaw] = await Promise.all([
@@ -1377,6 +1411,56 @@ export async function smokeTestWebExport(outputDirectory: string): Promise<WebEx
         }
       }
     }
+
+    const routeId = runtime.routeId || "runtime-route";
+    const routeGraphProject: VnMakerProject = {
+      version: "vn-maker/v1",
+      id: runtime.projectId || "runtime-project",
+      title: runtime.title || "Runtime Project",
+      premise: runtime.premise || "",
+      characters: [],
+      routes: [
+        {
+          id: routeId,
+          title: "Runtime Route",
+          heroineId: "",
+          summary: "",
+          entrySceneId: runtime.startSceneId,
+          endings: []
+        }
+      ],
+      scenes: scenes.map((scene) => ({
+        id: scene.id,
+        label: scene.label,
+        speaker: scene.speaker,
+        text: scene.text,
+        characters: [],
+        choices: scene.choices || [],
+        next: scene.next,
+        ending: scene.ending,
+        backgroundAssetId: scene.backgroundAsset?.id,
+        cgAssetId: scene.cgAsset?.id
+      })),
+      assets: runtime.assets || [],
+      generationJobs: [],
+      settings: {
+        defaultRouteId: routeId,
+        outputFileName: "index.html",
+        language: "ko"
+      }
+    };
+    const routeGraph = analyzeRouteGraph(routeGraphProject, routeId);
+    reachableEndingIds = routeGraph.reachableEndingIds;
+    uncoveredTerminalSceneIds = routeGraph.uncoveredTerminalSceneIds;
+    cyclesWithoutEndingPath = routeGraph.cyclesWithoutEndingPath;
+    const reachableEndingScenes = scenes.filter((scene) => routeGraph.reachableSceneIds.includes(scene.id) && scene.ending);
+    checks.endingMetadata = reachableEndingScenes.length > 0 && reachableEndingScenes.every((scene) => Boolean(scene.ending?.id && scene.ending.title && scene.ending.kind));
+    checks.branchEndingCoverage = checks.endingMetadata
+      && reachableEndingIds.length > 0
+      && uncoveredTerminalSceneIds.length === 0
+      && cyclesWithoutEndingPath.length === 0
+      && routeGraph.missingTargets.length === 0
+      && routeGraph.issues.every((issue) => issue.severity !== "error");
   } catch (error) {
     issues.push(error instanceof Error ? error.message : String(error));
   }
@@ -1390,7 +1474,10 @@ export async function smokeTestWebExport(outputDirectory: string): Promise<WebEx
   return {
     ok: issues.length === 0,
     checks,
-    issues
+    issues,
+    reachableEndingIds,
+    uncoveredTerminalSceneIds,
+    cyclesWithoutEndingPath
   };
 }
 

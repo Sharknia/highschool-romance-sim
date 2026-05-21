@@ -199,7 +199,7 @@ assert.match(replacedBatch.assets[0].uri, /^data:image\/png;base64,/);
 
 const expanded = await useCases.expandEvent({
   projectDirectory,
-  userEvent: "축제 전날 하루가 도서관에서 대본을 떨어트리고 당황하는 짧은 이벤트"
+  userEvent: "축제 전날 하루가 도서관에서 대본을 떨어트리고 당황한 뒤 노멀 엔딩으로 끝나는 짧은 이벤트"
 });
 assert.equal(expanded.ok, true);
 assert.equal(Boolean(expanded.patchHistoryEntry?.id), true);
@@ -251,7 +251,7 @@ assert.equal(historyAfterUndo.entries.some((entry) => entry.id === appliedEntry.
 
 const secondExpanded = await useCases.expandEvent({
   projectDirectory,
-  userEvent: "되돌린 뒤 하루가 축제 포스터 문구를 다시 고르는 짧은 이벤트"
+  userEvent: "되돌린 뒤 하루가 축제 포스터 문구를 다시 고르고 노멀 엔딩으로 끝나는 짧은 이벤트"
 });
 assert.equal(secondExpanded.ok, true);
 const secondApproved = await useCases.approveEvent({
@@ -333,12 +333,12 @@ const apiExpand = await mockApi({
   path: "/api/events/expand",
   body: {
     projectDirectory,
-    userEvent: "브라우저 기본 패치 경로가 Codex 텍스트 turn 없이 검증 가능한 패치를 만든다."
+    userEvent: "브라우저 기본 패치 경로가 Codex 텍스트 어댑터를 통해 검증 가능한 노멀 엔딩 패치를 만든다."
   }
 });
 assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.ok, true);
-assert.equal(codexTextCalls, 0);
+assert.equal(codexTextCalls, 1);
 
 const cliJobsOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "list-generation-jobs"], {
   input: JSON.stringify({ projectDirectory }),

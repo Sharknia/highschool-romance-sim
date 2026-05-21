@@ -122,9 +122,12 @@ class ApiServices {
 
   constructor(options: ApiHandlerOptions = {}) {
     this.codex = options.codex || createDefaultCodexAdapter();
+    const eventText = options.eventText || (this.codex.generateEventExpansionPlan
+      ? { generateEventExpansionPlan: (input: Parameters<EventTextGenerationAdapter["generateEventExpansionPlan"]>[0]) => this.codex.generateEventExpansionPlan!(input) }
+      : undefined);
     this.useCases = createVnMakerUseCases({
       defaultProjectDirectory: options.projectDirectory || getDefaultProjectDirectory(),
-      eventText: options.eventText,
+      eventText,
       image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) }
     });
   }
@@ -181,6 +184,18 @@ class ApiServices {
 
   saveScene(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.saveScene(body);
+  }
+
+  insertManualScene(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.insertManualScene(body);
+  }
+
+  linkManualScene(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.linkManualScene(body);
+  }
+
+  setSceneEnding(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.setSceneEnding(body);
   }
 
   validateProject(body: unknown): Promise<Record<string, unknown>> {
@@ -263,6 +278,9 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/projects/from-heroine", (context) => jsonBodyRoute(context, (body) => services.createProjectFromHeroine(body)));
   app.post("/api/project/characters", (context) => jsonBodyRoute(context, (body) => services.saveCharacter(body)));
   app.post("/api/project/scenes", (context) => jsonBodyRoute(context, (body) => services.saveScene(body)));
+  app.post("/api/project/scenes/insert", (context) => jsonBodyRoute(context, (body) => services.insertManualScene(body)));
+  app.post("/api/project/scenes/link", (context) => jsonBodyRoute(context, (body) => services.linkManualScene(body)));
+  app.post("/api/project/scenes/ending", (context) => jsonBodyRoute(context, (body) => services.setSceneEnding(body)));
   app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body)));
   app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
   app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));

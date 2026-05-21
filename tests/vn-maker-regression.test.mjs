@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,7 +17,13 @@ const projectDirectory = join(tempRoot, "TestGame.vnmaker");
 const starterOnlyProjectDirectory = join(tempRoot, "StarterOnly.vnmaker");
 const alphaDirectory = join(tempRoot, "AlphaHeroine.vnmaker");
 const cliExpansionDirectory = join(tempRoot, "CliExpansion.vnmaker");
+const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
+const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
+const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
+const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
+const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
+const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
 
 const project = core.createStarterProject({
   id: "test-project",
@@ -52,9 +58,11 @@ assert.match(htmlArtifact.html, /application\/json/);
 const store = await projectStore.createProjectWorkspace({ projectDirectory, project });
 assert.equal(existsSync(join(projectDirectory, "project.sqlite")), true);
 assert.equal(existsSync(join(projectDirectory, "assets", "generated")), true);
+assert.equal(store.requireProject().scenes.find((scene) => scene.id === "scene-haru-smile").ending.id, "ending-default");
 
 const exportedProject = store.exportProjectSnapshot();
 assert.equal(exportedProject.id, project.id);
+assert.equal(exportedProject.scenes.find((scene) => scene.id === "scene-haru-smile").ending.title, "기본 엔딩");
 
 const secondCharacter = {
   id: "mira",
@@ -100,6 +108,7 @@ const cliOpenOutput = execFileSync(process.execPath, ["packages/cli/dist/index.j
 const cliOpen = JSON.parse(cliOpenOutput);
 assert.equal(cliOpen.ok, true);
 assert.equal(cliOpen.project.characters.some((character) => character.id === "mira"), true);
+assert.equal(cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.kind, "normal");
 
 const cliSaveSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
@@ -115,6 +124,20 @@ const cliSaveScene = JSON.parse(cliSaveSceneOutput);
 assert.equal(cliSaveScene.ok, true);
 assert.match(cliSaveScene.project.scenes[0].text, /CLI가 같은 SQLite 프로젝트/);
 
+const cliSaveEndingSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+  input: JSON.stringify({
+    projectDirectory,
+    scene: {
+      ...cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
+      text: "CLI가 ending metadata를 포함한 장면을 저장했다."
+    }
+  }),
+  encoding: "utf8"
+});
+const cliSaveEndingScene = JSON.parse(cliSaveEndingSceneOutput);
+assert.equal(cliSaveEndingScene.ok, true);
+assert.equal(cliSaveEndingScene.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.id, "ending-default");
+
 const apiValidation = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/project/validate",
@@ -129,14 +152,15 @@ const apiScene = await webHandlers.handleApiRequest({
   body: {
     projectDirectory,
     scene: {
-      ...cliSaveScene.project.scenes[0],
-      text: "Web API가 같은 SQLite 프로젝트에 저장한 장면."
+      ...cliSaveEndingScene.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
+      text: "Web API가 ending metadata를 포함한 장면을 저장했다."
     }
   }
 });
 assert.equal(apiScene.status, 200);
 assert.equal(apiScene.body.ok, true);
-assert.match(apiScene.body.project.scenes[0].text, /Web API가 같은 SQLite 프로젝트/);
+assert.match(apiScene.body.project.scenes.find((scene) => scene.id === "scene-haru-smile").text, /Web API가 ending metadata/);
+assert.equal(apiScene.body.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.title, "기본 엔딩");
 
 const apiJob = await webHandlers.handleApiRequest({
   method: "POST",
@@ -173,6 +197,283 @@ const apiStarterOnlyJob = await webHandlers.handleApiRequest({
 assert.equal(apiStarterOnlyJob.status, 200);
 assert.equal(apiStarterOnlyJob.body.ok, true);
 assert.equal(apiStarterOnlyJob.body.project.id, "starter-only");
+
+const manualCliCreateOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-project-from-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    heroine: {
+      id: "haru-manual",
+      name: "하루",
+      description: "수동 제작 테스트 히로인.",
+      personality: "차분하다.",
+      speechStyle: "조심스러운 말투.",
+      appearance: "단정한 교복."
+    },
+    title: "Manual CLI API",
+    premise: "CLI와 API가 같은 수동 제작 use-case를 호출한다."
+  }),
+  encoding: "utf8"
+});
+const manualCliCreate = JSON.parse(manualCliCreateOutput);
+assert.equal(manualCliCreate.ok, true);
+const manualCliOpeningId = manualCliCreate.project.routes[0].entrySceneId;
+
+execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    scene: {
+      ...manualCliCreate.project.scenes.find((scene) => scene.id === manualCliOpeningId),
+      next: undefined
+    }
+  }),
+  encoding: "utf8"
+});
+
+const manualCliInsertOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "insert-scene"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    sourceSceneId: manualCliOpeningId,
+    link: { type: "choice", choiceId: "choice-good", choiceText: "고백한다" },
+    scene: {
+      id: "scene-cli-good-ending",
+      label: "CLI 굿 엔딩",
+      speaker: "하루",
+      text: "함께 완성하자.",
+      characters: [],
+      choices: []
+    }
+  }),
+  encoding: "utf8"
+});
+const manualCliInsert = JSON.parse(manualCliInsertOutput);
+assert.equal(manualCliInsert.ok, true);
+assert.equal(manualCliInsert.selectedSceneId, "scene-cli-good-ending");
+
+const manualCliEndingOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "set-scene-ending"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    sceneId: "scene-cli-good-ending",
+    ending: { id: "ending-cli-good", title: "CLI의 약속", kind: "good" }
+  }),
+  encoding: "utf8"
+});
+const manualCliEnding = JSON.parse(manualCliEndingOutput);
+assert.equal(manualCliEnding.ok, true);
+assert.equal(manualCliEnding.routeGraphAnalysis.reachableEndingIds.includes("ending-cli-good"), true);
+
+const manualApiInsert = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/insert",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    link: { type: "none" },
+    scene: {
+      id: "scene-api-normal-ending",
+      label: "API 노멀 엔딩",
+      speaker: "하루",
+      text: "다음 작품도 만들자.",
+      characters: [],
+      choices: [],
+      ending: { id: "ending-api-normal", title: "API의 다음 작품", kind: "normal" }
+    }
+  }
+});
+assert.equal(manualApiInsert.status, 200);
+assert.equal(manualApiInsert.body.ok, true);
+
+const manualApiLink = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/link",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    sourceSceneId: manualCliOpeningId,
+    targetSceneId: "scene-api-normal-ending",
+    link: { type: "choice", choiceId: "choice-normal", choiceText: "전시를 마무리한다" }
+  }
+});
+assert.equal(manualApiLink.status, 200);
+assert.equal(manualApiLink.body.ok, true);
+assert.deepEqual(manualApiLink.body.routeGraphAnalysis.uncoveredTerminalSceneIds, []);
+assert.deepEqual([...manualApiLink.body.routeGraphAnalysis.reachableEndingIds].sort(), ["ending-api-normal", "ending-cli-good"]);
+
+const manualApiMissingTarget = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/link",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    sourceSceneId: manualCliOpeningId,
+    targetSceneId: "scene-does-not-exist",
+    link: { type: "choice", choiceText: "없는 장면으로 간다" }
+  }
+});
+assert.equal(manualApiMissingTarget.status, 400);
+assert.match(manualApiMissingTarget.body.error, /target scene을 찾을 수 없습니다/);
+
+const manualApiEndingFailure = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/ending",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    sceneId: manualCliOpeningId,
+    ending: { id: "ending-api-bad", title: "갑작스런 끝", kind: "bad" },
+    clearOutgoing: false
+  }
+});
+assert.equal(manualApiEndingFailure.status, 400);
+assert.match(manualApiEndingFailure.body.error, /다음 장면이나 선택지를 제거해야 합니다/);
+
+const manualApiExpandAfterEnding = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/events/expand",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    routeId: manualCliCreate.project.routes[0].id,
+    afterSceneId: "scene-cli-good-ending",
+    heroineId: "haru-manual",
+    userEvent: "엔딩 뒤에 도서관 이벤트를 추가해줘."
+  }
+});
+assert.equal(manualApiExpandAfterEnding.status, 400);
+assert.match(manualApiExpandAfterEnding.body.error, /엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다/);
+
+const manualCliExpandAfterEnding = spawnSync(process.execPath, ["packages/cli/dist/index.js", "expand-event"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    routeId: manualCliCreate.project.routes[0].id,
+    afterSceneId: "scene-cli-good-ending",
+    heroineId: "haru-manual",
+    userEvent: "엔딩 뒤에 도서관 이벤트를 추가해줘."
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(manualCliExpandAfterEnding.status, 0);
+const manualCliExpandAfterEndingBody = JSON.parse(manualCliExpandAfterEnding.stdout);
+assert.equal(manualCliExpandAfterEndingBody.ok, false);
+assert.match(manualCliExpandAfterEndingBody.error, /엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다/);
+
+const branchHeroine = core.createHeroineProfile({
+  id: "haru-branch",
+  name: "하루",
+  description: "분기별 엔딩 export 테스트 히로인.",
+  personality: "침착하지만 선택 앞에서는 솔직하다.",
+  speechStyle: "담백한 말투.",
+  appearance: "단정한 교복과 연분홍 머리핀."
+});
+const createBranchEndingProject = (id) => {
+  const branchProject = core.createProjectFromHeroine({
+    id,
+    title: `Branch Ending ${id}`,
+    premise: "두 선택지가 각자 명시적 엔딩으로 도달한다.",
+    heroine: branchHeroine
+  });
+  const opening = branchProject.scenes.find((scene) => scene.id === "scene-haru-branch-opening");
+  const defaultEnding = branchProject.scenes.find((scene) => scene.id === "scene-haru-branch-default-ending");
+  opening.next = undefined;
+  opening.choices = [
+    { id: "choice-good", text: "고백한다", next: "scene-good-ending" },
+    { id: "choice-normal", text: "전시를 마무리한다", next: "scene-normal-ending" }
+  ];
+  defaultEnding.id = "scene-good-ending";
+  defaultEnding.label = "굿 엔딩";
+  defaultEnding.text = "문화제가 끝나도 함께 만들기로 했다.";
+  defaultEnding.cgAssetId = "asset-branch-cg";
+  defaultEnding.ending = { id: "ending-good", title: "문화제의 약속", kind: "good" };
+  branchProject.scenes.push({
+    id: "scene-normal-ending",
+    label: "노멀 엔딩",
+    speaker: "하루",
+    text: "오늘의 전시를 조용히 마무리했다.",
+    characters: [{ characterId: "haru-branch", expression: "normal", assetId: "asset-haru-branch-portrait", position: "center" }],
+    choices: [],
+    ending: { id: "ending-normal", title: "다음 작품으로", kind: "normal" }
+  });
+  branchProject.assets.push({ id: "asset-branch-cg", kind: "cg", label: "문화제 CG", source: "placeholder" });
+  return branchProject;
+};
+
+const branchEndingProject = createBranchEndingProject("branch-ending-export");
+const branchEndingStore = await projectStore.createProjectWorkspace({
+  projectDirectory: branchEndingDirectory,
+  project: branchEndingProject
+});
+const branchExport = await branchEndingStore.exportWebPlayer(join(tempRoot, "branch-ending-export"));
+assert.equal(branchExport.smoke.ok, true);
+assert.equal(branchExport.smoke.checks.branchEndingCoverage, true);
+assert.equal(branchExport.smoke.checks.endingMetadata, true);
+assert.deepEqual([...branchExport.smoke.reachableEndingIds].sort(), ["ending-good", "ending-normal"]);
+assert.deepEqual(branchExport.smoke.uncoveredTerminalSceneIds, []);
+assert.deepEqual(branchExport.smoke.cyclesWithoutEndingPath, []);
+const branchRuntimeScript = readFileSync(branchExport.export.runtimeScriptPath, "utf8");
+assert.match(branchRuntimeScript, /엔딩:/);
+assert.match(branchRuntimeScript, /처음부터 다시/);
+assert.match(branchRuntimeScript, /vn-ending/);
+branchEndingStore.close();
+
+await esbuild({
+  entryPoints: ["apps/web/src/client/components/SceneWorkbench.tsx"],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  outfile: bundledSceneWorkbenchPath
+});
+const sceneWorkbench = await import(pathToFileURL(bundledSceneWorkbenchPath).href);
+const branchUiSummary = sceneWorkbench.createRouteCompletionSummary(branchEndingProject, branchEndingProject.routes[0].id);
+assert.equal(branchUiSummary.endingCount, 2);
+assert.equal(branchUiSummary.openBranchCount, 0);
+assert.deepEqual([...branchUiSummary.reachableEndingIds].sort(), ["ending-good", "ending-normal"]);
+assert.equal(branchUiSummary.routeRows[0].sceneId, "scene-haru-branch-opening");
+assert.equal(branchUiSummary.routeRows.some((row) => row.parentSceneId === "scene-haru-branch-opening" && row.viaChoiceId === "choice-good"), true);
+assert.equal(sceneWorkbench.selectSceneOptions(branchEndingProject).some((option) => option.value === "scene-normal-ending"), true);
+const blankSceneDraft = sceneWorkbench.createBlankSceneDraft(branchEndingProject, "scene-good-ending");
+assert.equal(blankSceneDraft.id.startsWith("scene-good-ending-next"), true);
+assert.equal(blankSceneDraft.choices.length, 0);
+const openingActionState = sceneWorkbench.sceneActionState(branchEndingProject.scenes.find((scene) => scene.id === "scene-haru-branch-opening"));
+assert.equal(openingActionState.canAddNextScene, false);
+assert.match(openingActionState.nextSceneDisabledReason, /선택지가 있는 장면/);
+const goodEndingActionState = sceneWorkbench.sceneActionState(branchEndingProject.scenes.find((scene) => scene.id === "scene-good-ending"));
+assert.equal(goodEndingActionState.endingStatusTone, "neutral");
+assert.match(goodEndingActionState.endingStatusMessage, /엔딩 씬입니다/);
+const missingTargetOptions = sceneWorkbench.selectSceneTargetOptions(branchEndingProject, "scene-good-ending", "scene-missing");
+assert.equal(missingTargetOptions[0].value, "scene-missing");
+assert.equal(missingTargetOptions[0].missing, true);
+const workspacePageSource = readFileSync("apps/web/src/client/pages/WorkspacePage.tsx", "utf8");
+assert.match(workspacePageSource, /패치가 현재 프로젝트의 최신 상태를 기준으로 하지 않습니다\. 다시 제안받아 주세요\./);
+assert.match(workspacePageSource, /setWorkspaceStatus\(`\$\{label\} 실패: \$\{message\}`\)/);
+
+const branchTerminalFailureProject = createBranchEndingProject("branch-terminal-failure");
+delete branchTerminalFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending").ending;
+const branchTerminalFailureStore = await projectStore.createProjectWorkspace({
+  projectDirectory: branchTerminalFailureDirectory,
+  project: branchTerminalFailureProject
+});
+await assert.rejects(
+  () => branchTerminalFailureStore.exportWebPlayer(join(tempRoot, "branch-terminal-failure-export")),
+  /엔딩 없이 끝납니다|검증 실패 프로젝트/
+);
+branchTerminalFailureStore.close();
+
+const branchCycleFailureProject = createBranchEndingProject("branch-cycle-failure");
+const cycleScene = branchCycleFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending");
+delete cycleScene.ending;
+cycleScene.next = "scene-cycle-loop";
+branchCycleFailureProject.scenes.push({
+  id: "scene-cycle-loop",
+  label: "순환 장면",
+  speaker: "하루",
+  text: "결말 없이 같은 고민으로 돌아온다.",
+  characters: [{ characterId: "haru-branch", expression: "normal", assetId: "asset-haru-branch-portrait", position: "center" }],
+  choices: [],
+  next: "scene-normal-ending"
+});
+const branchCycleFailureStore = await projectStore.createProjectWorkspace({
+  projectDirectory: branchCycleFailureDirectory,
+  project: branchCycleFailureProject
+});
+await assert.rejects(
+  () => branchCycleFailureStore.exportWebPlayer(join(tempRoot, "branch-cycle-failure-export")),
+  /순환합니다|검증 실패 프로젝트/
+);
+branchCycleFailureStore.close();
 
 const sampleImageBase64 = Buffer.from("fake image").toString("base64");
 const codexImageResult = await codexGeneration.createCodexImageAssetResult(
@@ -312,7 +613,7 @@ const eventRequest = core.createEventExpansionRequest(alphaStore.requireProject(
   routeId: alphaStore.requireProject().routes[0].id,
   afterSceneId: alphaStore.requireProject().scenes[0].id,
   heroineId: "haru",
-  userEvent: "하루와 도서관에서 있던 일이야. 하루가 책을 떨어트리고, 내가 책을 주워주려다가 두 사람의 손이 겹쳐. 둘 다 당황해서 어색해지는 짧은 러브코미디 이벤트로 만들어줘. 씬은 3개, CG는 1개만 만들어줘.",
+  userEvent: "하루와 도서관에서 있던 일이야. 하루가 책을 떨어트리고, 내가 책을 주워주려다가 두 사람의 손이 겹쳐. 둘 다 당황해서 어색해지는 짧은 러브코미디 이벤트로 만들고 노멀 엔딩으로 끝내줘. 씬은 3개, CG는 1개만 만들어줘.",
   constraints: {
     maxScenes: 3,
     maxChoices: 1,
@@ -322,6 +623,51 @@ const eventRequest = core.createEventExpansionRequest(alphaStore.requireProject(
     contentRating: "teen"
   }
 });
+const nonExplicitEndingRequest = core.createEventExpansionRequest(alphaStore.requireProject(), {
+  projectDirectory: alphaDirectory,
+  routeId: alphaStore.requireProject().routes[0].id,
+  afterSceneId: alphaStore.requireProject().scenes[0].id,
+  heroineId: "haru",
+  userEvent: "도서관에서 전시를 마무리하는 짧은 이벤트를 추가해줘.",
+  constraints: {
+    maxScenes: 3,
+    maxChoices: 1,
+    maxCgCount: 1,
+    allowNewExpressionAssets: false,
+    language: "ko",
+    contentRating: "teen"
+  }
+});
+const nonExplicitEndingPlan = core.createDeterministicEventExpansionPlan(nonExplicitEndingRequest);
+const nonExplicitFinalSceneOperation = nonExplicitEndingPlan.patch.operations.filter((operation) => operation.type === "addScene").at(-1);
+assert.equal(nonExplicitFinalSceneOperation.scene.ending, undefined);
+const nonExplicitEndingValidation = core.validateEventExpansionPlan(alphaStore.requireProject(), nonExplicitEndingRequest, nonExplicitEndingPlan);
+assert.equal(nonExplicitEndingValidation.ok, false);
+assert.equal(nonExplicitEndingValidation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
+
+const deterministicApi = webHandlers.createApiRequestHandler({
+  eventText: {
+    async generateEventExpansionPlan({ request }) {
+      return core.createDeterministicEventExpansionPlan(request);
+    }
+  }
+});
+const nonExplicitApiExpand = await deterministicApi({
+  method: "POST",
+  path: "/api/events/expand",
+  body: {
+    projectDirectory: alphaDirectory,
+    routeId: nonExplicitEndingRequest.routeId,
+    afterSceneId: nonExplicitEndingRequest.afterSceneId,
+    heroineId: nonExplicitEndingRequest.heroineId,
+    userEvent: nonExplicitEndingRequest.userEvent
+  }
+});
+assert.equal(nonExplicitApiExpand.status, 200);
+assert.equal(nonExplicitApiExpand.body.ok, false);
+assert.equal(nonExplicitApiExpand.body.validation.ok, false);
+assert.equal(nonExplicitApiExpand.body.validation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
+
 const badEventPlan = {
   ...core.createDeterministicEventExpansionPlan(eventRequest),
   decision: {
@@ -333,7 +679,7 @@ const badEventPlan = {
 };
 const badPatchValidation = core.validateEventExpansionPlan(alphaStore.requireProject(), eventRequest, badEventPlan);
 assert.equal(badPatchValidation.ok, false);
-assert.equal(alphaStore.requireProject().scenes.length, 1);
+assert.equal(alphaStore.requireProject().scenes.length, 2);
 
 assert.equal("expandNaturalLanguageEvent" in codexGeneration, false);
 const generatedEvent = await useCasesModule.expandNaturalLanguageEvent({
@@ -355,6 +701,24 @@ assert.equal(generatedEvent.plan.decision.choiceCount, 1);
 assert.equal(generatedEvent.plan.decision.cgCount, 1);
 assert.match(core.describeProjectPatch(generatedEvent.plan.patch).text, /CG 작업/);
 
+const recoveredAfterMalformedJson = await useCasesModule.expandNaturalLanguageEvent({
+  project: alphaStore.requireProject(),
+  request: eventRequest,
+  maxAttempts: 2,
+  adapter: {
+    async generateEventExpansionPlan({ attempt }) {
+      if (attempt === 1) {
+        throw new SyntaxError("Unexpected token '`', ```json is not valid JSON");
+      }
+      return core.createDeterministicEventExpansionPlan(eventRequest);
+    }
+  }
+});
+assert.equal(recoveredAfterMalformedJson.ok, true);
+assert.equal(recoveredAfterMalformedJson.attempts[0].failureKind, "schema_invalid");
+assert.match(recoveredAfterMalformedJson.attempts[0].issues[0], /JSON/);
+assert.equal(recoveredAfterMalformedJson.attempts[1].ok, true);
+
 const apiExpand = await mockApi({
   method: "POST",
   path: "/api/events/expand",
@@ -369,8 +733,8 @@ const apiExpand = await mockApi({
 assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.plan.decision.sceneCount, 3);
 assert.equal(apiExpand.body.validation.ok, true);
-assert.equal(alphaStore.requireProject().scenes.length, 1);
-assert.equal(mockCodexTextCalls, 0);
+assert.equal(alphaStore.requireProject().scenes.length, 2);
+assert.equal(mockCodexTextCalls, 1);
 
 const apiApprove = await mockApi({
   method: "POST",
@@ -383,7 +747,7 @@ const apiApprove = await mockApi({
 });
 assert.equal(apiApprove.status, 200);
 assert.equal(apiApprove.body.validation.ok, true);
-assert.equal(apiApprove.body.project.scenes.length, 4);
+assert.equal(apiApprove.body.project.scenes.length, 5);
 
 const approvedProject = apiApprove.body.project;
 const plannedCgJob = approvedProject.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
@@ -441,19 +805,25 @@ assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.id === pla
 const cliBundle = readFileSync("packages/cli/dist/index.js", "utf8");
 assert.match(cliBundle, /createVnMakerUseCases/);
 assert.match(cliBundle, /useCases\.expandEvent/);
+assert.match(cliBundle, /generateEventExpansionPlan/);
 assert.doesNotMatch(cliBundle, /expandNaturalLanguageEvent/);
 
 const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "expand-event"], {
   input: JSON.stringify({
     projectDirectory: cliExpansionDirectory,
-    starter: {
+    project: core.createProjectFromHeroine({
       id: "cli-expansion",
       title: "CLI Expansion",
-      premise: "CLI가 공통 expansion use case를 호출하는 회귀 테스트"
-    },
-    userEvent: "방과 후 복도에서 우연히 마주치는 짧은 이벤트"
+      premise: "CLI가 공통 expansion use case를 호출하는 회귀 테스트",
+      heroine: haruHeroine
+    }),
+    routeId: "haru-route",
+    afterSceneId: "scene-haru-opening",
+    heroineId: "haru",
+    userEvent: "방과 후 복도에서 우연히 마주치고 노멀 엔딩으로 끝나는 짧은 이벤트"
   }),
-  encoding: "utf8"
+  encoding: "utf8",
+  env: { ...process.env, VN_MAKER_EVENT_TEXT_ADAPTER: "deterministic" }
 });
 const cliExpand = JSON.parse(cliExpandOutput);
 assert.equal(cliExpand.ok, true);
@@ -489,6 +859,28 @@ assert.equal(emptyLoginResponse.ok, false);
 assert.equal(emptyLoginResponse.httpStatus, 500);
 assert.match(emptyLoginResponse.error, /응답이 비어 있습니다|JSON/);
 globalThis.fetch = originalFetch;
+
+await esbuild({
+  entryPoints: ["apps/web/src/client/pages/WorkspacePage.tsx"],
+  bundle: true,
+  platform: "browser",
+  format: "esm",
+  outfile: bundledWorkspacePagePath
+});
+const workspacePage = await import(pathToFileURL(bundledWorkspacePagePath).href);
+assert.equal(workspacePage.actionFailureMessage({ ok: true }, "이벤트 패치 제안"), null);
+assert.equal(workspacePage.actionFailureMessage({
+  ok: false,
+  validation: { issues: [{ message: "엔딩 없이 끝납니다" }] }
+}, "이벤트 패치 제안"), "엔딩 없이 끝납니다");
+assert.equal(workspacePage.actionFailureMessage({
+  ok: false,
+  issues: [{ message: "입력값이 비어 있습니다" }]
+}, "씬 저장"), "입력값이 비어 있습니다");
+assert.equal(workspacePage.actionFailureMessage({
+  ok: false,
+  error: "Codex ChatGPT OAuth 로그인이 필요합니다."
+}, "이벤트 패치 제안"), "Codex ChatGPT OAuth 로그인이 필요합니다.");
 
 const webPackage = JSON.parse(readFileSync("apps/web/package.json", "utf8"));
 assert.equal(webPackage.scripts.dev, "node scripts/dev.mjs");
