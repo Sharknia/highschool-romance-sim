@@ -370,7 +370,7 @@ assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.plan.decision.sceneCount, 3);
 assert.equal(apiExpand.body.validation.ok, true);
 assert.equal(alphaStore.requireProject().scenes.length, 1);
-assert.equal(mockCodexTextCalls, 0);
+assert.equal(mockCodexTextCalls, 1);
 
 const apiApprove = await mockApi({
   method: "POST",
@@ -453,7 +453,8 @@ const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index
     },
     userEvent: "방과 후 복도에서 우연히 마주치는 짧은 이벤트"
   }),
-  encoding: "utf8"
+  encoding: "utf8",
+  env: { ...process.env, VN_MAKER_ALPHA_SANDBOX: "1" }
 });
 const cliExpand = JSON.parse(cliExpandOutput);
 assert.equal(cliExpand.ok, true);

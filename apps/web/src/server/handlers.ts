@@ -1,5 +1,12 @@
 import { Hono, type Context } from "hono";
 import { join } from "node:path";
+import {
+  ALPHA_SANDBOX_PROVENANCE,
+  type AlphaSandboxSession,
+  createAlphaSandboxEventTextAdapter,
+  createAlphaSandboxImageAdapter,
+  createAlphaSandboxSession
+} from "@vn-maker/alpha-sandbox";
 import { sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSession } from "@vn-maker/generation-codex";
 import { resolveProjectWorkspacePaths } from "@vn-maker/project-store";
 import {
@@ -22,9 +29,12 @@ export interface ApiResponse {
   body: Record<string, unknown>;
 }
 
+type ApiGenerationSession = CodexSession | AlphaSandboxSession;
+type ApiLoginStartResult = CodexLoginStartResult | { type: "alphaSandbox"; loginId: string };
+
 export interface CodexGenerationAdapter extends ProjectImageGenerationAdapter {
-  readSession(refreshToken?: boolean): Promise<CodexSession>;
-  startLogin(flow: "browser" | "device"): Promise<CodexLoginStartResult>;
+  readSession(refreshToken?: boolean): Promise<ApiGenerationSession>;
+  startLogin(flow: "browser" | "device"): Promise<ApiLoginStartResult>;
   logout(): Promise<void>;
   generateImageAsset(input: ProjectImageGenerationInput): Promise<ProjectImageGenerationResult>;
   generateEventExpansionPlan?: EventTextGenerationAdapter["generateEventExpansionPlan"];
@@ -48,6 +58,10 @@ function getLoginFlow(value: unknown): "browser" | "device" {
   return value === "device" ? "device" : "browser";
 }
 
+function isAlphaSandboxEnabled(): boolean {
+  return process.env.VN_MAKER_ALPHA_SANDBOX === "1";
+}
+
 function createDefaultCodexAdapter(): CodexGenerationAdapter {
   return {
     readSession: (refreshToken?: boolean) => sharedCodexAppServerClient.readSession(refreshToken),
@@ -55,6 +69,27 @@ function createDefaultCodexAdapter(): CodexGenerationAdapter {
     logout: () => sharedCodexAppServerClient.logout(),
     generateImageAsset: (input: ProjectImageGenerationInput) => sharedCodexAppServerClient.generateImageAsset(input),
     generateEventExpansionPlan: (input) => sharedCodexAppServerClient.generateEventExpansionPlan(input)
+  };
+}
+
+function createAlphaSandboxCodexAdapter(): CodexGenerationAdapter {
+  const eventText = createAlphaSandboxEventTextAdapter();
+  const image = createAlphaSandboxImageAdapter();
+  return {
+    async readSession() {
+      return createAlphaSandboxSession();
+    },
+    async startLogin() {
+      return {
+        type: "alphaSandbox",
+        loginId: ALPHA_SANDBOX_PROVENANCE
+      };
+    },
+    async logout() {
+      return undefined;
+    },
+    generateImageAsset: (input: ProjectImageGenerationInput) => image.generateImageAsset(input),
+    generateEventExpansionPlan: (input) => eventText.generateEventExpansionPlan(input)
   };
 }
 
@@ -121,16 +156,23 @@ class ApiServices {
   private readonly useCases: ReturnType<typeof createVnMakerUseCases>;
 
   constructor(options: ApiHandlerOptions = {}) {
-    this.codex = options.codex || createDefaultCodexAdapter();
+    this.codex = options.codex || (isAlphaSandboxEnabled() ? createAlphaSandboxCodexAdapter() : createDefaultCodexAdapter());
     this.useCases = createVnMakerUseCases({
       defaultProjectDirectory: options.projectDirectory || getDefaultProjectDirectory(),
-      eventText: options.eventText,
+      eventText: options.eventText || (this.codex.generateEventExpansionPlan ? { generateEventExpansionPlan: (input) => this.codex.generateEventExpansionPlan!(input) } : undefined),
       image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) }
     });
   }
 
   async readCodexSession(): Promise<Record<string, unknown>> {
     const session = await this.codex.readSession(false);
+    if (session.mode === "alpha-sandbox") {
+      return {
+        ok: true,
+        ...session,
+        note: "Alpha Sandbox fixture generation이 활성화되어 있다. Codex OAuth 로그인으로 표현하지 않는다."
+      };
+    }
     return {
       ok: true,
       ...session,

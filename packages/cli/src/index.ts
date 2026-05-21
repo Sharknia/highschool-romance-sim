@@ -4,6 +4,11 @@ import {
   sharedCodexAppServerClient
 } from "@vn-maker/generation-codex";
 import {
+  ALPHA_SANDBOX_PROVENANCE,
+  createAlphaSandboxEventTextAdapter,
+  createAlphaSandboxImageAdapter
+} from "@vn-maker/alpha-sandbox";
+import {
   buildProjectHtml,
   createAssetManifest,
   createImageGenerationJob,
@@ -73,8 +78,19 @@ function getProject(input: CliInput): VnMakerProject {
   return parsed.value;
 }
 
+function isAlphaSandboxEnabled(): boolean {
+  return process.env.VN_MAKER_ALPHA_SANDBOX === "1";
+}
+
+const sandboxEnabled = isAlphaSandboxEnabled();
+const sandboxEventText = sandboxEnabled ? createAlphaSandboxEventTextAdapter() : undefined;
+const sandboxImage = sandboxEnabled ? createAlphaSandboxImageAdapter() : undefined;
+
 const useCases = createVnMakerUseCases({
-  image: {
+  eventText: sandboxEventText || {
+    generateEventExpansionPlan: (input) => sharedCodexAppServerClient.generateEventExpansionPlan(input)
+  },
+  image: sandboxImage || {
     generateImageAsset: (input) => sharedCodexAppServerClient.generateImageAsset(input)
   }
 });
@@ -116,7 +132,8 @@ function printCapabilities(): void {
       "generate-image"
     ],
     io: "stdin-json/stdout-json",
-    purpose: "Codex/AI가 VN Maker Core를 안정적으로 호출하기 위한 기계용 인터페이스"
+    purpose: "Codex/AI가 VN Maker Core를 안정적으로 호출하기 위한 기계용 인터페이스",
+    sandbox: sandboxEnabled ? { enabled: true, provenance: ALPHA_SANDBOX_PROVENANCE } : { enabled: false }
   });
 }
 

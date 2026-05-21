@@ -115,6 +115,10 @@ export function describeSession(session: CodexSessionResult | null): string {
     return "Codex OAuth: 확인 중";
   }
 
+  if (session.mode === "alpha-sandbox") {
+    return "Alpha Sandbox: fixture generation 활성";
+  }
+
   if (session.connected) {
     const email = session.account?.email ? ` · ${session.account.email}` : "";
     const plan = session.account?.planType ? `/${session.account.planType}` : "";

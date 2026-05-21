@@ -71,6 +71,7 @@ export interface ProjectImageGenerationInput {
 }
 
 export interface ProjectImageGenerationResult {
+  adapter?: string;
   job: VnMakerGenerationJob;
   asset: VnMakerAsset;
   image?: {
