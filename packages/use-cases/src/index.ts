@@ -419,6 +419,14 @@ function classifyValidationFailure(validation: EventExpansionValidationResult): 
     : "engine_validation_failed";
 }
 
+function isRecoverableEventTextSchemaError(error: unknown): boolean {
+  return error instanceof SyntaxError;
+}
+
+function eventTextErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function expandNaturalLanguageEvent(
   input: ExpandNaturalLanguageEventInput
 ): Promise<ExpandNaturalLanguageEventResult> {
@@ -428,14 +436,30 @@ export async function expandNaturalLanguageEvent(
   let lastValidation: EventExpansionValidationResult | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const candidate = input.adapter
-      ? await input.adapter.generateEventExpansionPlan({
-          project: input.project,
-          request: input.request,
-          attempt,
-          previousAttempts: attempts
-        })
-      : createDeterministicEventExpansionPlan(input.request);
+    let candidate: unknown;
+    try {
+      candidate = input.adapter
+        ? await input.adapter.generateEventExpansionPlan({
+            project: input.project,
+            request: input.request,
+            attempt,
+            previousAttempts: attempts
+          })
+        : createDeterministicEventExpansionPlan(input.request);
+    } catch (error) {
+      if (!isRecoverableEventTextSchemaError(error)) {
+        throw error;
+      }
+      const message = eventTextErrorMessage(error);
+      rawOutput = { error: message };
+      attempts.push({
+        attempt,
+        ok: false,
+        failureKind: "schema_invalid",
+        issues: [`eventText: ${message}`]
+      });
+      continue;
+    }
     rawOutput = candidate;
     const parsed = parseEventExpansionPlan(candidate);
 

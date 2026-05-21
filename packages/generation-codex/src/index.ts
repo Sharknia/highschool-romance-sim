@@ -343,6 +343,7 @@ function createEventExpansionPrompt(
     "The JSON must match EventExpansionPlan with summary, decision, and patch.operations.",
     `Allowed operation types: ${policy.allowedOperationTypes.join(", ")}.`,
     `Forbidden changes: ${policy.forbiddenOperationSummary.join(", ")}.`,
+    "Alpha branch coverage rule: every reachable terminal scene must have scene.ending, ending scenes must not have next or choices, and route.endings is compatibility metadata only.",
     "Do not exceed request constraints.",
     `Attempt: ${attempt}`,
     `Previous failures: ${JSON.stringify(previousAttempts, null, 2)}`,

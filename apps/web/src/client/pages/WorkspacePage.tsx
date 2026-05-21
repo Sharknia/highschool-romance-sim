@@ -193,6 +193,38 @@ function isHttpFailure(result: unknown): result is ApiResult {
   );
 }
 
+function firstIssueMessage(value: unknown): string | null {
+  const issues = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && Array.isArray((value as { issues?: unknown }).issues)
+      ? (value as { issues: unknown[] }).issues
+      : null;
+  if (!issues) {
+    return null;
+  }
+  const firstIssue = issues[0];
+  if (!firstIssue || typeof firstIssue !== "object") {
+    return null;
+  }
+  const message = (firstIssue as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message : null;
+}
+
+function isApiFailure(result: unknown): result is ApiResult {
+  return Boolean(result && typeof result === "object" && (result as ApiResult).ok === false);
+}
+
+export function actionFailureMessage(result: unknown, label: string): string | null {
+  if (!isHttpFailure(result) && !isApiFailure(result)) {
+    return null;
+  }
+  const record = result as ApiResult;
+  return record.error
+    || firstIssueMessage(record.validation)
+    || firstIssueMessage(record.issues)
+    || `${label} 요청이 실패했습니다.`;
+}
+
 function projectPayloadFromEditor(projectJson: string): { project?: unknown; starter?: unknown } {
   const parsed = JSON.parse(projectJson) as Record<string, unknown>;
   return parsed.version === "vn-maker/v1"
@@ -362,8 +394,9 @@ export function WorkspacePage() {
     setWorkspaceStatus(`${label} 실행 중`);
     try {
       const actionResult = await action();
-      if (isHttpFailure(actionResult)) {
-        throw new Error(actionResult.error || `${label} 요청이 실패했습니다.`);
+      const failureMessage = actionFailureMessage(actionResult, label);
+      if (failureMessage) {
+        throw new Error(failureMessage);
       }
       applyActionResult(actionResult);
       setResult(formatResult(actionResult));

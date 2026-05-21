@@ -23,6 +23,7 @@ const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnm
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
+const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
 
 const project = core.createStarterProject({
   id: "test-project",
@@ -700,6 +701,24 @@ assert.equal(generatedEvent.plan.decision.choiceCount, 1);
 assert.equal(generatedEvent.plan.decision.cgCount, 1);
 assert.match(core.describeProjectPatch(generatedEvent.plan.patch).text, /CG 작업/);
 
+const recoveredAfterMalformedJson = await useCasesModule.expandNaturalLanguageEvent({
+  project: alphaStore.requireProject(),
+  request: eventRequest,
+  maxAttempts: 2,
+  adapter: {
+    async generateEventExpansionPlan({ attempt }) {
+      if (attempt === 1) {
+        throw new SyntaxError("Unexpected token '`', ```json is not valid JSON");
+      }
+      return core.createDeterministicEventExpansionPlan(eventRequest);
+    }
+  }
+});
+assert.equal(recoveredAfterMalformedJson.ok, true);
+assert.equal(recoveredAfterMalformedJson.attempts[0].failureKind, "schema_invalid");
+assert.match(recoveredAfterMalformedJson.attempts[0].issues[0], /JSON/);
+assert.equal(recoveredAfterMalformedJson.attempts[1].ok, true);
+
 const apiExpand = await mockApi({
   method: "POST",
   path: "/api/events/expand",
@@ -840,6 +859,28 @@ assert.equal(emptyLoginResponse.ok, false);
 assert.equal(emptyLoginResponse.httpStatus, 500);
 assert.match(emptyLoginResponse.error, /응답이 비어 있습니다|JSON/);
 globalThis.fetch = originalFetch;
+
+await esbuild({
+  entryPoints: ["apps/web/src/client/pages/WorkspacePage.tsx"],
+  bundle: true,
+  platform: "browser",
+  format: "esm",
+  outfile: bundledWorkspacePagePath
+});
+const workspacePage = await import(pathToFileURL(bundledWorkspacePagePath).href);
+assert.equal(workspacePage.actionFailureMessage({ ok: true }, "이벤트 패치 제안"), null);
+assert.equal(workspacePage.actionFailureMessage({
+  ok: false,
+  validation: { issues: [{ message: "엔딩 없이 끝납니다" }] }
+}, "이벤트 패치 제안"), "엔딩 없이 끝납니다");
+assert.equal(workspacePage.actionFailureMessage({
+  ok: false,
+  issues: [{ message: "입력값이 비어 있습니다" }]
+}, "씬 저장"), "입력값이 비어 있습니다");
+assert.equal(workspacePage.actionFailureMessage({
+  ok: false,
+  error: "Codex ChatGPT OAuth 로그인이 필요합니다."
+}, "이벤트 패치 제안"), "Codex ChatGPT OAuth 로그인이 필요합니다.");
 
 const webPackage = JSON.parse(readFileSync("apps/web/package.json", "utf8"));
 assert.equal(webPackage.scripts.dev, "node scripts/dev.mjs");
