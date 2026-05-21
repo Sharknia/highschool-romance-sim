@@ -15,12 +15,12 @@ import {
   Search,
   Sparkles,
   Tags,
-  Trash2,
-  XCircle
+  Trash2
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ApiResult, ImagePreviewResult } from "../api/types";
 import { describeSession, useAuth } from "../auth/AuthProvider";
+import { SceneWorkbench } from "../components/SceneWorkbench";
 import { AppShell, Button, StatusBanner } from "../components/ui";
 
 interface HeroineDraft {
@@ -234,6 +234,7 @@ export function WorkspacePage() {
   const [sceneDraft, setSceneDraft] = useState<SceneDraft | null>(null);
   const [result, setResult] = useState("{}");
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [previewStale, setPreviewStale] = useState(false);
   const [workspaceStatus, setWorkspaceStatus] = useState("작업 대기 중");
   const [lastExport, setLastExport] = useState<Record<string, unknown> | null>(null);
 
@@ -288,14 +289,22 @@ export function WorkspacePage() {
     });
   }
 
-  function setProjectState(nextProject: ProjectData): void {
+  function setProjectState(nextProject: ProjectData, preferredSceneId?: string): void {
     setProject(nextProject);
     setProjectJson(JSON.stringify(nextProject, null, 2));
     setGenerationJobs(nextProject.generationJobs || []);
-    setSelectedRouteId((current) => nextProject.routes.some((route) => route.id === current) ? current : nextProject.routes[0]?.id || "");
-    if (!sceneDraft && nextProject.scenes[0]) {
-      setSceneDraft(cloneScene(nextProject.scenes[0]));
-      setCurrentSceneId(nextProject.scenes[0].id);
+    const nextRouteId = nextProject.routes.some((route) => route.id === selectedRouteId) ? selectedRouteId : nextProject.routes[0]?.id || "";
+    const nextRoute = nextProject.routes.find((route) => route.id === nextRouteId) || nextProject.routes[0];
+    const nextSceneId = preferredSceneId && nextProject.scenes.some((scene) => scene.id === preferredSceneId)
+      ? preferredSceneId
+      : currentSceneId && nextProject.scenes.some((scene) => scene.id === currentSceneId)
+        ? currentSceneId
+        : nextRoute?.entrySceneId || nextProject.scenes[0]?.id || "";
+    const nextScene = nextProject.scenes.find((scene) => scene.id === nextSceneId) || nextProject.scenes[0];
+    setSelectedRouteId(nextRouteId);
+    if (nextScene) {
+      setSceneDraft(cloneScene(nextScene));
+      setCurrentSceneId(nextScene.id);
     }
   }
 
@@ -318,7 +327,7 @@ export function WorkspacePage() {
         setProjectDirectory(record.projectDirectory);
       }
       if (record.project && typeof record.project === "object") {
-        setProjectState(record.project as ProjectData);
+        setProjectState(record.project as ProjectData, typeof record.selectedSceneId === "string" ? record.selectedSceneId : undefined);
       }
       if (Array.isArray(record.heroines)) {
         setHeroines(record.heroines as HeroineDraft[]);
@@ -338,6 +347,7 @@ export function WorkspacePage() {
         const runtimeData = record.runtime as RuntimeData;
         setRuntime(runtimeData);
         setCurrentSceneId(runtimeData.startSceneId);
+        setPreviewStale(false);
       }
       if (record.export && typeof record.export === "object") {
         setLastExport(record as Record<string, unknown>);
@@ -361,6 +371,16 @@ export function WorkspacePage() {
       setResult(formatResult(failure));
       setWorkspaceStatus(`${label} 실패`);
       return failure;
+    }
+  }
+
+  function markProjectMutatedByEditor(): void {
+    setRuntime(null);
+    setPreviewStale(true);
+    setLastExport(null);
+    if (pendingPatch) {
+      setPendingPatch(null);
+      setWorkspaceStatus("수동 변경으로 pending natural-language patch를 폐기했습니다.");
     }
   }
 
@@ -398,13 +418,17 @@ export function WorkspacePage() {
   }
 
   async function createProjectFromSelectedHeroine(): Promise<void> {
+    const selectedLibraryHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId);
     await runAction("히로인 프로젝트 생성", async () => postAuthedJson<ApiResult>("/api/projects/from-heroine", {
       projectDirectory: projectDirectory || undefined,
-      heroineId: selectedHeroineId || undefined,
-      heroine: selectedHeroineId ? undefined : heroineDraft,
+      heroineId: selectedLibraryHeroine?.id || undefined,
+      heroine: selectedLibraryHeroine ? undefined : heroineDraft,
       title: `${heroineDraft.name} Beta`,
       premise: `${heroineDraft.name}와 반복 제작을 검증하는 Beta 루트`
     }));
+    setRuntime(null);
+    setPreviewStale(false);
+    setPendingPatch(null);
     await loadPatchHistory();
     await loadGenerationJobs();
   }
@@ -414,6 +438,9 @@ export function WorkspacePage() {
       projectDirectory: projectDirectory || undefined,
       starter: starterProject
     }));
+    setRuntime(null);
+    setPreviewStale(false);
+    setPendingPatch(null);
     await loadGenerationJobs();
   }
 
@@ -421,6 +448,8 @@ export function WorkspacePage() {
     await runAction("프로젝트 열기", async () => postAuthedJson<ApiResult>("/api/project/open", {
       projectDirectory: projectDirectory || undefined
     }));
+    setRuntime(null);
+    setPreviewStale(false);
     await loadHeroineLibrary();
     await loadPatchHistory();
     await loadGenerationJobs();
@@ -516,6 +545,8 @@ export function WorkspacePage() {
       patchHistoryId: pendingPatch.patchHistoryEntry?.id
     }));
     setPendingPatch(null);
+    setRuntime(null);
+    setPreviewStale(true);
     await loadPatchHistory();
     await loadGenerationJobs();
   }
@@ -539,10 +570,13 @@ export function WorkspacePage() {
     if (!sceneDraft) {
       return;
     }
-    await runAction("씬 저장", async () => postAuthedJson<ApiResult>("/api/project/scenes", {
+    const response = await runAction("씬 저장", async () => postAuthedJson<ApiResult>("/api/project/scenes", {
       projectDirectory: projectDirectory || undefined,
       scene: sceneDraft
     }));
+    if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
+      markProjectMutatedByEditor();
+    }
   }
 
   async function previewProject(startSceneId?: string): Promise<void> {
@@ -550,6 +584,37 @@ export function WorkspacePage() {
       projectDirectory: projectDirectory || undefined,
       startSceneId
     }));
+    setPreviewStale(false);
+  }
+
+  async function insertManualScene(input: { sourceSceneId?: string; link: unknown; scene: SceneDraft }): Promise<void> {
+    const response = await runAction("수동 장면 추가", async () => postAuthedJson<ApiResult>("/api/project/scenes/insert", {
+      projectDirectory: projectDirectory || undefined,
+      ...input
+    }));
+    if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
+      markProjectMutatedByEditor();
+    }
+  }
+
+  async function linkManualScene(input: { sourceSceneId: string; targetSceneId: string; link: unknown }): Promise<void> {
+    const response = await runAction("수동 장면 연결", async () => postAuthedJson<ApiResult>("/api/project/scenes/link", {
+      projectDirectory: projectDirectory || undefined,
+      ...input
+    }));
+    if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
+      markProjectMutatedByEditor();
+    }
+  }
+
+  async function setSceneEnding(input: { sceneId: string; ending: unknown; clearOutgoing?: boolean }): Promise<void> {
+    const response = await runAction("엔딩 지정", async () => postAuthedJson<ApiResult>("/api/project/scenes/ending", {
+      projectDirectory: projectDirectory || undefined,
+      ...input
+    }));
+    if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
+      markProjectMutatedByEditor();
+    }
   }
 
   async function exportProject(): Promise<void> {
@@ -576,42 +641,6 @@ export function WorkspacePage() {
     setSelectedJobIds((current) => current.includes(jobId)
       ? current.filter((id) => id !== jobId)
       : [...current, jobId]);
-  }
-
-  function updateSceneField(field: keyof SceneDraft, value: string): void {
-    setSceneDraft((current) => current ? { ...current, [field]: value } : current);
-  }
-
-  function updateSceneCharacterExpression(value: string): void {
-    setSceneDraft((current) => {
-      if (!current) return current;
-      const characterId = current.characters[0]?.characterId || currentHeroine?.id || "";
-      return {
-        ...current,
-        characters: [{ characterId, expression: value, position: "center" }]
-      };
-    });
-  }
-
-  function updateChoice(index: number, field: "text" | "next", value: string): void {
-    setSceneDraft((current) => {
-      if (!current) return current;
-      const choices = current.choices.map((choice, choiceIndex) => choiceIndex === index ? { ...choice, [field]: value } : choice);
-      return { ...current, choices };
-    });
-  }
-
-  function addChoice(): void {
-    setSceneDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        choices: [
-          ...current.choices,
-          { id: `choice-${current.id}-${current.choices.length + 1}`, text: "새 선택지", next: current.next || current.id }
-        ]
-      };
-    });
   }
 
   return (
@@ -768,109 +797,34 @@ export function WorkspacePage() {
               </div>
             </section>
 
-            <section className="workbench-section">
-              <header className="section-header">
-                <div>
-                  <p className="panel-eyebrow">Route / Scene</p>
-                  <h2>씬 편집과 자연어 패치</h2>
-                </div>
-                <div className="button-row">
-                  <Button icon={<Save size={16} />} onClick={() => void saveSceneDraft()}>씬 저장</Button>
-                  <Button icon={<Sparkles size={16} />} onClick={() => void expandEvent()} variant="primary">패치 제안</Button>
-                  <Button disabled={!patchCanApply} icon={<CheckCircle2 size={16} />} onClick={() => void approveEvent()}>승인</Button>
-                  <Button disabled={!pendingPatch} icon={<XCircle size={16} />} onClick={() => setPendingPatch(null)}>취소</Button>
-                </div>
-              </header>
-              {project?.routes.length ? (
-                <div className="route-panel">
-                  <div className="route-selector">
-                    <select aria-label="루트 선택" value={currentRoute?.id || ""} onChange={(event) => selectRoute(event.target.value)}>
-                      {project.routes.map((route) => (
-                        <option key={route.id} value={route.id}>{route.title}</option>
-                      ))}
-                    </select>
-                    <div className="inline-status">
-                      {currentRoute?.id || "루트 없음"} · {currentHeroine?.displayName || currentRoute?.heroineId || "히로인 없음"} · 시작 {currentRoute?.entrySceneId || "없음"}
-                    </div>
-                  </div>
-                  <div className="route-list" aria-label="루트 목록">
-                    {project.routes.map((route) => {
-                      const routeHeroine = project.characters.find((character) => character.id === route.heroineId);
-                      const entryScene = project.scenes.find((item) => item.id === route.entrySceneId);
-                      return (
-                        <button
-                          className={currentRoute?.id === route.id ? "route-item selected" : "route-item"}
-                          key={route.id}
-                          onClick={() => selectRoute(route.id)}
-                          type="button"
-                        >
-                          <strong>{route.title}</strong>
-                          <span>{route.id}</span>
-                          <small>{routeHeroine?.displayName || route.heroineId} · {route.entrySceneId} · {entryScene ? "연결됨" : "시작 씬 없음"}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : <div className="inline-status">루트가 없습니다.</div>}
-              <div className="scene-layout">
-                <div className="scene-list">
-                  {(project?.scenes || []).map((item) => (
-                    <button
-                      className={sceneDraft?.id === item.id ? "list-item selected" : "list-item"}
-                      key={item.id}
-                      onClick={() => {
-                        setSceneDraft(cloneScene(item));
-                        setCurrentSceneId(item.id);
-                      }}
-                      type="button"
-                    >
-                      <strong>{item.label}</strong>
-                      <span>{item.id}</span>
-                    </button>
-                  ))}
-                </div>
-                {sceneDraft ? (
-                  <div className="scene-editor">
-                    <div className="form-grid">
-                      <input aria-label="씬 ID" value={sceneDraft.id} onChange={(event) => updateSceneField("id", event.target.value)} />
-                      <input aria-label="씬 라벨" value={sceneDraft.label} onChange={(event) => updateSceneField("label", event.target.value)} />
-                      <input aria-label="화자" value={sceneDraft.speaker} onChange={(event) => updateSceneField("speaker", event.target.value)} />
-                      <input aria-label="다음 씬" value={sceneDraft.next || ""} onChange={(event) => updateSceneField("next", event.target.value)} />
-                    </div>
-                    <textarea aria-label="씬 본문" value={sceneDraft.text} onChange={(event) => updateSceneField("text", event.target.value)} />
-                    <select aria-label="표정 태그" onChange={(event) => updateSceneCharacterExpression(event.target.value)} value={sceneDraft.characters[0]?.expression || "normal"}>
-                      {(currentHeroine?.emotionTags || ["normal"]).map((tag) => <option key={tag} value={tag}>{tag}</option>)}
-                    </select>
-                    <div className="choice-editor">
-                      {sceneDraft.choices.map((choice, index) => (
-                        <div className="choice-row" key={choice.id}>
-                          <input aria-label="선택지 문구" value={choice.text} onChange={(event) => updateChoice(index, "text", event.target.value)} />
-                          <input aria-label="선택지 이동 씬" value={choice.next} onChange={(event) => updateChoice(index, "next", event.target.value)} />
-                        </div>
-                      ))}
-                      <Button icon={<ListChecks size={16} />} onClick={addChoice}>선택지 추가</Button>
-                    </div>
-                  </div>
-                ) : <div className="inline-status">편집할 씬을 선택하세요.</div>}
-              </div>
-              <textarea aria-label="자연어 이벤트" value={prompt} onChange={(event) => setPrompt(event.target.value)} wrap="soft" />
-              {pendingPatch ? (
-                <div className="patch-summary">
-                  <strong>{pendingPatch.plan.summary}</strong>
-                  <span>씬 {pendingPatch.plan.decision?.sceneCount || 0} / 선택지 {pendingPatch.plan.decision?.choiceCount || 0} / CG {pendingPatch.plan.decision?.cgCount || 0}</span>
-                  <span>{pendingPatch.diff?.text}</span>
-                  <ul>
-                    {(pendingPatch.diff?.operations || []).map((operation) => <li key={operation}>{operation}</li>)}
-                  </ul>
-                  {(pendingPatch.validation?.issues || []).length > 0 ? (
-                    <ul>
-                      {pendingPatch.validation?.issues?.map((issue) => <li key={`${issue.path}-${issue.message}`}>{issue.path}: {issue.message}</li>)}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-            </section>
+            <SceneWorkbench
+              currentHeroine={currentHeroine}
+              currentRoute={currentRoute}
+              currentSceneId={currentSceneId}
+              onApproveEvent={() => void approveEvent()}
+              onCancelPatch={() => setPendingPatch(null)}
+              onExpandEvent={() => void expandEvent()}
+              onInsertScene={(input) => void insertManualScene(input)}
+              onLinkScene={(input) => void linkManualScene(input)}
+              onPromptChange={setPrompt}
+              onSaveScene={() => void saveSceneDraft()}
+              onSelectRoute={selectRoute}
+              onSelectScene={(sceneId) => {
+                const selected = project?.scenes.find((item) => item.id === sceneId);
+                if (selected) {
+                  setSceneDraft(cloneScene(selected));
+                }
+                setCurrentSceneId(sceneId);
+              }}
+              onSceneDraftChange={(scene) => setSceneDraft(scene)}
+              onSetSceneEnding={(input) => void setSceneEnding(input)}
+              patchCanApply={patchCanApply}
+              pendingPatch={pendingPatch}
+              previewStale={previewStale}
+              project={project}
+              prompt={prompt}
+              sceneDraft={sceneDraft}
+            />
 
             <section className="workbench-section">
               <header className="section-header">
@@ -896,12 +850,13 @@ export function WorkspacePage() {
                     <span>{scene.label}</span>
                     <strong>{scene.speaker}</strong>
                     <p>{scene.text}</p>
+                    {scene.ending ? <div className="player-ending">엔딩: {scene.ending.title} <span>{scene.ending.kind}</span></div> : null}
                   </div>
                   <div className="player-choices">
-                    {scene.choices.map((choice) => (
+                    {scene.ending ? <Button onClick={() => setCurrentSceneId(runtime?.startSceneId || "")}>처음부터 다시</Button> : scene.choices.map((choice) => (
                       <Button key={choice.id} onClick={() => setCurrentSceneId(choice.next)}>{choice.text}</Button>
                     ))}
-                    {scene.choices.length === 0 && scene.next ? <Button onClick={() => setCurrentSceneId(scene.next || "")}>다음</Button> : null}
+                    {!scene.ending && scene.choices.length === 0 && scene.next ? <Button onClick={() => setCurrentSceneId(scene.next || "")}>다음</Button> : null}
                   </div>
                 </div>
               ) : <div className="inline-status">프리뷰가 비어 있습니다. 프로젝트를 열고 프리뷰를 실행하세요.</div>}

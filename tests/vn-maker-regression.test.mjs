@@ -22,6 +22,7 @@ const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
+const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
 
 const project = core.createStarterProject({
   id: "test-project",
@@ -377,6 +378,25 @@ assert.match(branchRuntimeScript, /엔딩:/);
 assert.match(branchRuntimeScript, /처음부터 다시/);
 assert.match(branchRuntimeScript, /vn-ending/);
 branchEndingStore.close();
+
+await esbuild({
+  entryPoints: ["apps/web/src/client/components/SceneWorkbench.tsx"],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  outfile: bundledSceneWorkbenchPath
+});
+const sceneWorkbench = await import(pathToFileURL(bundledSceneWorkbenchPath).href);
+const branchUiSummary = sceneWorkbench.createRouteCompletionSummary(branchEndingProject, branchEndingProject.routes[0].id);
+assert.equal(branchUiSummary.endingCount, 2);
+assert.equal(branchUiSummary.openBranchCount, 0);
+assert.deepEqual([...branchUiSummary.reachableEndingIds].sort(), ["ending-good", "ending-normal"]);
+assert.equal(branchUiSummary.routeRows[0].sceneId, "scene-haru-branch-opening");
+assert.equal(branchUiSummary.routeRows.some((row) => row.parentSceneId === "scene-haru-branch-opening" && row.viaChoiceId === "choice-good"), true);
+assert.equal(sceneWorkbench.selectSceneOptions(branchEndingProject).some((option) => option.value === "scene-normal-ending"), true);
+const blankSceneDraft = sceneWorkbench.createBlankSceneDraft(branchEndingProject, "scene-good-ending");
+assert.equal(blankSceneDraft.id.startsWith("scene-good-ending-next"), true);
+assert.equal(blankSceneDraft.choices.length, 0);
 
 const branchTerminalFailureProject = createBranchEndingProject("branch-terminal-failure");
 delete branchTerminalFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending").ending;
