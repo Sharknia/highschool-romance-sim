@@ -63,7 +63,22 @@ function statusForError(error: unknown): number {
     return 400;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("OAuth 로그인이 필요") ? 401 : 400;
+  if (message.includes("OAuth 로그인이 필요")) {
+    return 401;
+  }
+  if (message.includes("현재 프로젝트가 패치 적용 직후 상태와 달라")) {
+    return 409;
+  }
+  if (
+    message.startsWith("패치 검증 실패")
+    || message.includes("패치 제안 이력을 찾을 수 없습니다")
+    || message.includes("패치 이력을 찾을 수 없습니다")
+    || message.includes("적용된 패치만 되돌릴 수 있습니다")
+    || message.includes("이미 되돌린 패치입니다")
+  ) {
+    return 400;
+  }
+  return 500;
 }
 
 async function readRequestJson(context: { req: { json(): Promise<unknown> } }): Promise<unknown> {

@@ -414,6 +414,130 @@ function parseFail<T>(issues: ValidationIssue[]): DtoParseResult<T> {
   return { ok: false, issues };
 }
 
+function addNestedIssues(issues: ValidationIssue[], prefix: string, nestedIssues: ValidationIssue[]): void {
+  nestedIssues.forEach((issue) => {
+    issues.push({
+      ...issue,
+      path: issue.path === "$" ? prefix : `${prefix}.${issue.path}`
+    });
+  });
+}
+
+function validateStringItems(values: unknown, path: string, issues: ValidationIssue[]): void {
+  if (!Array.isArray(values)) {
+    return;
+  }
+  values.forEach((item, index) => {
+    if (typeof item !== "string") {
+      addSchemaIssue(issues, `${path}.${index}`, "문자열이어야 합니다.");
+    }
+  });
+}
+
+function validateStringMap(value: unknown, path: string, issues: ValidationIssue[]): void {
+  if (!isRecord(value)) {
+    return;
+  }
+  Object.entries(value).forEach(([key, item]) => {
+    if (typeof item !== "string") {
+      addSchemaIssue(issues, `${path}.${key}`, "문자열이어야 합니다.");
+    }
+  });
+}
+
+function validateOptionalString(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): void {
+  if (record[key] !== undefined && typeof record[key] !== "string") {
+    addSchemaIssue(issues, path, "문자열이어야 합니다.");
+  }
+}
+
+function parseVnMakerRoute(value: unknown): DtoParseResult<VnMakerRoute> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "route 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "title", "title", issues, { nonEmpty: true });
+  hasString(value, "heroineId", "heroineId", issues, { nonEmpty: true });
+  hasString(value, "summary", "summary", issues);
+  hasString(value, "entrySceneId", "entrySceneId", issues, { nonEmpty: true });
+  if (hasArray(value, "endings", "endings", issues)) {
+    (value.endings as unknown[]).forEach((ending, index) => {
+      if (!isRecord(ending)) {
+        addSchemaIssue(issues, `endings.${index}`, "객체여야 합니다.");
+        return;
+      }
+      hasString(ending, "id", `endings.${index}.id`, issues, { nonEmpty: true });
+      hasString(ending, "title", `endings.${index}.title`, issues, { nonEmpty: true });
+      hasObject(ending, "condition", `endings.${index}.condition`, issues);
+    });
+  }
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerRoute);
+}
+
+function parseVnMakerAsset(value: unknown): DtoParseResult<VnMakerAsset> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "asset 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "kind", "kind", issues, { nonEmpty: true });
+  hasString(value, "label", "label", issues, { nonEmpty: true });
+  validateOptionalString(value, "uri", "uri", issues);
+  validateOptionalString(value, "source", "source", issues);
+  validateOptionalString(value, "generationJobId", "generationJobId", issues);
+  if (typeof value.kind === "string" && !["background", "portrait", "expression", "cg", "audio", "other"].includes(value.kind)) {
+    addSchemaIssue(issues, "kind", `지원하지 않는 에셋 종류입니다: ${value.kind}`);
+  }
+  if (typeof value.source === "string" && !["generated", "imported", "placeholder"].includes(value.source)) {
+    addSchemaIssue(issues, "source", `지원하지 않는 에셋 출처입니다: ${value.source}`);
+  }
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerAsset);
+}
+
+function parseVnMakerGenerationJob(value: unknown): DtoParseResult<VnMakerGenerationJob> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "generationJob 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "kind", "kind", issues, { nonEmpty: true });
+  hasString(value, "targetId", "targetId", issues, { nonEmpty: true });
+  hasString(value, "prompt", "prompt", issues, { nonEmpty: true });
+  hasString(value, "provider", "provider", issues, { nonEmpty: true });
+  hasString(value, "status", "status", issues, { nonEmpty: true });
+  validateOptionalString(value, "style", "style", issues);
+  validateOptionalString(value, "outputAssetId", "outputAssetId", issues);
+  validateOptionalString(value, "failureMessage", "failureMessage", issues);
+  if (typeof value.provider === "string" && !["codex-text-adapter", "image-generation-adapter", "mock-adapter"].includes(value.provider)) {
+    addSchemaIssue(issues, "provider", `지원하지 않는 생성 provider입니다: ${value.provider}`);
+  }
+  if (typeof value.status === "string" && !["planned", "running", "completed", "failed"].includes(value.status)) {
+    addSchemaIssue(issues, "status", `지원하지 않는 생성 상태입니다: ${value.status}`);
+  }
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerGenerationJob);
+}
+
+function parseVnMakerProjectSettings(value: unknown): DtoParseResult<VnMakerProjectSettings> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "settings 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "defaultRouteId", "defaultRouteId", issues);
+  hasString(value, "outputFileName", "outputFileName", issues, { nonEmpty: true });
+  hasString(value, "language", "language", issues, { nonEmpty: true });
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerProjectSettings);
+}
+
+function validateProjectNestedShape(value: Record<string, unknown>, issues: ValidationIssue[]): void {
+  (value.characters as unknown[]).forEach((character, index) => addNestedIssues(issues, `characters.${index}`, parseVnMakerCharacter(character).issues));
+  (value.routes as unknown[]).forEach((route, index) => addNestedIssues(issues, `routes.${index}`, parseVnMakerRoute(route).issues));
+  (value.scenes as unknown[]).forEach((scene, index) => addNestedIssues(issues, `scenes.${index}`, parseVnMakerScene(scene).issues));
+  (value.assets as unknown[]).forEach((asset, index) => addNestedIssues(issues, `assets.${index}`, parseVnMakerAsset(asset).issues));
+  (value.generationJobs as unknown[]).forEach((job, index) => addNestedIssues(issues, `generationJobs.${index}`, parseVnMakerGenerationJob(job).issues));
+  addNestedIssues(issues, "settings", parseVnMakerProjectSettings(value.settings).issues);
+}
+
 export function parseVnMakerProject(value: unknown): DtoParseResult<VnMakerProject> {
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
@@ -433,6 +557,11 @@ export function parseVnMakerProject(value: unknown): DtoParseResult<VnMakerProje
   hasArray(value, "generationJobs", "generationJobs", issues);
   hasObject(value, "settings", "settings", issues);
 
+  if (issues.length > 0) {
+    return parseFail(issues);
+  }
+
+  validateProjectNestedShape(value, issues);
   if (issues.length > 0) {
     return parseFail(issues);
   }
@@ -484,9 +613,20 @@ export function parseVnMakerCharacter(value: unknown): DtoParseResult<VnMakerCha
   hasString(value, "profile", "profile", issues);
   hasArray(value, "emotionTags", "emotionTags", issues);
   hasArray(value, "portraitAssetIds", "portraitAssetIds", issues);
+  validateStringItems(value.emotionTags, "emotionTags", issues);
+  validateStringItems(value.portraitAssetIds, "portraitAssetIds", issues);
   if (value.expressionAssetIds !== undefined && !isRecord(value.expressionAssetIds)) {
     addSchemaIssue(issues, "expressionAssetIds", "객체여야 합니다.");
   }
+  validateStringMap(value.expressionAssetIds, "expressionAssetIds", issues);
+  validateOptionalString(value, "description", "description", issues);
+  validateOptionalString(value, "personality", "personality", issues);
+  validateOptionalString(value, "speechStyle", "speechStyle", issues);
+  validateOptionalString(value, "appearance", "appearance", issues);
+  validateOptionalString(value, "defaultPortraitAssetId", "defaultPortraitAssetId", issues);
+  validateOptionalString(value, "sourceHeroineId", "sourceHeroineId", issues);
+  validateOptionalString(value, "sourceHeroineName", "sourceHeroineName", issues);
+  validateOptionalString(value, "sourceSnapshotCreatedAt", "sourceSnapshotCreatedAt", issues);
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerCharacter);
 }
 
@@ -501,6 +641,32 @@ export function parseVnMakerScene(value: unknown): DtoParseResult<VnMakerScene> 
   hasString(value, "text", "text", issues);
   hasArray(value, "characters", "characters", issues);
   hasArray(value, "choices", "choices", issues);
+  validateOptionalString(value, "backgroundAssetId", "backgroundAssetId", issues);
+  validateOptionalString(value, "cgAssetId", "cgAssetId", issues);
+  validateOptionalString(value, "next", "next", issues);
+  if (Array.isArray(value.characters)) {
+    value.characters.forEach((character, index) => {
+      if (!isRecord(character)) {
+        addSchemaIssue(issues, `characters.${index}`, "객체여야 합니다.");
+        return;
+      }
+      hasString(character, "characterId", `characters.${index}.characterId`, issues, { nonEmpty: true });
+      validateOptionalString(character, "expression", `characters.${index}.expression`, issues);
+      validateOptionalString(character, "assetId", `characters.${index}.assetId`, issues);
+      validateOptionalString(character, "position", `characters.${index}.position`, issues);
+    });
+  }
+  if (Array.isArray(value.choices)) {
+    value.choices.forEach((choice, index) => {
+      if (!isRecord(choice)) {
+        addSchemaIssue(issues, `choices.${index}`, "객체여야 합니다.");
+        return;
+      }
+      hasString(choice, "id", `choices.${index}.id`, issues, { nonEmpty: true });
+      hasString(choice, "text", `choices.${index}.text`, issues);
+      hasString(choice, "next", `choices.${index}.next`, issues, { nonEmpty: true });
+    });
+  }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerScene);
 }
 
@@ -1438,7 +1604,7 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
           ? projectCharacter?.expressionAssetIds?.[normalizeTag(character.expression)]
           : undefined;
         const fallbackAssetId = projectCharacter?.defaultPortraitAssetId || projectCharacter?.portraitAssetIds[0];
-        const assetId = character.assetId || expressionAssetId || fallbackAssetId;
+        const assetId = expressionAssetId || character.assetId || fallbackAssetId;
         return {
           ...character,
           asset: assetId ? assetMap.get(assetId) : undefined

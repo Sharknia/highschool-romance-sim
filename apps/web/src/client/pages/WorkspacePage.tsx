@@ -128,6 +128,7 @@ interface PendingPatch {
     text?: string;
     operations?: string[];
   };
+  patchHistoryEntry?: PatchHistoryEntry;
 }
 
 interface PatchHistoryEntry {
@@ -135,6 +136,11 @@ interface PatchHistoryEntry {
   status: "proposed" | "applied" | "failed";
   summary: string;
   validationIssues: Array<{ path: string; message: string; severity: string }>;
+  attempts?: Array<{ attempt: number; ok: boolean; failureKind?: string; issues?: string[] }>;
+  diff?: {
+    text?: string;
+    operations?: string[];
+  };
   beforeSummary?: string;
   afterSummary?: string;
   revertedAt?: string;
@@ -213,6 +219,7 @@ export function WorkspacePage() {
   const [generationJobs, setGenerationJobs] = useState<GenerationJob[]>([]);
   const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
   const [runtime, setRuntime] = useState<RuntimeData | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState("");
   const [currentSceneId, setCurrentSceneId] = useState("");
   const [sceneDraft, setSceneDraft] = useState<SceneDraft | null>(null);
   const [result, setResult] = useState("{}");
@@ -220,7 +227,7 @@ export function WorkspacePage() {
   const [workspaceStatus, setWorkspaceStatus] = useState("작업 대기 중");
   const [lastExport, setLastExport] = useState<Record<string, unknown> | null>(null);
 
-  const currentRoute = project?.routes[0] || null;
+  const currentRoute = project?.routes.find((route) => route.id === selectedRouteId) || project?.routes[0] || null;
   const currentHeroine = project?.characters.find((character) => character.id === currentRoute?.heroineId) || null;
   const plannedJobCount = generationJobs.filter((job) => job.status === "planned").length;
   const failedJobCount = generationJobs.filter((job) => job.status === "failed").length;
@@ -275,9 +282,22 @@ export function WorkspacePage() {
     setProject(nextProject);
     setProjectJson(JSON.stringify(nextProject, null, 2));
     setGenerationJobs(nextProject.generationJobs || []);
+    setSelectedRouteId((current) => nextProject.routes.some((route) => route.id === current) ? current : nextProject.routes[0]?.id || "");
     if (!sceneDraft && nextProject.scenes[0]) {
       setSceneDraft(cloneScene(nextProject.scenes[0]));
       setCurrentSceneId(nextProject.scenes[0].id);
+    }
+  }
+
+  function selectRoute(routeId: string): void {
+    setSelectedRouteId(routeId);
+    const route = project?.routes.find((item) => item.id === routeId);
+    const entryScene = project?.scenes.find((item) => item.id === route?.entrySceneId);
+    if (route?.entrySceneId) {
+      setCurrentSceneId(route.entrySceneId);
+    }
+    if (entryScene) {
+      setSceneDraft(cloneScene(entryScene));
     }
   }
 
@@ -465,6 +485,8 @@ export function WorkspacePage() {
     const response = await runAction("이벤트 패치 제안", async () => postAuthedJson<ApiResult>("/api/events/expand", {
       projectDirectory: projectDirectory || undefined,
       userEvent: prompt,
+      routeId: currentRoute?.id || undefined,
+      heroineId: currentRoute?.heroineId || undefined,
       afterSceneId: sceneDraft?.id || currentSceneId || undefined
     }));
     if (response && typeof response === "object" && (response as ApiResult).ok) {
@@ -480,7 +502,8 @@ export function WorkspacePage() {
     await runAction("이벤트 패치 승인", async () => postAuthedJson<ApiResult>("/api/events/approve", {
       projectDirectory: projectDirectory || undefined,
       request: pendingPatch.request,
-      plan: pendingPatch.plan
+      plan: pendingPatch.plan,
+      patchHistoryId: pendingPatch.patchHistoryEntry?.id
     }));
     setPendingPatch(null);
     await loadPatchHistory();
@@ -748,6 +771,38 @@ export function WorkspacePage() {
                   <Button disabled={!pendingPatch} icon={<XCircle size={16} />} onClick={() => setPendingPatch(null)}>취소</Button>
                 </div>
               </header>
+              {project?.routes.length ? (
+                <div className="route-panel">
+                  <div className="route-selector">
+                    <select aria-label="루트 선택" value={currentRoute?.id || ""} onChange={(event) => selectRoute(event.target.value)}>
+                      {project.routes.map((route) => (
+                        <option key={route.id} value={route.id}>{route.title}</option>
+                      ))}
+                    </select>
+                    <div className="inline-status">
+                      {currentRoute?.id || "루트 없음"} · {currentHeroine?.displayName || currentRoute?.heroineId || "히로인 없음"} · 시작 {currentRoute?.entrySceneId || "없음"}
+                    </div>
+                  </div>
+                  <div className="route-list" aria-label="루트 목록">
+                    {project.routes.map((route) => {
+                      const routeHeroine = project.characters.find((character) => character.id === route.heroineId);
+                      const entryScene = project.scenes.find((item) => item.id === route.entrySceneId);
+                      return (
+                        <button
+                          className={currentRoute?.id === route.id ? "route-item selected" : "route-item"}
+                          key={route.id}
+                          onClick={() => selectRoute(route.id)}
+                          type="button"
+                        >
+                          <strong>{route.title}</strong>
+                          <span>{route.id}</span>
+                          <small>{routeHeroine?.displayName || route.heroineId} · {route.entrySceneId} · {entryScene ? "연결됨" : "시작 씬 없음"}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : <div className="inline-status">루트가 없습니다.</div>}
               <div className="scene-layout">
                 <div className="scene-list">
                   {(project?.scenes || []).map((item) => (
@@ -873,7 +928,28 @@ export function WorkspacePage() {
                     <strong>{entry.summary}</strong>
                     <span>{entry.status}{entry.revertedAt ? " · reverted" : ""}</span>
                     {entry.beforeSummary && entry.afterSummary ? <small>{entry.beforeSummary}{" -> "}{entry.afterSummary}</small> : null}
+                    {entry.diff?.text ? <small>{entry.diff.text}</small> : null}
                     {entry.validationIssues.length > 0 ? <small>{entry.validationIssues[0].path}: {entry.validationIssues[0].message}</small> : null}
+                    {(entry.attempts?.length || entry.rawOutput || entry.diff?.operations?.length) ? (
+                      <details className="history-details">
+                        <summary>상세</summary>
+                        {entry.attempts?.length ? (
+                          <ul>
+                            {entry.attempts.map((attempt) => (
+                              <li key={attempt.attempt}>
+                                attempt {attempt.attempt}: {attempt.ok ? "ok" : attempt.failureKind || "failed"}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {entry.diff?.operations?.length ? (
+                          <ul>
+                            {entry.diff.operations.map((operation) => <li key={operation}>{operation}</li>)}
+                          </ul>
+                        ) : null}
+                        {entry.rawOutput ? <pre>{formatResult(entry.rawOutput)}</pre> : null}
+                      </details>
+                    ) : null}
                     {entry.status === "applied" && !entry.revertedAt ? <Button icon={<RotateCcw size={15} />} onClick={() => void undoPatch(entry.id)}>되돌리기</Button> : null}
                   </article>
                 ))}

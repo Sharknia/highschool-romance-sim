@@ -146,6 +146,21 @@ const expressionPreview = await useCases.previewProject({ projectDirectory, star
 const previewScene = expressionPreview.runtime.scenes.find((scene) => scene.id === "scene-happy-expression");
 assert.equal(previewScene.characters[0].asset.id, defaults.project.characters[0].expressionAssetIds.happy);
 
+const expressionSceneWithPortrait = {
+  ...expressionScene,
+  id: "scene-happy-expression-explicit-portrait",
+  characters: [{
+    characterId: "haru-festival",
+    expression: "happy",
+    assetId: "asset-haru-festival-portrait",
+    position: "center"
+  }]
+};
+await useCases.saveScene({ projectDirectory, scene: expressionSceneWithPortrait });
+const expressionPriorityPreview = await useCases.previewProject({ projectDirectory, startSceneId: "scene-happy-expression-explicit-portrait" });
+const priorityScene = expressionPriorityPreview.runtime.scenes.find((scene) => scene.id === "scene-happy-expression-explicit-portrait");
+assert.equal(priorityScene.characters[0].asset.id, defaults.project.characters[0].expressionAssetIds.happy);
+
 const boardBefore = await useCases.listGenerationJobs({ projectDirectory, status: "planned" });
 assert.equal(boardBefore.jobs.some((job) => job.id === "job-haru-festival-expression-shy"), true);
 assert.equal(boardBefore.jobs[0].provider, "image-generation-adapter");
@@ -167,6 +182,10 @@ const retriedBatch = await useCases.runGenerationJobs({
 assert.equal(retriedBatch.ok, true);
 assert.equal(retriedBatch.jobs[0].status, "completed");
 assert.equal(retriedBatch.assets[0].kind, "expression");
+assert.match(retriedBatch.assets[0].uri, /^data:image\/png;base64,/);
+const openedAfterRetry = await useCases.openProject({ projectDirectory });
+const retriedAsset = openedAfterRetry.project.assets.find((asset) => asset.id === "asset-haru-festival-expression-shy");
+assert.match(retriedAsset.uri, /^data:image\/png;base64,/);
 
 const replacedBatch = await useCases.runGenerationJobs({
   projectDirectory,
@@ -176,12 +195,14 @@ const replacedBatch = await useCases.runGenerationJobs({
 assert.equal(replacedBatch.ok, true);
 assert.equal(replacedBatch.jobs[0].status, "completed");
 assert.equal(replacedBatch.assets[0].id, "asset-haru-festival-expression-shy");
+assert.match(replacedBatch.assets[0].uri, /^data:image\/png;base64,/);
 
 const expanded = await useCases.expandEvent({
   projectDirectory,
   userEvent: "축제 전날 하루가 도서관에서 대본을 떨어트리고 당황하는 짧은 이벤트"
 });
 assert.equal(expanded.ok, true);
+assert.equal(Boolean(expanded.patchHistoryEntry?.id), true);
 
 const proposedHistory = await useCases.listPatchHistory({ projectDirectory });
 assert.equal(proposedHistory.entries.some((entry) => entry.status === "proposed" && entry.rawOutput), true);
@@ -203,7 +224,8 @@ assert.equal(failedHistory.entries.some((entry) => entry.status === "failed" && 
 const approved = await useCases.approveEvent({
   projectDirectory,
   request: expanded.request,
-  plan: expanded.plan
+  plan: expanded.plan,
+  patchHistoryId: expanded.patchHistoryEntry.id
 });
 assert.equal(approved.ok, true);
 const sceneCountAfterApprove = approved.project.scenes.length;
@@ -213,6 +235,9 @@ const appliedEntry = appliedHistory.entries.find((entry) => entry.status === "ap
 assert.equal(Boolean(appliedEntry), true);
 assert.match(appliedEntry.beforeSummary, /씬/);
 assert.match(appliedEntry.afterSummary, /씬/);
+assert.equal(Boolean(appliedEntry.rawOutput), true);
+assert.equal(appliedEntry.attempts.length > 0, true);
+assert.match(appliedEntry.diff.text, /씬|CG|생성 작업/);
 
 const undone = await useCases.undoPatch({
   projectDirectory,
@@ -223,6 +248,29 @@ assert.equal(undone.project.scenes.length, sceneCountAfterApprove - expanded.pla
 
 const historyAfterUndo = await useCases.listPatchHistory({ projectDirectory });
 assert.equal(historyAfterUndo.entries.some((entry) => entry.id === appliedEntry.id && entry.revertedAt), true);
+
+const secondExpanded = await useCases.expandEvent({
+  projectDirectory,
+  userEvent: "되돌린 뒤 하루가 축제 포스터 문구를 다시 고르는 짧은 이벤트"
+});
+assert.equal(secondExpanded.ok, true);
+const secondApproved = await useCases.approveEvent({
+  projectDirectory,
+  request: secondExpanded.request,
+  plan: secondExpanded.plan,
+  patchHistoryId: secondExpanded.patchHistoryEntry.id
+});
+const manuallyEditedScene = {
+  ...secondApproved.project.scenes[0],
+  text: `${secondApproved.project.scenes[0].text} 수동 수정`
+};
+await useCases.saveScene({ projectDirectory, scene: manuallyEditedScene });
+await assert.rejects(
+  () => useCases.undoPatch({ projectDirectory, patchHistoryId: secondApproved.patchHistoryEntry.id }),
+  /현재 프로젝트가 패치 적용 직후 상태와 달라/
+);
+const openedAfterRejectedUndo = await useCases.openProject({ projectDirectory });
+assert.equal(openedAfterRejectedUndo.project.scenes.find((scene) => scene.id === manuallyEditedScene.id).text, manuallyEditedScene.text);
 
 let codexTextCalls = 0;
 const mockApi = webHandlers.createApiRequestHandler({

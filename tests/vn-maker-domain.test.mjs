@@ -15,6 +15,13 @@ const parsedProject = core.parseVnMakerProject({
 assert.equal(parsedProject.ok, false);
 assert.equal(parsedProject.issues.some((issue) => issue.path === "title"), true);
 
+const parsedMalformedNestedProject = core.parseVnMakerProject({
+  ...starter,
+  characters: [{}]
+});
+assert.equal(parsedMalformedNestedProject.ok, false);
+assert.equal(parsedMalformedNestedProject.issues.some((issue) => issue.path === "characters.0.id"), true);
+
 const parsedValidProject = core.parseVnMakerProject(starter);
 assert.equal(parsedValidProject.ok, true);
 assert.equal(parsedValidProject.value.id, "domain-test");

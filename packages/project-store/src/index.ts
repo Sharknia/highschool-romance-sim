@@ -8,6 +8,7 @@ import {
   applyGenerationResultToProject,
   createPlayerRuntimeData,
   createStarterProject,
+  hashProjectSnapshot,
   parseVnMakerProject,
   updateGenerationJobStatus,
   upsertProjectCharacter,
@@ -1030,9 +1031,14 @@ VALUES (
 
   applyEventExpansionPlan(
     request: EventExpansionRequest,
-    plan: EventExpansionPlan
+    plan: EventExpansionPlan,
+    sourcePatchHistoryId?: string
   ): ApplyEventExpansionResult {
     const project = this.requireProject();
+    const sourcePatchHistoryEntry = sourcePatchHistoryId ? this.getPatchHistoryEntry(sourcePatchHistoryId) : null;
+    if (sourcePatchHistoryId && !sourcePatchHistoryEntry) {
+      throw new Error(`패치 제안 이력을 찾을 수 없습니다: ${sourcePatchHistoryId}`);
+    }
     const patchValidation = validateEventExpansionPlan(project, request, plan);
     if (!patchValidation.ok || !patchValidation.appliedProject) {
       this.saveValidationIssues(project.id, patchValidation.issues);
@@ -1041,6 +1047,8 @@ VALUES (
         summary: plan.summary || "패치 검증 실패",
         request,
         plan,
+        rawOutput: sourcePatchHistoryEntry?.rawOutput,
+        attempts: sourcePatchHistoryEntry?.attempts,
         validation: patchValidation,
         diff: patchValidation.diff,
         beforeProject: project
@@ -1055,6 +1063,8 @@ VALUES (
       summary: plan.summary,
       request,
       plan,
+      rawOutput: sourcePatchHistoryEntry?.rawOutput,
+      attempts: sourcePatchHistoryEntry?.attempts,
       validation,
       diff: patchValidation.diff,
       beforeProject: project,
@@ -1135,6 +1145,18 @@ ORDER BY created_at DESC, id DESC
     return rows.map(patchHistoryEntryFromRow);
   }
 
+  getPatchHistoryEntry(patchHistoryId: string): PatchHistoryEntry | null {
+    const project = this.requireProject();
+    const row = this.db.prepare(`
+SELECT id, status, summary, request_json, plan_json, raw_output_json, attempts_json,
+  validation_issues_json, diff_json, before_project_json, after_project_json,
+  created_at, reverted_at
+FROM patch_history
+WHERE project_id = ? AND id = ?
+`).get(project.id, patchHistoryId) as PatchHistoryRow | undefined;
+    return row ? patchHistoryEntryFromRow(row) : null;
+  }
+
   recordPatchHistory(input: RecordPatchHistoryInput): PatchHistoryEntry {
     const project = this.requireProject();
     const createdAt = nowIso();
@@ -1189,8 +1211,15 @@ WHERE project_id = ? AND id = ?
     }
 
     const beforeProject = parseJson<VnMakerProject | null>(row.before_project_json, null);
+    const afterProject = parseJson<VnMakerProject | null>(row.after_project_json, null);
     if (!beforeProject) {
       throw new Error("되돌릴 프로젝트 스냅샷이 없습니다.");
+    }
+    if (!afterProject) {
+      throw new Error("패치 적용 직후 프로젝트 스냅샷이 없습니다.");
+    }
+    if (hashProjectSnapshot(project) !== hashProjectSnapshot(afterProject)) {
+      throw new Error("현재 프로젝트가 패치 적용 직후 상태와 달라 되돌릴 수 없습니다.");
     }
     const saved = this.saveProject(beforeProject);
     this.db.prepare("UPDATE patch_history SET reverted_at = ? WHERE id = ?").run(nowIso(), patchHistoryId);

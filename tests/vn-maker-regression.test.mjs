@@ -224,6 +224,13 @@ const mockCodex = {
 };
 
 const mockApi = webHandlers.createApiRequestHandler({ codex: mockCodex });
+const apiServerFailure = await mockApi({
+  method: "POST",
+  path: "/api/project/open",
+  body: { projectDirectory: "/dev/null/Nope.vnmaker" }
+});
+assert.equal(apiServerFailure.status, 500);
+
 const apiSession = await mockApi({ method: "GET", path: "/api/codex/session" });
 assert.equal(apiSession.status, 200);
 assert.equal(apiSession.body.connected, true);

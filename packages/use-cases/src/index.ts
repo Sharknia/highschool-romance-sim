@@ -384,6 +384,26 @@ function selectGenerationInput(project: VnMakerProject, store: ProjectStore, inp
   };
 }
 
+function withWorkspacePreviewUri(result: ProjectImageGenerationResult): ProjectImageGenerationResult {
+  const previewUri = result.image?.dataUrl || result.image?.uri || result.asset.uri;
+  if (!previewUri) {
+    return result;
+  }
+  return {
+    ...result,
+    asset: {
+      ...result.asset,
+      uri: previewUri
+    },
+    image: result.image
+      ? {
+          ...result.image,
+          uri: result.image.uri || previewUri
+        }
+      : result.image
+  };
+}
+
 export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
   const defaultProjectDirectory = options.defaultProjectDirectory || getDefaultProjectDirectory();
 
@@ -625,7 +645,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           });
           return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error };
         }
-        store.recordPatchHistory({
+        const patchHistoryEntry = store.recordPatchHistory({
           status: "proposed",
           summary: result.plan.summary,
           request,
@@ -645,7 +665,8 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           validation: result.validation,
           diff: result.validation.diff,
           attempts: result.attempts,
-          rawOutput: result.rawOutput
+          rawOutput: result.rawOutput,
+          patchHistoryEntry
         };
       } finally {
         store.close();
@@ -653,9 +674,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     },
 
     async approveEvent(input: unknown) {
+      const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const result = store.applyEventExpansionPlan(requiredEventRequest(input), requiredEventPlan(input));
+        const sourcePatchHistoryId = typeof record.patchHistoryId === "string" ? record.patchHistoryId : undefined;
+        const result = store.applyEventExpansionPlan(requiredEventRequest(input), requiredEventPlan(input), sourcePatchHistoryId);
         return { ok: true, projectDirectory: store.paths.projectDirectory, ...result };
       } finally {
         store.close();
@@ -796,7 +819,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           try {
             store.markGenerationJobStatus(jobId, "running");
             const generationInput = selectGenerationInput(store.requireProject(), store, { ...record, jobId });
-            const result = await options.image.generateImageAsset(generationInput);
+            const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
             const savedProject = await store.storeGenerationResult(result);
             const savedJob = savedProject.generationJobs.find((job) => job.id === result.job.id) || result.job;
             jobs.push(savedJob);
@@ -836,7 +859,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           if (generationInput.jobId) {
             store.markGenerationJobStatus(generationInput.jobId, "running");
           }
-          const result = await options.image.generateImageAsset(generationInput);
+          const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
           const savedProject = await store.storeGenerationResult(result);
           return { ok: true, projectDirectory: store.paths.projectDirectory, project: savedProject, ...result };
         } catch (error) {
