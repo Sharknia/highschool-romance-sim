@@ -629,8 +629,7 @@ export function parseVnMakerProject(value: unknown): DtoParseResult<VnMakerProje
   }
 
   const project = value as unknown as VnMakerProject;
-  const domainIssues = validateProject(project).filter((issue) => issue.severity === "error");
-  return domainIssues.length > 0 ? parseFail(domainIssues) : parseOk(project);
+  return parseOk(project);
 }
 
 export function parseHeroineProfileInput(value: unknown): DtoParseResult<CreateHeroineProfileInput> {

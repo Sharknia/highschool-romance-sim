@@ -17,6 +17,7 @@ const projectDirectory = join(tempRoot, "TestGame.vnmaker");
 const starterOnlyProjectDirectory = join(tempRoot, "StarterOnly.vnmaker");
 const alphaDirectory = join(tempRoot, "AlphaHeroine.vnmaker");
 const cliExpansionDirectory = join(tempRoot, "CliExpansion.vnmaker");
+const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 
 const project = core.createStarterProject({
@@ -191,6 +192,130 @@ const apiStarterOnlyJob = await webHandlers.handleApiRequest({
 assert.equal(apiStarterOnlyJob.status, 200);
 assert.equal(apiStarterOnlyJob.body.ok, true);
 assert.equal(apiStarterOnlyJob.body.project.id, "starter-only");
+
+const manualCliCreateOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-project-from-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    heroine: {
+      id: "haru-manual",
+      name: "하루",
+      description: "수동 제작 테스트 히로인.",
+      personality: "차분하다.",
+      speechStyle: "조심스러운 말투.",
+      appearance: "단정한 교복."
+    },
+    title: "Manual CLI API",
+    premise: "CLI와 API가 같은 수동 제작 use-case를 호출한다."
+  }),
+  encoding: "utf8"
+});
+const manualCliCreate = JSON.parse(manualCliCreateOutput);
+assert.equal(manualCliCreate.ok, true);
+const manualCliOpeningId = manualCliCreate.project.routes[0].entrySceneId;
+
+execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    scene: {
+      ...manualCliCreate.project.scenes.find((scene) => scene.id === manualCliOpeningId),
+      next: undefined
+    }
+  }),
+  encoding: "utf8"
+});
+
+const manualCliInsertOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "insert-scene"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    sourceSceneId: manualCliOpeningId,
+    link: { type: "choice", choiceId: "choice-good", choiceText: "고백한다" },
+    scene: {
+      id: "scene-cli-good-ending",
+      label: "CLI 굿 엔딩",
+      speaker: "하루",
+      text: "함께 완성하자.",
+      characters: [],
+      choices: []
+    }
+  }),
+  encoding: "utf8"
+});
+const manualCliInsert = JSON.parse(manualCliInsertOutput);
+assert.equal(manualCliInsert.ok, true);
+assert.equal(manualCliInsert.selectedSceneId, "scene-cli-good-ending");
+
+const manualCliEndingOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "set-scene-ending"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    sceneId: "scene-cli-good-ending",
+    ending: { id: "ending-cli-good", title: "CLI의 약속", kind: "good" }
+  }),
+  encoding: "utf8"
+});
+const manualCliEnding = JSON.parse(manualCliEndingOutput);
+assert.equal(manualCliEnding.ok, true);
+assert.equal(manualCliEnding.routeGraphAnalysis.reachableEndingIds.includes("ending-cli-good"), true);
+
+const manualApiInsert = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/insert",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    link: { type: "none" },
+    scene: {
+      id: "scene-api-normal-ending",
+      label: "API 노멀 엔딩",
+      speaker: "하루",
+      text: "다음 작품도 만들자.",
+      characters: [],
+      choices: [],
+      ending: { id: "ending-api-normal", title: "API의 다음 작품", kind: "normal" }
+    }
+  }
+});
+assert.equal(manualApiInsert.status, 200);
+assert.equal(manualApiInsert.body.ok, true);
+
+const manualApiLink = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/link",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    sourceSceneId: manualCliOpeningId,
+    targetSceneId: "scene-api-normal-ending",
+    link: { type: "choice", choiceId: "choice-normal", choiceText: "전시를 마무리한다" }
+  }
+});
+assert.equal(manualApiLink.status, 200);
+assert.equal(manualApiLink.body.ok, true);
+assert.deepEqual(manualApiLink.body.routeGraphAnalysis.uncoveredTerminalSceneIds, []);
+assert.deepEqual([...manualApiLink.body.routeGraphAnalysis.reachableEndingIds].sort(), ["ending-api-normal", "ending-cli-good"]);
+
+const manualApiMissingTarget = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/link",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    sourceSceneId: manualCliOpeningId,
+    targetSceneId: "scene-does-not-exist",
+    link: { type: "choice", choiceText: "없는 장면으로 간다" }
+  }
+});
+assert.equal(manualApiMissingTarget.status, 400);
+assert.match(manualApiMissingTarget.body.error, /target scene을 찾을 수 없습니다/);
+
+const manualApiEndingFailure = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/ending",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    sceneId: manualCliOpeningId,
+    ending: { id: "ending-api-bad", title: "갑작스런 끝", kind: "bad" },
+    clearOutgoing: false
+  }
+});
+assert.equal(manualApiEndingFailure.status, 400);
+assert.match(manualApiEndingFailure.body.error, /다음 장면이나 선택지를 제거해야 합니다/);
 
 const sampleImageBase64 = Buffer.from("fake image").toString("base64");
 const codexImageResult = await codexGeneration.createCodexImageAssetResult(

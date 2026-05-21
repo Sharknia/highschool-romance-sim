@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   DEFAULT_EMOTION_TAGS,
+  analyzeRouteGraph,
   buildProjectHtml,
   createAssetManifest,
   createDeterministicEventExpansionPlan,
@@ -29,9 +30,11 @@ import {
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
+  type VnMakerChoice,
   type VnMakerGenerationJob,
   type VnMakerProject,
-  type VnMakerScene
+  type VnMakerScene,
+  type VnMakerSceneEnding
 } from "@vn-maker/engine-core";
 import {
   createProjectWorkspace,
@@ -201,6 +204,136 @@ function tagsFrom(value: unknown): string[] {
     return value.split(",").map((item) => item.trim());
   }
   return [];
+}
+
+function slugId(value: string, fallback: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "") || fallback;
+}
+
+function uniqueSceneId(project: VnMakerProject, seed: string): string {
+  const used = new Set(project.scenes.map((scene) => scene.id));
+  const base = slugId(seed, "scene-new").startsWith("scene-")
+    ? slugId(seed, "scene-new")
+    : `scene-${slugId(seed, "new")}`;
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`scene id를 생성할 수 없습니다: ${base}`);
+}
+
+function uniqueChoiceId(scene: VnMakerScene, seed: string): string {
+  const used = new Set(scene.choices.map((choice) => choice.id));
+  const base = slugId(seed, "choice-new").startsWith("choice-")
+    ? slugId(seed, "choice-new")
+    : `choice-${scene.id}-${slugId(seed, "new")}`;
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`choice id를 생성할 수 없습니다: ${base}`);
+}
+
+function uniqueEndingId(project: VnMakerProject, sceneId: string): string {
+  const used = new Set(project.scenes.flatMap((scene) => scene.ending?.id ? [scene.ending.id] : []));
+  const base = `ending-${slugId(sceneId.replace(/^scene-/, ""), "scene")}`;
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`ending id를 생성할 수 없습니다: ${base}`);
+}
+
+function projectClone(project: VnMakerProject): VnMakerProject {
+  return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+}
+
+function manualInputError(message: string, path: string, sceneIds?: string[], choiceIds?: string[]): InputValidationError {
+  return new InputValidationError(message, [{ severity: "error", path, message }].map((issue) => ({
+    ...issue,
+    sceneIds,
+    choiceIds
+  } as ValidationIssue)));
+}
+
+function sceneFromInput(project: VnMakerProject, inputScene: unknown): VnMakerScene {
+  const record = asRecord(inputScene);
+  const candidate = {
+    ...record,
+    id: typeof record.id === "string" && record.id.trim()
+      ? record.id.trim()
+      : uniqueSceneId(project, String(record.label || record.text || "scene-new")),
+    label: typeof record.label === "string" ? record.label : "새 장면",
+    speaker: typeof record.speaker === "string" ? record.speaker : "",
+    text: typeof record.text === "string" ? record.text : "",
+    characters: Array.isArray(record.characters) ? record.characters : [],
+    choices: Array.isArray(record.choices) ? record.choices : []
+  };
+  if (project.scenes.some((scene) => scene.id === candidate.id)) {
+    candidate.id = uniqueSceneId(project, candidate.id);
+  }
+  return requireParsed(parseVnMakerScene(candidate), "scene");
+}
+
+function endingFromInput(project: VnMakerProject, sceneId: string, inputEnding: unknown): VnMakerSceneEnding | undefined {
+  if (inputEnding === null) {
+    return undefined;
+  }
+  const record = asRecord(inputEnding);
+  const candidate = {
+    id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : uniqueEndingId(project, sceneId),
+    title: typeof record.title === "string" ? record.title : "새 엔딩",
+    kind: typeof record.kind === "string" ? record.kind : "normal"
+  };
+  const parsed = parseVnMakerScene({
+    id: sceneId,
+    label: "ending validation",
+    speaker: "",
+    text: "",
+    characters: [],
+    choices: [],
+    ending: candidate
+  });
+  if (!parsed.ok) {
+    throw new InputValidationError("ending 입력이 올바르지 않습니다.", parsed.issues.map((issue) => ({
+      ...issue,
+      path: issue.path.replace(/^ending/, "ending")
+    })));
+  }
+  return candidate as VnMakerSceneEnding;
+}
+
+function manualMutationResult(store: ProjectStore, project: VnMakerProject, selectedSceneId: string) {
+  const savedProject = store.saveProject(project);
+  const validation = store.validateAndStore();
+  const routeGraphAnalysis = analyzeRouteGraph(savedProject);
+  return {
+    ok: true,
+    projectDirectory: store.paths.projectDirectory,
+    project: savedProject,
+    validation,
+    routeGraphAnalysis,
+    selectedSceneId
+  };
 }
 
 function cloneHeroineProfile(source: HeroineProfile, input: unknown): HeroineProfile {
@@ -561,6 +694,153 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.upsertScene(requiredScene(input));
         const validation = store.validateAndStore();
         return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation };
+      } finally {
+        store.close();
+      }
+    },
+
+    async insertManualScene(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = projectClone(store.requireProject());
+        const route = project.routes[0];
+        if (!route) {
+          throw manualInputError("프로젝트에 route가 없습니다.", "routes");
+        }
+
+        const link = asRecord(record.link);
+        const linkType = typeof link.type === "string" ? link.type : "none";
+        if (!["none", "next", "choice"].includes(linkType)) {
+          throw manualInputError("link.type은 none, next, choice 중 하나여야 합니다.", "link.type");
+        }
+        if (linkType !== "none" && typeof record.sourceSceneId !== "string") {
+          throw manualInputError("sourceSceneId 입력이 필요합니다.", "sourceSceneId");
+        }
+
+        const sourceScene = typeof record.sourceSceneId === "string"
+          ? project.scenes.find((scene) => scene.id === record.sourceSceneId)
+          : undefined;
+        if (linkType !== "none" && !sourceScene) {
+          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [String(record.sourceSceneId || "")]);
+        }
+        if (sourceScene?.ending) {
+          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+        }
+
+        const scene = sceneFromInput(project, record.scene);
+        if (linkType === "next" && sourceScene) {
+          if (sourceScene.choices.length > 0) {
+            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          if (sourceScene.next && link.preservePreviousNext === true && !scene.ending && !scene.next) {
+            scene.next = sourceScene.next;
+          }
+          sourceScene.next = scene.id;
+        }
+        if (linkType === "choice" && sourceScene) {
+          if (sourceScene.next) {
+            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+          if (!choiceText) {
+            throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id]);
+          }
+          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+            ? link.choiceId.trim()
+            : uniqueChoiceId(sourceScene, choiceText);
+          const choice: VnMakerChoice = { id: choiceId, text: choiceText, next: scene.id };
+          sourceScene.choices.push(choice);
+        }
+
+        project.scenes.push(scene);
+        return manualMutationResult(store, project, scene.id);
+      } finally {
+        store.close();
+      }
+    },
+
+    async linkManualScene(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = projectClone(store.requireProject());
+        const sourceSceneId = String(record.sourceSceneId || "");
+        const targetSceneId = String(record.targetSceneId || "");
+        const sourceScene = project.scenes.find((scene) => scene.id === sourceSceneId);
+        const targetScene = project.scenes.find((scene) => scene.id === targetSceneId);
+        if (!sourceScene) {
+          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [sourceSceneId]);
+        }
+        if (!targetScene) {
+          throw manualInputError("연결할 target scene을 찾을 수 없습니다.", "targetSceneId", [targetSceneId]);
+        }
+        if (sourceScene.ending) {
+          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+        }
+
+        const link = asRecord(record.link);
+        const linkType = typeof link.type === "string" ? link.type : "next";
+        if (linkType === "next") {
+          if (sourceScene.choices.length > 0) {
+            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          sourceScene.next = targetScene.id;
+        } else if (linkType === "choice") {
+          if (sourceScene.next) {
+            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+          }
+          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+            ? link.choiceId.trim()
+            : uniqueChoiceId(sourceScene, choiceText || targetScene.label);
+          const existingChoice = sourceScene.choices.find((choice) => choice.id === choiceId);
+          if (existingChoice) {
+            existingChoice.next = targetScene.id;
+            if (choiceText) {
+              existingChoice.text = choiceText;
+            }
+          } else {
+            if (!choiceText) {
+              throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id], [choiceId]);
+            }
+            sourceScene.choices.push({ id: choiceId, text: choiceText, next: targetScene.id });
+          }
+        } else {
+          throw manualInputError("link.type은 next 또는 choice여야 합니다.", "link.type", [sourceScene.id]);
+        }
+
+        return manualMutationResult(store, project, targetScene.id);
+      } finally {
+        store.close();
+      }
+    },
+
+    async setSceneEnding(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = projectClone(store.requireProject());
+        const sceneId = String(record.sceneId || "");
+        const scene = project.scenes.find((item) => item.id === sceneId);
+        if (!scene) {
+          throw manualInputError("엔딩을 설정할 scene을 찾을 수 없습니다.", "sceneId", [sceneId]);
+        }
+
+        if (record.ending === null) {
+          scene.ending = undefined;
+          return manualMutationResult(store, project, scene.id);
+        }
+
+        if ((scene.next || scene.choices.length > 0) && record.clearOutgoing !== true) {
+          throw manualInputError("엔딩으로 지정하려면 다음 장면이나 선택지를 제거해야 합니다.", "clearOutgoing", [scene.id]);
+        }
+        if (record.clearOutgoing === true) {
+          scene.next = undefined;
+          scene.choices = [];
+        }
+        scene.ending = endingFromInput(project, scene.id, record.ending);
+        return manualMutationResult(store, project, scene.id);
       } finally {
         store.close();
       }

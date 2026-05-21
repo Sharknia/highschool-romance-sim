@@ -22,6 +22,12 @@ interface CliInput {
   outputPath?: string;
   character?: VnMakerCharacter;
   scene?: VnMakerScene;
+  sourceSceneId?: string;
+  targetSceneId?: string;
+  sceneId?: string;
+  link?: unknown;
+  ending?: unknown;
+  clearOutgoing?: boolean;
   heroine?: unknown;
   heroineId?: string;
   sourceHeroineId?: string;
@@ -94,6 +100,9 @@ function printCapabilities(): void {
       "delete-heroine",
       "save-character",
       "save-scene",
+      "insert-scene",
+      "link-scene",
+      "set-scene-ending",
       "validate-store",
       "validate",
       "manifest",
@@ -177,6 +186,21 @@ async function run(): Promise<void> {
 
   if (command === "save-scene") {
     writeJson(await useCases.saveScene(input));
+    return;
+  }
+
+  if (command === "insert-scene") {
+    writeJson(await useCases.insertManualScene(input));
+    return;
+  }
+
+  if (command === "link-scene") {
+    writeJson(await useCases.linkManualScene(input));
+    return;
+  }
+
+  if (command === "set-scene-ending") {
+    writeJson(await useCases.setSceneEnding(input));
     return;
   }
 
