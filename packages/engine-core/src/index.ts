@@ -93,6 +93,14 @@ export interface VnMakerEnding {
   condition: VnMakerCondition;
 }
 
+export type VnMakerEndingKind = "good" | "normal" | "bad";
+
+export interface VnMakerSceneEnding {
+  id: string;
+  title: string;
+  kind: VnMakerEndingKind;
+}
+
 export interface VnMakerScene {
   id: string;
   label: string;
@@ -103,6 +111,7 @@ export interface VnMakerScene {
   characters: VnMakerSceneCharacter[];
   choices: VnMakerChoice[];
   next?: string;
+  ending?: VnMakerSceneEnding;
   condition?: VnMakerCondition;
   memoryTags?: Record<string, string[]>;
 }
@@ -160,6 +169,42 @@ export interface ValidationIssue {
   severity: ValidationSeverity;
   path: string;
   message: string;
+}
+
+export type RouteGraphIssueCode =
+  | "missing-target"
+  | "ending-has-outgoing"
+  | "mixed-outgoing"
+  | "uncovered-terminal"
+  | "cycle-without-ending-path"
+  | "duplicate-choice-id"
+  | "empty-choice-text"
+  | "duplicate-ending-id"
+  | "invalid-ending"
+  | "orphan-scene";
+
+export interface RouteGraphIssue {
+  code: RouteGraphIssueCode;
+  severity: ValidationSeverity;
+  sceneIds: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+  message: string;
+}
+
+export interface RouteGraphAnalysis {
+  routeId: string;
+  entrySceneId: string;
+  reachableSceneIds: string[];
+  orphanSceneIds: string[];
+  terminalSceneIds: string[];
+  reachableEndingIds: string[];
+  uncoveredTerminalSceneIds: string[];
+  missingTargets: Array<{ sourceSceneId: string; targetSceneId: string; edgeType: "next" | "choice"; choiceId?: string }>;
+  invalidEndingOutgoingSceneIds: string[];
+  mixedOutgoingSceneIds: string[];
+  cyclesWithoutEndingPath: string[][];
+  issues: RouteGraphIssue[];
 }
 
 export interface AssetManifest {
@@ -323,6 +368,7 @@ export interface PlayerRuntimeScene {
   characters: Array<VnMakerSceneCharacter & { asset?: VnMakerAsset }>;
   choices: VnMakerChoice[];
   next?: string;
+  ending?: VnMakerSceneEnding;
   backgroundAsset?: VnMakerAsset;
   cgAsset?: VnMakerAsset;
 }
@@ -448,6 +494,22 @@ function validateStringMap(value: unknown, path: string, issues: ValidationIssue
 function validateOptionalString(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): void {
   if (record[key] !== undefined && typeof record[key] !== "string") {
     addSchemaIssue(issues, path, "문자열이어야 합니다.");
+  }
+}
+
+function validateSceneEnding(value: unknown, path: string, issues: ValidationIssue[]): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!isRecord(value)) {
+    addSchemaIssue(issues, path, "객체여야 합니다.");
+    return;
+  }
+  hasString(value, "id", `${path}.id`, issues, { nonEmpty: true });
+  hasString(value, "title", `${path}.title`, issues, { nonEmpty: true });
+  hasString(value, "kind", `${path}.kind`, issues, { nonEmpty: true });
+  if (typeof value.kind === "string" && !["good", "normal", "bad"].includes(value.kind)) {
+    addSchemaIssue(issues, `${path}.kind`, `지원하지 않는 엔딩 종류입니다: ${value.kind}`);
   }
 }
 
@@ -644,6 +706,7 @@ export function parseVnMakerScene(value: unknown): DtoParseResult<VnMakerScene> 
   validateOptionalString(value, "backgroundAssetId", "backgroundAssetId", issues);
   validateOptionalString(value, "cgAssetId", "cgAssetId", issues);
   validateOptionalString(value, "next", "next", issues);
+  validateSceneEnding(value.ending, "ending", issues);
   if (Array.isArray(value.characters)) {
     value.characters.forEach((character, index) => {
       if (!isRecord(character)) {
@@ -663,7 +726,7 @@ export function parseVnMakerScene(value: unknown): DtoParseResult<VnMakerScene> 
         return;
       }
       hasString(choice, "id", `choices.${index}.id`, issues, { nonEmpty: true });
-      hasString(choice, "text", `choices.${index}.text`, issues);
+      hasString(choice, "text", `choices.${index}.text`, issues, { nonEmpty: true });
       hasString(choice, "next", `choices.${index}.next`, issues, { nonEmpty: true });
     });
   }
@@ -941,6 +1004,7 @@ export function createProjectFromHeroine(input: CreateProjectFromHeroineInput): 
   const id = input.id || normalizeId(title);
   const routeId = `${input.heroine.id}-route`;
   const openingSceneId = `scene-${input.heroine.id}-opening`;
+  const defaultEndingSceneId = `scene-${input.heroine.id}-default-ending`;
   const portraitAssetId = input.heroine.defaultPortraitAssetId || input.heroine.portraitAssetIds[0] || `asset-${input.heroine.id}-portrait`;
 
   return {
@@ -966,7 +1030,21 @@ export function createProjectFromHeroine(input: CreateProjectFromHeroineInput): 
         speaker: "나",
         text: `${input.heroine.name}와의 이야기가 시작되려 한다.`,
         characters: [{ characterId: input.heroine.id, expression: "normal", assetId: portraitAssetId, position: "center" }],
-        choices: []
+        choices: [],
+        next: defaultEndingSceneId
+      },
+      {
+        id: defaultEndingSceneId,
+        label: "기본 엔딩",
+        speaker: input.heroine.name,
+        text: "오늘의 이야기는 여기서 잠시 마무리된다.",
+        characters: [{ characterId: input.heroine.id, expression: "normal", assetId: portraitAssetId, position: "center" }],
+        choices: [],
+        ending: {
+          id: "ending-default",
+          title: "기본 엔딩",
+          kind: "normal"
+        }
       }
     ],
     assets: [
@@ -1082,7 +1160,12 @@ export function createStarterProject(input: CreateStarterProjectInput = {}): VnM
         text: "고마워. 너랑 같이 만들면, 왠지 완성할 수 있을 것 같아.",
         backgroundAssetId: "asset-classroom-bg",
         characters: [{ characterId: "haru", expression: "happy", assetId: "asset-haru-portrait", position: "center" }],
-        choices: []
+        choices: [],
+        ending: {
+          id: "ending-default",
+          title: "기본 엔딩",
+          kind: "normal"
+        }
       }
     ],
     assets: [
@@ -1193,6 +1276,7 @@ export function createDeterministicEventExpansionPlan(request: EventExpansionReq
   const cgJobId = `job-cg-${seed}`;
   const heroineName = request.heroineContext.name;
   const portraitAssetId = `asset-${request.heroineId}-portrait`;
+  const explicitEndingRequested = /엔딩|끝내|마무리/.test(request.userEvent);
 
   return {
     summary: `${heroineName}와 도서관에서 책을 줍다가 손이 겹치는 3씬 러브코미디 이벤트를 추가합니다.`,
@@ -1248,7 +1332,14 @@ export function createDeterministicEventExpansionPlan(request: EventExpansionReq
             speaker: heroineName,
             text: "괜찮아. 그런데... 방금 건 아무한테도 말하지 말아줘.",
             characters: [{ characterId: request.heroineId, expression: "shy", assetId: portraitAssetId, position: "center" }],
-            choices: []
+            choices: [],
+            ending: explicitEndingRequested
+              ? {
+                  id: `ending-${seed}`,
+                  title: `${heroineName}와의 작은 비밀`,
+                  kind: "normal"
+                }
+              : undefined
           }
         },
         {
@@ -1364,6 +1455,340 @@ function addIssue(issues: ValidationIssue[], path: string, message: string, seve
   issues.push({ severity, path, message });
 }
 
+function addRouteGraphIssue(
+  issues: RouteGraphIssue[],
+  issue: RouteGraphIssue
+): void {
+  issues.push(issue);
+}
+
+function isSceneEnding(value: unknown): value is VnMakerSceneEnding {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && Boolean(value.id.trim())
+    && typeof value.title === "string"
+    && Boolean(value.title.trim())
+    && typeof value.kind === "string"
+    && ["good", "normal", "bad"].includes(value.kind);
+}
+
+function routeGraphIssuePath(project: VnMakerProject, issue: RouteGraphIssue): string {
+  const sceneId = issue.sceneIds[0];
+  const sceneIndex = project.scenes.findIndex((scene) => scene.id === sceneId);
+  if (sceneIndex < 0) {
+    return "routes";
+  }
+  if (issue.choiceIds?.[0]) {
+    const choiceIndex = project.scenes[sceneIndex].choices.findIndex((choice) => choice.id === issue.choiceIds?.[0]);
+    return choiceIndex >= 0 ? `scenes.${sceneIndex}.choices.${choiceIndex}` : `scenes.${sceneIndex}.choices`;
+  }
+  if (issue.code === "invalid-ending" || issue.code === "duplicate-ending-id" || issue.code === "ending-has-outgoing") {
+    return `scenes.${sceneIndex}.ending`;
+  }
+  if (issue.code === "mixed-outgoing") {
+    return `scenes.${sceneIndex}`;
+  }
+  return `scenes.${sceneIndex}`;
+}
+
+function routeGraphIssueToValidationIssue(project: VnMakerProject, issue: RouteGraphIssue): ValidationIssue {
+  return {
+    severity: issue.severity,
+    path: routeGraphIssuePath(project, issue),
+    message: issue.message
+  };
+}
+
+export function analyzeRouteGraph(project: VnMakerProject, routeId?: string): RouteGraphAnalysis {
+  const route = routeId
+    ? project.routes.find((item) => item.id === routeId)
+    : project.routes.find((item) => item.id === project.settings.defaultRouteId) || project.routes[0];
+  const routeIdValue = route?.id || routeId || "";
+  const entrySceneId = route?.entrySceneId || "";
+  const sceneMap = new Map(project.scenes.map((scene) => [scene.id, scene]));
+  const issues: RouteGraphIssue[] = [];
+  const reachableSceneIds: string[] = [];
+  const reachableSet = new Set<string>();
+  const terminalSceneIds: string[] = [];
+  const terminalSet = new Set<string>();
+  const reachableEndingIds: string[] = [];
+  const uncoveredTerminalSceneIds: string[] = [];
+  const missingTargets: RouteGraphAnalysis["missingTargets"] = [];
+  const invalidEndingOutgoingSceneIds: string[] = [];
+  const mixedOutgoingSceneIds: string[] = [];
+  const graphEdges = new Map<string, string[]>();
+  const endingSceneById = new Map<string, string>();
+
+  function markTerminal(sceneId: string): void {
+    if (!terminalSet.has(sceneId)) {
+      terminalSet.add(sceneId);
+      terminalSceneIds.push(sceneId);
+    }
+  }
+
+  function inspectScene(scene: VnMakerScene): Array<{ targetSceneId: string; edgeType: "next" | "choice"; choiceId?: string }> {
+    const edges: Array<{ targetSceneId: string; edgeType: "next" | "choice"; choiceId?: string }> = [];
+    const choiceIds = new Set<string>();
+    const duplicateChoiceIds = new Set<string>();
+
+    scene.choices.forEach((choice) => {
+      if (!choice.id.trim() || choiceIds.has(choice.id)) {
+        duplicateChoiceIds.add(choice.id);
+      }
+      choiceIds.add(choice.id);
+      if (!choice.text.trim()) {
+        addRouteGraphIssue(issues, {
+          code: "empty-choice-text",
+          severity: "error",
+          sceneIds: [scene.id],
+          choiceIds: [choice.id],
+          message: "선택지 문구가 비어 있습니다."
+        });
+      }
+    });
+
+    duplicateChoiceIds.forEach((choiceId) => {
+      addRouteGraphIssue(issues, {
+        code: "duplicate-choice-id",
+        severity: "error",
+        sceneIds: [scene.id],
+        choiceIds: choiceId ? [choiceId] : undefined,
+        message: `같은 장면 안에 중복 선택지 id가 있습니다: ${choiceId || "(empty)"}`
+      });
+    });
+
+    if (scene.ending !== undefined && !isSceneEnding(scene.ending)) {
+      addRouteGraphIssue(issues, {
+        code: "invalid-ending",
+        severity: "error",
+        sceneIds: [scene.id],
+        message: "엔딩 정보가 올바르지 않습니다."
+      });
+    }
+
+    if (isSceneEnding(scene.ending)) {
+      markTerminal(scene.id);
+      reachableEndingIds.push(scene.ending.id);
+      const duplicateSceneId = endingSceneById.get(scene.ending.id);
+      if (duplicateSceneId) {
+        addRouteGraphIssue(issues, {
+          code: "duplicate-ending-id",
+          severity: "error",
+          sceneIds: [duplicateSceneId, scene.id],
+          message: `같은 route 안에 중복 엔딩 id가 있습니다: ${scene.ending.id}`
+        });
+      } else {
+        endingSceneById.set(scene.ending.id, scene.id);
+      }
+      if (scene.next || scene.choices.length > 0) {
+        invalidEndingOutgoingSceneIds.push(scene.id);
+        addRouteGraphIssue(issues, {
+          code: "ending-has-outgoing",
+          severity: "error",
+          sceneIds: [scene.id],
+          message: "엔딩 장면에는 다음 장면이나 선택지가 있을 수 없습니다."
+        });
+      }
+      return [];
+    }
+
+    if (scene.choices.length > 0) {
+      if (scene.next) {
+        mixedOutgoingSceneIds.push(scene.id);
+        addRouteGraphIssue(issues, {
+          code: "mixed-outgoing",
+          severity: "error",
+          sceneIds: [scene.id],
+          message: "같은 장면에 next와 choices를 동시에 둘 수 없습니다."
+        });
+      }
+      scene.choices.forEach((choice) => {
+        edges.push({ targetSceneId: choice.next, edgeType: "choice", choiceId: choice.id });
+      });
+      return edges;
+    }
+
+    if (scene.next) {
+      edges.push({ targetSceneId: scene.next, edgeType: "next" });
+      return edges;
+    }
+
+    markTerminal(scene.id);
+    uncoveredTerminalSceneIds.push(scene.id);
+    addRouteGraphIssue(issues, {
+      code: "uncovered-terminal",
+      severity: "error",
+      sceneIds: [scene.id],
+      message: "이 분기는 엔딩 없이 끝납니다."
+    });
+    return [];
+  }
+
+  function visit(sceneId: string): void {
+    if (reachableSet.has(sceneId)) {
+      return;
+    }
+    const scene = sceneMap.get(sceneId);
+    if (!scene) {
+      return;
+    }
+    reachableSet.add(sceneId);
+    reachableSceneIds.push(sceneId);
+
+    const outgoing = inspectScene(scene);
+    const validTargets: string[] = [];
+    outgoing.forEach((edge) => {
+      if (!sceneMap.has(edge.targetSceneId)) {
+        missingTargets.push({
+          sourceSceneId: scene.id,
+          targetSceneId: edge.targetSceneId,
+          edgeType: edge.edgeType,
+          choiceId: edge.choiceId
+        });
+        addRouteGraphIssue(issues, {
+          code: "missing-target",
+          severity: "error",
+          sceneIds: [scene.id],
+          choiceIds: edge.choiceId ? [edge.choiceId] : undefined,
+          targetSceneId: edge.targetSceneId,
+          message: `${edge.edgeType === "choice" ? "선택지" : "다음 장면"}가 존재하지 않는 장면으로 이동합니다: ${edge.targetSceneId}`
+        });
+        return;
+      }
+      validTargets.push(edge.targetSceneId);
+    });
+    graphEdges.set(sceneId, validTargets);
+    validTargets.forEach((targetSceneId) => visit(targetSceneId));
+  }
+
+  if (entrySceneId) {
+    if (sceneMap.has(entrySceneId)) {
+      visit(entrySceneId);
+    } else {
+      missingTargets.push({ sourceSceneId: routeIdValue, targetSceneId: entrySceneId, edgeType: "next" });
+      addRouteGraphIssue(issues, {
+        code: "missing-target",
+        severity: "error",
+        sceneIds: [],
+        targetSceneId: entrySceneId,
+        message: `route entrySceneId가 존재하지 않는 장면을 가리킵니다: ${entrySceneId}`
+      });
+    }
+  }
+
+  const orphanSceneIds = project.scenes
+    .map((scene) => scene.id)
+    .filter((sceneId) => !reachableSet.has(sceneId));
+  orphanSceneIds.forEach((sceneId) => {
+    addRouteGraphIssue(issues, {
+      code: "orphan-scene",
+      severity: "warning",
+      sceneIds: [sceneId],
+      message: `route entry에서 도달할 수 없는 장면입니다: ${sceneId}`
+    });
+  });
+
+  const canReachEndingMemo = new Map<string, boolean>();
+  function canReachEnding(sceneId: string, visiting = new Set<string>()): boolean {
+    if (canReachEndingMemo.has(sceneId)) {
+      return canReachEndingMemo.get(sceneId) || false;
+    }
+    const scene = sceneMap.get(sceneId);
+    if (!scene) {
+      canReachEndingMemo.set(sceneId, false);
+      return false;
+    }
+    if (isSceneEnding(scene.ending)) {
+      canReachEndingMemo.set(sceneId, true);
+      return true;
+    }
+    if (visiting.has(sceneId)) {
+      return false;
+    }
+    visiting.add(sceneId);
+    const reaches = (graphEdges.get(sceneId) || []).some((targetSceneId) => canReachEnding(targetSceneId, visiting));
+    visiting.delete(sceneId);
+    canReachEndingMemo.set(sceneId, reaches);
+    return reaches;
+  }
+
+  const indexByScene = new Map<string, number>();
+  const lowlinkByScene = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const cyclesWithoutEndingPath: string[][] = [];
+  let nextIndex = 0;
+
+  function strongConnect(sceneId: string): void {
+    indexByScene.set(sceneId, nextIndex);
+    lowlinkByScene.set(sceneId, nextIndex);
+    nextIndex += 1;
+    stack.push(sceneId);
+    onStack.add(sceneId);
+
+    (graphEdges.get(sceneId) || []).forEach((targetSceneId) => {
+      if (!reachableSet.has(targetSceneId)) {
+        return;
+      }
+      if (!indexByScene.has(targetSceneId)) {
+        strongConnect(targetSceneId);
+        lowlinkByScene.set(sceneId, Math.min(lowlinkByScene.get(sceneId) || 0, lowlinkByScene.get(targetSceneId) || 0));
+      } else if (onStack.has(targetSceneId)) {
+        lowlinkByScene.set(sceneId, Math.min(lowlinkByScene.get(sceneId) || 0, indexByScene.get(targetSceneId) || 0));
+      }
+    });
+
+    if (lowlinkByScene.get(sceneId) !== indexByScene.get(sceneId)) {
+      return;
+    }
+
+    const component: string[] = [];
+    let current: string | undefined;
+    do {
+      current = stack.pop();
+      if (!current) {
+        break;
+      }
+      onStack.delete(current);
+      component.push(current);
+    } while (current !== sceneId);
+
+    const hasSelfLoop = component.length === 1 && (graphEdges.get(component[0]) || []).includes(component[0]);
+    const isCycle = component.length > 1 || hasSelfLoop;
+    if (isCycle && !component.some((componentSceneId) => canReachEnding(componentSceneId))) {
+      const orderedComponent = component.sort((left, right) => reachableSceneIds.indexOf(left) - reachableSceneIds.indexOf(right));
+      cyclesWithoutEndingPath.push(orderedComponent);
+      addRouteGraphIssue(issues, {
+        code: "cycle-without-ending-path",
+        severity: "error",
+        sceneIds: orderedComponent,
+        message: "선택지 분기가 엔딩에 도달하지 못하고 순환합니다."
+      });
+    }
+  }
+
+  reachableSceneIds.forEach((sceneId) => {
+    if (!indexByScene.has(sceneId)) {
+      strongConnect(sceneId);
+    }
+  });
+
+  return {
+    routeId: routeIdValue,
+    entrySceneId,
+    reachableSceneIds,
+    orphanSceneIds,
+    terminalSceneIds,
+    reachableEndingIds,
+    uncoveredTerminalSceneIds,
+    missingTargets,
+    invalidEndingOutgoingSceneIds,
+    mixedOutgoingSceneIds,
+    cyclesWithoutEndingPath,
+    issues
+  };
+}
+
 export function validateEventExpansionPlan(
   project: VnMakerProject,
   request: EventExpansionRequest,
@@ -1383,6 +1808,10 @@ export function validateEventExpansionPlan(
   }
   if (!project.scenes.some((scene) => scene.id === request.afterSceneId)) {
     addIssue(issues, "request.afterSceneId", "삽입 기준 씬이 프로젝트에 없습니다.");
+  }
+  const afterScene = project.scenes.find((scene) => scene.id === request.afterSceneId);
+  if (afterScene?.ending) {
+    addIssue(issues, "request.afterSceneId", "엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다.");
   }
   if (request.baseProjectHash !== hashProjectSnapshot(project)) {
     addIssue(issues, "request.baseProjectHash", "패치 생성 기준 프로젝트와 현재 프로젝트가 다릅니다.");
@@ -1500,6 +1929,12 @@ export function validateProject(project: VnMakerProject): ValidationIssue[] {
     }
   });
 
+  project.routes.forEach((route) => {
+    analyzeRouteGraph(project, route.id).issues.forEach((issue) => {
+      issues.push(routeGraphIssueToValidationIssue(project, issue));
+    });
+  });
+
   project.scenes.forEach((scene, sceneIndex) => {
     [scene.backgroundAssetId, scene.cgAssetId].filter(Boolean).forEach((assetId) => {
       if (!assetIds.has(assetId!)) {
@@ -1612,6 +2047,7 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
       }),
       choices: scene.choices,
       next: scene.next,
+      ending: scene.ending,
       backgroundAsset: scene.backgroundAssetId ? assetMap.get(scene.backgroundAssetId) : undefined,
       cgAsset: scene.cgAssetId ? assetMap.get(scene.cgAssetId) : undefined
     })),

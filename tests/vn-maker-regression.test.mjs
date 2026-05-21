@@ -52,9 +52,11 @@ assert.match(htmlArtifact.html, /application\/json/);
 const store = await projectStore.createProjectWorkspace({ projectDirectory, project });
 assert.equal(existsSync(join(projectDirectory, "project.sqlite")), true);
 assert.equal(existsSync(join(projectDirectory, "assets", "generated")), true);
+assert.equal(store.requireProject().scenes.find((scene) => scene.id === "scene-haru-smile").ending.id, "ending-default");
 
 const exportedProject = store.exportProjectSnapshot();
 assert.equal(exportedProject.id, project.id);
+assert.equal(exportedProject.scenes.find((scene) => scene.id === "scene-haru-smile").ending.title, "기본 엔딩");
 
 const secondCharacter = {
   id: "mira",
@@ -312,7 +314,7 @@ const eventRequest = core.createEventExpansionRequest(alphaStore.requireProject(
   routeId: alphaStore.requireProject().routes[0].id,
   afterSceneId: alphaStore.requireProject().scenes[0].id,
   heroineId: "haru",
-  userEvent: "하루와 도서관에서 있던 일이야. 하루가 책을 떨어트리고, 내가 책을 주워주려다가 두 사람의 손이 겹쳐. 둘 다 당황해서 어색해지는 짧은 러브코미디 이벤트로 만들어줘. 씬은 3개, CG는 1개만 만들어줘.",
+  userEvent: "하루와 도서관에서 있던 일이야. 하루가 책을 떨어트리고, 내가 책을 주워주려다가 두 사람의 손이 겹쳐. 둘 다 당황해서 어색해지는 짧은 러브코미디 이벤트로 만들고 노멀 엔딩으로 끝내줘. 씬은 3개, CG는 1개만 만들어줘.",
   constraints: {
     maxScenes: 3,
     maxChoices: 1,
@@ -333,7 +335,7 @@ const badEventPlan = {
 };
 const badPatchValidation = core.validateEventExpansionPlan(alphaStore.requireProject(), eventRequest, badEventPlan);
 assert.equal(badPatchValidation.ok, false);
-assert.equal(alphaStore.requireProject().scenes.length, 1);
+assert.equal(alphaStore.requireProject().scenes.length, 2);
 
 assert.equal("expandNaturalLanguageEvent" in codexGeneration, false);
 const generatedEvent = await useCasesModule.expandNaturalLanguageEvent({
@@ -369,7 +371,7 @@ const apiExpand = await mockApi({
 assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.plan.decision.sceneCount, 3);
 assert.equal(apiExpand.body.validation.ok, true);
-assert.equal(alphaStore.requireProject().scenes.length, 1);
+assert.equal(alphaStore.requireProject().scenes.length, 2);
 assert.equal(mockCodexTextCalls, 0);
 
 const apiApprove = await mockApi({
@@ -383,7 +385,7 @@ const apiApprove = await mockApi({
 });
 assert.equal(apiApprove.status, 200);
 assert.equal(apiApprove.body.validation.ok, true);
-assert.equal(apiApprove.body.project.scenes.length, 4);
+assert.equal(apiApprove.body.project.scenes.length, 5);
 
 const approvedProject = apiApprove.body.project;
 const plannedCgJob = approvedProject.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
@@ -446,12 +448,16 @@ assert.doesNotMatch(cliBundle, /expandNaturalLanguageEvent/);
 const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "expand-event"], {
   input: JSON.stringify({
     projectDirectory: cliExpansionDirectory,
-    starter: {
+    project: core.createProjectFromHeroine({
       id: "cli-expansion",
       title: "CLI Expansion",
-      premise: "CLI가 공통 expansion use case를 호출하는 회귀 테스트"
-    },
-    userEvent: "방과 후 복도에서 우연히 마주치는 짧은 이벤트"
+      premise: "CLI가 공통 expansion use case를 호출하는 회귀 테스트",
+      heroine: haruHeroine
+    }),
+    routeId: "haru-route",
+    afterSceneId: "scene-haru-opening",
+    heroineId: "haru",
+    userEvent: "방과 후 복도에서 우연히 마주치고 노멀 엔딩으로 끝나는 짧은 이벤트"
   }),
   encoding: "utf8"
 });

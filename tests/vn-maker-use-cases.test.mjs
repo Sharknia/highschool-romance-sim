@@ -72,7 +72,7 @@ assert.equal(created.project.characters.length, 1);
 
 const expanded = await useCases.expandEvent({
   projectDirectory,
-  userEvent: "도서관에서 책을 줍다가 손이 겹치는 이벤트"
+  userEvent: "도서관에서 책을 줍다가 손이 겹치고 노멀 엔딩으로 끝나는 이벤트"
 });
 assert.equal(expanded.ok, true);
 assert.equal(expanded.plan.decision.sceneCount, 3);
@@ -83,7 +83,7 @@ const approved = await useCases.approveEvent({
   plan: expanded.plan
 });
 assert.equal(approved.ok, true);
-assert.equal(approved.project.scenes.length, 4);
+assert.equal(approved.project.scenes.length, 5);
 
 const plannedJob = approved.project.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
 assert.equal(Boolean(plannedJob), true);

@@ -48,6 +48,14 @@ interface RuntimeAsset {
   uri?: string;
 }
 
+type SceneEndingKind = "good" | "normal" | "bad";
+
+interface SceneEnding {
+  id: string;
+  title: string;
+  kind: SceneEndingKind;
+}
+
 interface RuntimeScene {
   id: string;
   label: string;
@@ -56,6 +64,7 @@ interface RuntimeScene {
   characters: Array<{ characterId: string; expression?: string; asset?: RuntimeAsset; position?: string }>;
   choices: Array<{ id: string; text: string; next: string }>;
   next?: string;
+  ending?: SceneEnding;
   backgroundAsset?: RuntimeAsset;
   cgAsset?: RuntimeAsset;
 }
@@ -92,6 +101,7 @@ interface SceneDraft {
   characters: Array<{ characterId: string; expression?: string; assetId?: string; position?: "left" | "center" | "right" }>;
   choices: Array<{ id: string; text: string; next: string }>;
   next?: string;
+  ending?: SceneEnding;
   backgroundAssetId?: string;
   cgAssetId?: string;
 }

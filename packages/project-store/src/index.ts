@@ -209,6 +209,7 @@ interface SceneRow {
   characters_json: string;
   choices_json: string;
   next_scene_id: string | null;
+  ending_json: string | null;
   condition_json: string | null;
   memory_tags_json: string | null;
   position: number;
@@ -433,6 +434,13 @@ CREATE TABLE IF NOT EXISTS patch_history (
 
 CREATE INDEX IF NOT EXISTS idx_patch_history_project_created ON patch_history(project_id, created_at);
 `
+  },
+  {
+    id: 4,
+    name: "scene_level_ending",
+    sql: `
+ALTER TABLE scenes ADD COLUMN ending_json TEXT;
+`
   }
 ] as const;
 
@@ -637,7 +645,7 @@ ORDER BY position ASC, id ASC
 `).all(project.id) as RouteRow[];
 
     const scenes = this.db.prepare(`
-SELECT id, label, speaker, text, background_asset_id, cg_asset_id, characters_json, choices_json, next_scene_id, condition_json, memory_tags_json, position
+SELECT id, label, speaker, text, background_asset_id, cg_asset_id, characters_json, choices_json, next_scene_id, ending_json, condition_json, memory_tags_json, position
 FROM scenes
 WHERE project_id = ?
 ORDER BY position ASC, id ASC
@@ -697,6 +705,7 @@ ORDER BY position ASC, id ASC
         characters: parseJson<VnMakerScene["characters"]>(row.characters_json, []),
         choices: parseJson<VnMakerScene["choices"]>(row.choices_json, []),
         next: row.next_scene_id || undefined,
+        ending: parseJson<VnMakerScene["ending"] | undefined>(row.ending_json, undefined),
         condition: parseJson<VnMakerScene["condition"] | undefined>(row.condition_json, undefined),
         memoryTags: parseJson<VnMakerScene["memoryTags"] | undefined>(row.memory_tags_json, undefined)
       })),
@@ -910,11 +919,11 @@ VALUES (@projectId, @id, @title, @heroineId, @summary, @entrySceneId, @endingsJs
       const insertScene = this.db.prepare(`
 INSERT INTO scenes (
   project_id, id, label, speaker, text, background_asset_id, cg_asset_id,
-  characters_json, choices_json, next_scene_id, condition_json, memory_tags_json, position
+  characters_json, choices_json, next_scene_id, ending_json, condition_json, memory_tags_json, position
 )
 VALUES (
   @projectId, @id, @label, @speaker, @text, @backgroundAssetId, @cgAssetId,
-  @charactersJson, @choicesJson, @nextSceneId, @conditionJson, @memoryTagsJson, @position
+  @charactersJson, @choicesJson, @nextSceneId, @endingJson, @conditionJson, @memoryTagsJson, @position
 )
 `);
       project.scenes.forEach((scene, position) => insertScene.run({
@@ -928,6 +937,7 @@ VALUES (
         charactersJson: json(scene.characters),
         choicesJson: json(scene.choices),
         nextSceneId: normalizeNullable(scene.next),
+        endingJson: scene.ending ? json(scene.ending) : null,
         conditionJson: scene.condition ? json(scene.condition) : null,
         memoryTagsJson: scene.memoryTags ? json(scene.memoryTags) : null,
         position
