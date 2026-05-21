@@ -1265,6 +1265,10 @@ function createEventId(seed: string, suffix: string): string {
   return normalizeId(`${seed}-${suffix}`).slice(0, 80);
 }
 
+function requestsExplicitSceneEnding(text: string): boolean {
+  return /(엔딩|굿\s*엔딩|노멀\s*엔딩|배드\s*엔딩|끝내\s*줘|결말|마지막\s*장면)/.test(text);
+}
+
 export function createDeterministicEventExpansionPlan(request: EventExpansionRequest): EventExpansionPlan {
   const seed = createEventId(`${request.heroineId}-${hashString(request.userEvent)}`, "library");
   const sceneOneId = `scene-${seed}-1`;
@@ -1275,7 +1279,7 @@ export function createDeterministicEventExpansionPlan(request: EventExpansionReq
   const cgJobId = `job-cg-${seed}`;
   const heroineName = request.heroineContext.name;
   const portraitAssetId = `asset-${request.heroineId}-portrait`;
-  const explicitEndingRequested = /엔딩|끝내|마무리/.test(request.userEvent);
+  const explicitEndingRequested = requestsExplicitSceneEnding(request.userEvent);
 
   return {
     summary: `${heroineName}와 도서관에서 책을 줍다가 손이 겹치는 3씬 러브코미디 이벤트를 추가합니다.`,

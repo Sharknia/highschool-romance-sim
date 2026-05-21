@@ -108,7 +108,7 @@ export interface ExpandNaturalLanguageEventInput {
 
 export type ExpandNaturalLanguageEventResult =
   | { ok: true; plan: EventExpansionPlan; validation: EventExpansionValidationResult; attempts: EventTextGenerationAttempt[]; rawOutput: unknown }
-  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown };
+  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown; validation?: EventExpansionValidationResult };
 
 export class InputValidationError extends Error {
   readonly issues: ValidationIssue[];
@@ -425,6 +425,7 @@ export async function expandNaturalLanguageEvent(
   const maxAttempts = input.maxAttempts ?? 3;
   const attempts: EventTextGenerationAttempt[] = [];
   let rawOutput: unknown;
+  let lastValidation: EventExpansionValidationResult | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const candidate = input.adapter
@@ -450,6 +451,7 @@ export async function expandNaturalLanguageEvent(
 
     const validation = validateEventExpansionPlan(input.project, input.request, parsed.value);
     if (!validation.ok) {
+      lastValidation = validation;
       attempts.push({
         attempt,
         ok: false,
@@ -473,7 +475,8 @@ export async function expandNaturalLanguageEvent(
     ok: false,
     attempts,
     error: attempts.at(-1)?.issues.join(", ") || "자연어 이벤트 생성에 실패했습니다.",
-    rawOutput
+    rawOutput,
+    validation: lastValidation
   };
 }
 
@@ -908,10 +911,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         if (!route) {
           throw new Error("이벤트를 추가할 루트가 없습니다.");
         }
+        const afterSceneId = typeof record.afterSceneId === "string" && record.afterSceneId ? record.afterSceneId : route.entrySceneId;
+        const afterScene = project.scenes.find((scene) => scene.id === afterSceneId);
+        if (afterScene?.ending) {
+          throw new InputValidationError("엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다.", [{
+            severity: "error",
+            path: "afterSceneId",
+            message: "엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다."
+          }]);
+        }
         const request = createEventExpansionRequest(project, {
           projectDirectory: store.paths.projectDirectory,
           routeId: route.id,
-          afterSceneId: typeof record.afterSceneId === "string" && record.afterSceneId ? record.afterSceneId : route.entrySceneId,
+          afterSceneId,
           heroineId: typeof record.heroineId === "string" && record.heroineId ? record.heroineId : route.heroineId,
           userEvent: String(record.userEvent || record.prompt || ""),
           constraints: record.constraints && typeof record.constraints === "object"
@@ -920,15 +932,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         });
         const result = await expandNaturalLanguageEvent({ project, request, adapter: options.eventText });
         if (!result.ok) {
+          const validation = result.validation || {
+            ok: false,
+            issues: [{ severity: "error" as const, path: "eventText", message: result.error }]
+          };
           store.recordPatchHistory({
             status: "failed",
             summary: "자연어 이벤트 생성 실패",
             request,
             rawOutput: result.rawOutput,
             attempts: result.attempts,
-            validation: { ok: false, issues: [{ severity: "error", path: "eventText", message: result.error }] }
+            validation
           });
-          return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error };
+          return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error, validation };
         }
         const patchHistoryEntry = store.recordPatchHistory({
           status: "proposed",

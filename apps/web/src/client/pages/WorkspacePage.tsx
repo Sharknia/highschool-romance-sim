@@ -380,7 +380,7 @@ export function WorkspacePage() {
     setLastExport(null);
     if (pendingPatch) {
       setPendingPatch(null);
-      setWorkspaceStatus("수동 변경으로 pending natural-language patch를 폐기했습니다.");
+      setWorkspaceStatus("패치가 현재 프로젝트의 최신 상태를 기준으로 하지 않습니다. 다시 제안받아 주세요.");
     }
   }
 

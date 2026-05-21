@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -321,6 +321,35 @@ const manualApiEndingFailure = await webHandlers.handleApiRequest({
 assert.equal(manualApiEndingFailure.status, 400);
 assert.match(manualApiEndingFailure.body.error, /다음 장면이나 선택지를 제거해야 합니다/);
 
+const manualApiExpandAfterEnding = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/events/expand",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    routeId: manualCliCreate.project.routes[0].id,
+    afterSceneId: "scene-cli-good-ending",
+    heroineId: "haru-manual",
+    userEvent: "엔딩 뒤에 도서관 이벤트를 추가해줘."
+  }
+});
+assert.equal(manualApiExpandAfterEnding.status, 400);
+assert.match(manualApiExpandAfterEnding.body.error, /엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다/);
+
+const manualCliExpandAfterEnding = spawnSync(process.execPath, ["packages/cli/dist/index.js", "expand-event"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    routeId: manualCliCreate.project.routes[0].id,
+    afterSceneId: "scene-cli-good-ending",
+    heroineId: "haru-manual",
+    userEvent: "엔딩 뒤에 도서관 이벤트를 추가해줘."
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(manualCliExpandAfterEnding.status, 0);
+const manualCliExpandAfterEndingBody = JSON.parse(manualCliExpandAfterEnding.stdout);
+assert.equal(manualCliExpandAfterEndingBody.ok, false);
+assert.match(manualCliExpandAfterEndingBody.error, /엔딩 장면 뒤에는 이벤트를 추가할 수 없습니다/);
+
 const branchHeroine = core.createHeroineProfile({
   id: "haru-branch",
   name: "하루",
@@ -397,6 +426,8 @@ assert.equal(sceneWorkbench.selectSceneOptions(branchEndingProject).some((option
 const blankSceneDraft = sceneWorkbench.createBlankSceneDraft(branchEndingProject, "scene-good-ending");
 assert.equal(blankSceneDraft.id.startsWith("scene-good-ending-next"), true);
 assert.equal(blankSceneDraft.choices.length, 0);
+const workspacePageSource = readFileSync("apps/web/src/client/pages/WorkspacePage.tsx", "utf8");
+assert.match(workspacePageSource, /패치가 현재 프로젝트의 최신 상태를 기준으로 하지 않습니다\. 다시 제안받아 주세요\./);
 
 const branchTerminalFailureProject = createBranchEndingProject("branch-terminal-failure");
 delete branchTerminalFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending").ending;
@@ -581,6 +612,44 @@ const eventRequest = core.createEventExpansionRequest(alphaStore.requireProject(
     contentRating: "teen"
   }
 });
+const nonExplicitEndingRequest = core.createEventExpansionRequest(alphaStore.requireProject(), {
+  projectDirectory: alphaDirectory,
+  routeId: alphaStore.requireProject().routes[0].id,
+  afterSceneId: alphaStore.requireProject().scenes[0].id,
+  heroineId: "haru",
+  userEvent: "도서관에서 전시를 마무리하는 짧은 이벤트를 추가해줘.",
+  constraints: {
+    maxScenes: 3,
+    maxChoices: 1,
+    maxCgCount: 1,
+    allowNewExpressionAssets: false,
+    language: "ko",
+    contentRating: "teen"
+  }
+});
+const nonExplicitEndingPlan = core.createDeterministicEventExpansionPlan(nonExplicitEndingRequest);
+const nonExplicitFinalSceneOperation = nonExplicitEndingPlan.patch.operations.filter((operation) => operation.type === "addScene").at(-1);
+assert.equal(nonExplicitFinalSceneOperation.scene.ending, undefined);
+const nonExplicitEndingValidation = core.validateEventExpansionPlan(alphaStore.requireProject(), nonExplicitEndingRequest, nonExplicitEndingPlan);
+assert.equal(nonExplicitEndingValidation.ok, false);
+assert.equal(nonExplicitEndingValidation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
+
+const nonExplicitApiExpand = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/events/expand",
+  body: {
+    projectDirectory: alphaDirectory,
+    routeId: nonExplicitEndingRequest.routeId,
+    afterSceneId: nonExplicitEndingRequest.afterSceneId,
+    heroineId: nonExplicitEndingRequest.heroineId,
+    userEvent: nonExplicitEndingRequest.userEvent
+  }
+});
+assert.equal(nonExplicitApiExpand.status, 200);
+assert.equal(nonExplicitApiExpand.body.ok, false);
+assert.equal(nonExplicitApiExpand.body.validation.ok, false);
+assert.equal(nonExplicitApiExpand.body.validation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
+
 const badEventPlan = {
   ...core.createDeterministicEventExpansionPlan(eventRequest),
   decision: {
