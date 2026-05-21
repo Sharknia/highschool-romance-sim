@@ -2075,7 +2075,13 @@ export function buildPlayerRuntimeScript(): string {
 
     function imageNode(asset, alt) {
       if (!asset || !asset.uri) return "";
-      return '<img src="' + asset.uri + '" alt="' + alt.replace(/"/g, "&quot;") + '">';
+      return '<img src="' + escapeText(asset.uri) + '" alt="' + escapeText(alt) + '">';
+    }
+
+    function escapeText(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, function (character) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character];
+      });
     }
 
     function render(sceneId) {
@@ -2091,20 +2097,33 @@ export function buildPlayerRuntimeScript(): string {
         images += imageNode(character.asset, character.characterId || "character");
       });
       if (scene.cgAsset) images += imageNode(scene.cgAsset, scene.cgAsset.label || "cg");
-      var choices = (scene.choices || []).map(function (choice) {
-        return '<button class="vn-choice" data-next="' + choice.next + '">' + choice.text + '</button>';
-      }).join("");
-      if (!choices && scene.next) {
-        choices = '<button class="vn-choice" data-next="' + scene.next + '">다음</button>';
+      var isEnding = Boolean(scene.ending);
+      var ending = "";
+      if (isEnding) {
+        ending = '<div class="vn-ending"><span class="vn-ending-title">엔딩: ' + escapeText(scene.ending.title) + '</span><span class="vn-ending-kind">' + escapeText(scene.ending.kind) + '</span></div>';
+      }
+      var choices = "";
+      if (isEnding) {
+        choices = '<button class="vn-choice vn-restart" data-restart="true">처음부터 다시</button>';
+      } else {
+        choices = (scene.choices || []).map(function (choice) {
+          return '<button class="vn-choice" data-next="' + escapeText(choice.next) + '">' + escapeText(choice.text) + '</button>';
+        }).join("");
+        if (!choices && scene.next) {
+          choices = '<button class="vn-choice" data-next="' + escapeText(scene.next) + '">다음</button>';
+        }
       }
       root.innerHTML =
         '<section class="vn-stage">' +
         '<div class="vn-images">' + images + '</div>' +
-        '<div class="vn-dialogue"><p class="vn-label">' + scene.label + '</p><h2>' + scene.speaker + '</h2><p>' + scene.text + '</p></div>' +
+        '<div class="vn-dialogue"><p class="vn-label">' + escapeText(scene.label) + '</p><h2>' + escapeText(scene.speaker) + '</h2><p>' + escapeText(scene.text) + '</p>' + ending + '</div>' +
         '<div class="vn-choices">' + choices + '</div>' +
         '</section>';
       root.querySelectorAll("[data-next]").forEach(function (button) {
         button.addEventListener("click", function () { render(button.getAttribute("data-next")); });
+      });
+      root.querySelectorAll("[data-restart]").forEach(function (button) {
+        button.addEventListener("click", function () { render(runtime.startSceneId); });
       });
     }
 
@@ -2156,6 +2175,10 @@ export function buildProjectHtml(project: VnMakerProject, options: BuildProjectH
     .vn-choices { display: flex; flex-direction: column; gap: 10px; }
     .vn-choice { border: 1px solid #60a5fa; border-radius: 8px; background: #1e3a8a; color: white; padding: 12px 14px; font: inherit; cursor: pointer; }
     .vn-choice:hover { background: #1d4ed8; }
+    .vn-ending { margin-top: 16px; display: flex; align-items: center; gap: 8px; color: #f8fafc; }
+    .vn-ending-title { font-weight: 700; }
+    .vn-ending-kind { border: 1px solid #64748b; border-radius: 6px; padding: 2px 8px; color: #cbd5e1; font-size: 12px; text-transform: uppercase; }
+    .vn-restart { border-color: #94a3b8; background: #334155; }
   </style>
 </head>
 <body>

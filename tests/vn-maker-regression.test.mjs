@@ -18,6 +18,9 @@ const starterOnlyProjectDirectory = join(tempRoot, "StarterOnly.vnmaker");
 const alphaDirectory = join(tempRoot, "AlphaHeroine.vnmaker");
 const cliExpansionDirectory = join(tempRoot, "CliExpansion.vnmaker");
 const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
+const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
+const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
+const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 
 const project = core.createStarterProject({
@@ -316,6 +319,99 @@ const manualApiEndingFailure = await webHandlers.handleApiRequest({
 });
 assert.equal(manualApiEndingFailure.status, 400);
 assert.match(manualApiEndingFailure.body.error, /다음 장면이나 선택지를 제거해야 합니다/);
+
+const branchHeroine = core.createHeroineProfile({
+  id: "haru-branch",
+  name: "하루",
+  description: "분기별 엔딩 export 테스트 히로인.",
+  personality: "침착하지만 선택 앞에서는 솔직하다.",
+  speechStyle: "담백한 말투.",
+  appearance: "단정한 교복과 연분홍 머리핀."
+});
+const createBranchEndingProject = (id) => {
+  const branchProject = core.createProjectFromHeroine({
+    id,
+    title: `Branch Ending ${id}`,
+    premise: "두 선택지가 각자 명시적 엔딩으로 도달한다.",
+    heroine: branchHeroine
+  });
+  const opening = branchProject.scenes.find((scene) => scene.id === "scene-haru-branch-opening");
+  const defaultEnding = branchProject.scenes.find((scene) => scene.id === "scene-haru-branch-default-ending");
+  opening.next = undefined;
+  opening.choices = [
+    { id: "choice-good", text: "고백한다", next: "scene-good-ending" },
+    { id: "choice-normal", text: "전시를 마무리한다", next: "scene-normal-ending" }
+  ];
+  defaultEnding.id = "scene-good-ending";
+  defaultEnding.label = "굿 엔딩";
+  defaultEnding.text = "문화제가 끝나도 함께 만들기로 했다.";
+  defaultEnding.cgAssetId = "asset-branch-cg";
+  defaultEnding.ending = { id: "ending-good", title: "문화제의 약속", kind: "good" };
+  branchProject.scenes.push({
+    id: "scene-normal-ending",
+    label: "노멀 엔딩",
+    speaker: "하루",
+    text: "오늘의 전시를 조용히 마무리했다.",
+    characters: [{ characterId: "haru-branch", expression: "normal", assetId: "asset-haru-branch-portrait", position: "center" }],
+    choices: [],
+    ending: { id: "ending-normal", title: "다음 작품으로", kind: "normal" }
+  });
+  branchProject.assets.push({ id: "asset-branch-cg", kind: "cg", label: "문화제 CG", source: "placeholder" });
+  return branchProject;
+};
+
+const branchEndingProject = createBranchEndingProject("branch-ending-export");
+const branchEndingStore = await projectStore.createProjectWorkspace({
+  projectDirectory: branchEndingDirectory,
+  project: branchEndingProject
+});
+const branchExport = await branchEndingStore.exportWebPlayer(join(tempRoot, "branch-ending-export"));
+assert.equal(branchExport.smoke.ok, true);
+assert.equal(branchExport.smoke.checks.branchEndingCoverage, true);
+assert.equal(branchExport.smoke.checks.endingMetadata, true);
+assert.deepEqual([...branchExport.smoke.reachableEndingIds].sort(), ["ending-good", "ending-normal"]);
+assert.deepEqual(branchExport.smoke.uncoveredTerminalSceneIds, []);
+assert.deepEqual(branchExport.smoke.cyclesWithoutEndingPath, []);
+const branchRuntimeScript = readFileSync(branchExport.export.runtimeScriptPath, "utf8");
+assert.match(branchRuntimeScript, /엔딩:/);
+assert.match(branchRuntimeScript, /처음부터 다시/);
+assert.match(branchRuntimeScript, /vn-ending/);
+branchEndingStore.close();
+
+const branchTerminalFailureProject = createBranchEndingProject("branch-terminal-failure");
+delete branchTerminalFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending").ending;
+const branchTerminalFailureStore = await projectStore.createProjectWorkspace({
+  projectDirectory: branchTerminalFailureDirectory,
+  project: branchTerminalFailureProject
+});
+await assert.rejects(
+  () => branchTerminalFailureStore.exportWebPlayer(join(tempRoot, "branch-terminal-failure-export")),
+  /엔딩 없이 끝납니다|검증 실패 프로젝트/
+);
+branchTerminalFailureStore.close();
+
+const branchCycleFailureProject = createBranchEndingProject("branch-cycle-failure");
+const cycleScene = branchCycleFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending");
+delete cycleScene.ending;
+cycleScene.next = "scene-cycle-loop";
+branchCycleFailureProject.scenes.push({
+  id: "scene-cycle-loop",
+  label: "순환 장면",
+  speaker: "하루",
+  text: "결말 없이 같은 고민으로 돌아온다.",
+  characters: [{ characterId: "haru-branch", expression: "normal", assetId: "asset-haru-branch-portrait", position: "center" }],
+  choices: [],
+  next: "scene-normal-ending"
+});
+const branchCycleFailureStore = await projectStore.createProjectWorkspace({
+  projectDirectory: branchCycleFailureDirectory,
+  project: branchCycleFailureProject
+});
+await assert.rejects(
+  () => branchCycleFailureStore.exportWebPlayer(join(tempRoot, "branch-cycle-failure-export")),
+  /순환합니다|검증 실패 프로젝트/
+);
+branchCycleFailureStore.close();
 
 const sampleImageBase64 = Buffer.from("fake image").toString("base64");
 const codexImageResult = await codexGeneration.createCodexImageAssetResult(
