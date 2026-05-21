@@ -93,6 +93,14 @@ function createAlphaSandboxCodexAdapter(): CodexGenerationAdapter {
   };
 }
 
+function createCodexRequiredEventTextAdapter(): EventTextGenerationAdapter {
+  return {
+    async generateEventExpansionPlan() {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+  };
+}
+
 function statusForError(error: unknown): number {
   if (error instanceof InputValidationError) {
     return 400;
@@ -159,7 +167,10 @@ class ApiServices {
     this.codex = options.codex || (isAlphaSandboxEnabled() ? createAlphaSandboxCodexAdapter() : createDefaultCodexAdapter());
     this.useCases = createVnMakerUseCases({
       defaultProjectDirectory: options.projectDirectory || getDefaultProjectDirectory(),
-      eventText: options.eventText || (this.codex.generateEventExpansionPlan ? { generateEventExpansionPlan: (input) => this.codex.generateEventExpansionPlan!(input) } : undefined),
+      eventText: options.eventText
+        || (this.codex.generateEventExpansionPlan
+          ? { generateEventExpansionPlan: (input) => this.codex.generateEventExpansionPlan!(input) }
+          : createCodexRequiredEventTextAdapter()),
       image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) }
     });
   }

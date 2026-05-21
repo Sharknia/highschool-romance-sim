@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -14,11 +14,73 @@ function runCli(command, input, env = {}) {
   return JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", command], {
     input: JSON.stringify(input),
     encoding: "utf8",
+    timeout: 10000,
     env: {
       ...process.env,
       ...env
     }
   }));
+}
+
+function runCliFailure(command, input, env = {}) {
+  try {
+    runCli(command, input, env);
+  } catch (error) {
+    if (error && typeof error === "object" && "stdout" in error) {
+      return JSON.parse(String(error.stdout));
+    }
+    throw error;
+  }
+  throw new Error(`CLI command unexpectedly succeeded: ${command}`);
+}
+
+async function createFakeLoggedOutCodexBin(root) {
+  const binDirectory = join(root, "fake-codex-bin");
+  const codexPath = join(binDirectory, "codex");
+  await mkdir(binDirectory, { recursive: true });
+  await writeFile(codexPath, `#!/usr/bin/env node
+process.stdin.setEncoding("utf8");
+let buffer = "";
+function write(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+function handle(message) {
+  if (!("id" in message)) return;
+  if (message.method === "initialize") {
+    write({ id: message.id, result: {} });
+    return;
+  }
+  if (message.method === "account/read") {
+    write({ id: message.id, result: { account: null, requiresOpenaiAuth: true } });
+    return;
+  }
+  if (message.method === "modelProvider/capabilities/read") {
+    write({ id: message.id, result: { imageGeneration: true, namespaceTools: false, webSearch: false } });
+    return;
+  }
+  if (message.method === "account/login/start") {
+    write({ id: message.id, result: { type: message.params?.type || "chatgpt", loginId: "fake-login", authUrl: "https://chatgpt.com/auth" } });
+    return;
+  }
+  if (message.method === "account/logout") {
+    write({ id: message.id, result: {} });
+    return;
+  }
+  write({ id: message.id, error: { message: "fake codex only supports auth/session methods" } });
+}
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newlineIndex = buffer.indexOf("\\n");
+  while (newlineIndex >= 0) {
+    const line = buffer.slice(0, newlineIndex).trim();
+    buffer = buffer.slice(newlineIndex + 1);
+    newlineIndex = buffer.indexOf("\\n");
+    if (line) handle(JSON.parse(line));
+  }
+});
+`, "utf8");
+  await chmod(codexPath, 0o755);
+  return binDirectory;
 }
 
 try {
@@ -74,6 +136,65 @@ try {
   });
   assert.equal(sandboxOffExpansion.status, 401);
   assert.match(String(sandboxOffExpansion.body.error), /OAuth 로그인이 필요/);
+
+  const fakeCodexBin = await createFakeLoggedOutCodexBin(tempRoot);
+  const fakeCodexPath = `${fakeCodexBin}:${process.env.PATH || ""}`;
+  const cliSandboxOffExpansion = runCliFailure("expand-event", {
+    projectDirectory: join(tempRoot, "CliSandboxOff.vnmaker"),
+    starter: {
+      id: "cli-sandbox-off",
+      title: "CLI Sandbox Off",
+      premise: "CLI 일반 경로는 Codex OAuth 요구를 유지한다."
+    },
+    userEvent: "샌드박스가 꺼진 CLI 경로는 fixture fallback으로 성공하면 안 된다."
+  }, {
+    PATH: fakeCodexPath,
+    VN_MAKER_ALPHA_SANDBOX: ""
+  });
+  assert.equal(cliSandboxOffExpansion.ok, false);
+  assert.match(String(cliSandboxOffExpansion.error), /OAuth 로그인이 필요/);
+
+  const imageOnlyApi = webHandlers.createApiRequestHandler({
+    codex: {
+      async readSession() {
+        return {
+          connected: false,
+          mode: null,
+          account: null,
+          requiresOpenaiAuth: true,
+          capabilities: null
+        };
+      },
+      async startLogin() {
+        return {
+          type: "chatgpt",
+          loginId: "image-only-login",
+          authUrl: "https://chatgpt.com/auth"
+        };
+      },
+      async logout() {
+        return undefined;
+      },
+      async generateImageAsset() {
+        throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+      }
+    }
+  });
+  const missingTextAdapterExpansion = await imageOnlyApi({
+    method: "POST",
+    path: "/api/events/expand",
+    body: {
+      projectDirectory: join(tempRoot, "MissingTextAdapter.vnmaker"),
+      starter: {
+        id: "missing-text-adapter",
+        title: "Missing Text Adapter",
+        premise: "텍스트 adapter 누락 시 deterministic fallback을 막는다."
+      },
+      userEvent: "텍스트 adapter가 없으면 성공하면 안 된다."
+    }
+  });
+  assert.equal(missingTextAdapterExpansion.status, 401);
+  assert.match(String(missingTextAdapterExpansion.body.error), /OAuth 로그인이 필요/);
 
   process.env.VN_MAKER_ALPHA_SANDBOX = "1";
   const sandboxApi = webHandlers.createApiRequestHandler();
@@ -179,6 +300,14 @@ try {
   const cliProjectDirectory = join(tempRoot, "CliSandbox.vnmaker");
   const cliInspect = runCli("inspect", {}, cliEnv);
   assert.equal(cliInspect.sandbox.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
+  const cliSandboxAuth = runCli("codex-auth-status", {}, { ...cliEnv, PATH: fakeCodexPath });
+  assert.equal(cliSandboxAuth.session.mode, "alpha-sandbox");
+  assert.equal(cliSandboxAuth.session.sandbox.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
+  const cliSandboxLogin = runCli("codex-login", { login: { flow: "device" } }, { ...cliEnv, PATH: fakeCodexPath });
+  assert.equal(cliSandboxLogin.login.type, "alphaSandbox");
+  assert.equal(cliSandboxLogin.login.loginId, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
+  const cliSandboxLogout = runCli("codex-logout", {}, { ...cliEnv, PATH: fakeCodexPath });
+  assert.equal(cliSandboxLogout.session.mode, "alpha-sandbox");
 
   const cliProject = runCli("create-project-from-heroine", {
     projectDirectory: cliProjectDirectory,

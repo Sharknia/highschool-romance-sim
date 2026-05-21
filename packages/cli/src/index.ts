@@ -6,7 +6,8 @@ import {
 import {
   ALPHA_SANDBOX_PROVENANCE,
   createAlphaSandboxEventTextAdapter,
-  createAlphaSandboxImageAdapter
+  createAlphaSandboxImageAdapter,
+  createAlphaSandboxSession
 } from "@vn-maker/alpha-sandbox";
 import {
   buildProjectHtml,
@@ -303,16 +304,36 @@ async function run(): Promise<void> {
   }
 
   if (command === "codex-auth-status") {
+    if (sandboxEnabled) {
+      writeJson({ ok: true, session: createAlphaSandboxSession() });
+      return;
+    }
     writeJson({ ok: true, session: await sharedCodexAppServerClient.readSession(false) });
     return;
   }
 
   if (command === "codex-login") {
+    if (sandboxEnabled) {
+      writeJson({
+        ok: true,
+        login: {
+          type: "alphaSandbox",
+          loginId: ALPHA_SANDBOX_PROVENANCE
+        },
+        session: createAlphaSandboxSession(),
+        note: "Alpha Sandbox fixture generation이 활성화되어 있다. Codex OAuth 로그인으로 표현하지 않는다."
+      });
+      return;
+    }
     writeJson({ ok: true, login: await sharedCodexAppServerClient.startLogin(input.login?.flow || "browser") });
     return;
   }
 
   if (command === "codex-logout") {
+    if (sandboxEnabled) {
+      writeJson({ ok: true, session: createAlphaSandboxSession() });
+      return;
+    }
     await sharedCodexAppServerClient.logout();
     writeJson({ ok: true });
     return;
