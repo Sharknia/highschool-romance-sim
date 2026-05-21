@@ -1,0 +1,17 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  root: ".",
+  plugins: [react()],
+  build: {
+    outDir: "dist/client",
+    emptyOutDir: true
+  },
+  server: {
+    proxy: {
+      "/api": "http://127.0.0.1:5174",
+      "/generated-assets": "http://127.0.0.1:5174"
+    }
+  }
+});

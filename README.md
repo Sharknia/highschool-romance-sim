@@ -1,8 +1,34 @@
-# 비주얼노벨 엔진 사용 가이드
+# VN Maker 개발 가이드
 
-이 프로젝트는 최종 배포물을 단일 `index.html`로 유지하면서, 엔진 코드는 TypeScript로 작성해 컴파일 후 HTML에 내장한다.
+이 저장소의 현재 중심 목표는 단일 `index.html` 게임이 아니라 로컬 데스크톱형 미연시 제작 프로그램이다. 기본 작업 경계는 `VN Maker Core + CLI + Web App + Codex OAuth + 생성 어댑터`이며, 루트 `src/engine`과 `index.html`은 레거시 플레이어 런타임으로 분리해서 다룬다.
 
-## 구조
+## VN Maker 구조
+
+새 제작툴 구조는 `packages/engine-core`, `packages/project-store`, `packages/generation-codex`, `packages/use-cases`, `packages/cli`, `apps/web` 워크스페이스로 구성된다. 목표는 Codex가 외부에서 CLI로 호출하든, 웹앱 내부 API로 호출하든 같은 코어와 같은 use case 경계로 미연시 프로젝트를 생성, 검증, 빌드, 이미지 생성 작업화하는 것이다.
+
+```txt
+packages/engine-core/       도메인 타입, DTO schema, 순수 검증/빌더/mutation
+packages/project-store/     SQLite/파일 저장소, migration, transaction
+packages/generation-codex/  Codex app-server, ChatGPT managed OAuth, imageGeneration adapter
+packages/use-cases/         CLI와 Web API가 공유하는 제작 use case
+packages/cli/               JSON stdin/stdout 자동화 인터페이스
+apps/web/                   제작 UI와 Hono 기반 Node API
+```
+
+웹앱의 생성 경로는 OpenAI API key 입력이 아니라 Codex app-server의 ChatGPT managed OAuth를 사용한다. `Codex 로그인` 버튼은 `account/login/start`의 ChatGPT 브라우저 플로우를, `디바이스 코드` 버튼은 device-code 플로우를 시작한다. 실제 이미지 생성은 Codex app-server가 `imageGeneration` 기능을 제공하고 OAuth 로그인이 연결되어 있을 때 실행된다.
+
+```bash
+npm run test:maker
+npm run build -w @vn-maker/web
+node packages/cli/dist/index.js inspect
+node packages/cli/dist/index.js codex-auth-status
+```
+
+상세 구조와 CLI/API 계약은 [docs/vn-maker-toolkit.md](docs/vn-maker-toolkit.md)를 참고한다.
+
+## 레거시 플레이어 구조
+
+아래 구조는 기존 단일 HTML 플레이어 런타임이다. 신규 제작툴 기능의 중심 작업으로 삼지 않고, 회귀 검증이 필요할 때 `legacy:*` 명령으로 다룬다.
 
 ```txt
 src/engine/
@@ -39,15 +65,15 @@ dist/
 
 ```bash
 npm install
-npm run build
+npm run build:maker
+npm run build:legacy
 ```
 
-`npm run build`는 다음 순서로 실행된다.
+`npm run build:maker`는 VN Maker 워크스페이스를 빌드한다. `npm run build:legacy`는 레거시 플레이어 엔진 번들과 `index.html` 삽입물을 만든다. 통합 확인이 필요할 때만 `npm run build`를 사용한다.
 
 ```txt
-TypeScript 타입 검사
-엔진 번들 생성
-index.html의 VN_ENGINE_BUNDLE 영역에 번들 삽입
+maker: engine-core -> project-store -> generation-codex -> use-cases -> cli -> web
+legacy: TypeScript 타입 검사 -> 엔진 번들 생성 -> index.html의 VN_ENGINE_BUNDLE 영역에 번들 삽입
 ```
 
 ## 엔진 생성

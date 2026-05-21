@@ -1,10 +1,23 @@
 {
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "typecheck": "npx tsc --noEmit",
-    "test:engine": "npm run build:engine && node tests/engine-regression.test.mjs",
-    "build:engine": "npx esbuild src/engine/index.ts --bundle --format=iife --global-name=VisualNovelEngine --target=es2018 --outfile=dist/visual-novel-engine.js",
+    "legacy:typecheck": "npx tsc --noEmit",
+    "typecheck:legacy": "npm run legacy:typecheck",
+    "typecheck:maker": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/project-store && npm run build -w @vn-maker/use-cases && npm run build -w @vn-maker/generation-codex && npm run typecheck -w @vn-maker/cli && npm run typecheck -w @vn-maker/web",
+    "typecheck": "npm run legacy:typecheck && npm run typecheck:maker",
+    "legacy:test": "npm run legacy:build:engine && node tests/engine-regression.test.mjs",
+    "test:engine": "npm run legacy:test",
+    "test:maker": "npm run build:maker && node tests/vn-maker-domain.test.mjs && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-beta.test.mjs && node tests/vn-maker-regression.test.mjs",
+    "legacy:build:engine": "npx esbuild src/engine/index.ts --bundle --format=iife --global-name=VisualNovelEngine --target=es2018 --outfile=dist/visual-novel-engine.js",
+    "build:engine": "npm run legacy:build:engine",
     "build:html": "node scripts/embed-engine.mjs",
-    "build": "npm run typecheck && npm run build:engine && npm run build:html"
+    "build:legacy": "npm run legacy:typecheck && npm run legacy:build:engine && npm run build:html",
+    "build:maker": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/project-store && npm run build -w @vn-maker/use-cases && npm run build -w @vn-maker/generation-codex && npm run build -w @vn-maker/cli && npm run build -w @vn-maker/web",
+    "build": "npm run build:legacy && npm run build:maker"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
