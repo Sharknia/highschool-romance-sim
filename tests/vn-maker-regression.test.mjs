@@ -102,6 +102,7 @@ const cliOpenOutput = execFileSync(process.execPath, ["packages/cli/dist/index.j
 const cliOpen = JSON.parse(cliOpenOutput);
 assert.equal(cliOpen.ok, true);
 assert.equal(cliOpen.project.characters.some((character) => character.id === "mira"), true);
+assert.equal(cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.kind, "normal");
 
 const cliSaveSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
@@ -117,6 +118,20 @@ const cliSaveScene = JSON.parse(cliSaveSceneOutput);
 assert.equal(cliSaveScene.ok, true);
 assert.match(cliSaveScene.project.scenes[0].text, /CLI가 같은 SQLite 프로젝트/);
 
+const cliSaveEndingSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+  input: JSON.stringify({
+    projectDirectory,
+    scene: {
+      ...cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
+      text: "CLI가 ending metadata를 포함한 장면을 저장했다."
+    }
+  }),
+  encoding: "utf8"
+});
+const cliSaveEndingScene = JSON.parse(cliSaveEndingSceneOutput);
+assert.equal(cliSaveEndingScene.ok, true);
+assert.equal(cliSaveEndingScene.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.id, "ending-default");
+
 const apiValidation = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/project/validate",
@@ -131,14 +146,15 @@ const apiScene = await webHandlers.handleApiRequest({
   body: {
     projectDirectory,
     scene: {
-      ...cliSaveScene.project.scenes[0],
-      text: "Web API가 같은 SQLite 프로젝트에 저장한 장면."
+      ...cliSaveEndingScene.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
+      text: "Web API가 ending metadata를 포함한 장면을 저장했다."
     }
   }
 });
 assert.equal(apiScene.status, 200);
 assert.equal(apiScene.body.ok, true);
-assert.match(apiScene.body.project.scenes[0].text, /Web API가 같은 SQLite 프로젝트/);
+assert.match(apiScene.body.project.scenes.find((scene) => scene.id === "scene-haru-smile").text, /Web API가 ending metadata/);
+assert.equal(apiScene.body.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.title, "기본 엔딩");
 
 const apiJob = await webHandlers.handleApiRequest({
   method: "POST",
