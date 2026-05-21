@@ -2,24 +2,25 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
-  createDeterministicEventExpansionPlan,
   describeEventExpansionPolicy,
   createImageGenerationJob,
-  parseEventExpansionPlan,
-  validateEventExpansionPlan,
   type AssetKind,
   type EventExpansionPlan,
   type EventExpansionRequest,
   type VnMakerAsset,
   type VnMakerGenerationJob,
-  type VnMakerProject,
-  type EventExpansionValidationResult
+  type VnMakerProject
 } from "@vn-maker/engine-core";
+import type {
+  EventTextGenerationAdapter,
+  EventTextGenerationAttempt
+} from "@vn-maker/use-cases";
 
 type JsonObject = Record<string, unknown>;
 type LoginFlow = "browser" | "device";
 type CodexAuthMode = "chatgpt" | "chatgptAuthTokens" | "apikey" | null;
 type CodexImageKind = Extract<AssetKind, "portrait" | "expression" | "cg">;
+type EventTextGenerationInput = Parameters<EventTextGenerationAdapter["generateEventExpansionPlan"]>[0];
 
 interface JsonRpcResponse<T = unknown> {
   id: number;
@@ -138,42 +139,6 @@ export interface GeneratedCodexImageAssetResult {
     item: CodexImageGenerationItem;
   };
 }
-
-export interface EventTextGenerationAttempt {
-  attempt: number;
-  ok: boolean;
-  failureKind?: "schema_invalid" | "engine_validation_failed" | "quality_rule_failed";
-  issues: string[];
-}
-
-export interface EventTextGenerationAdapter {
-  generateEventExpansionPlan(input: {
-    project: VnMakerProject;
-    request: EventExpansionRequest;
-    attempt: number;
-    previousAttempts: EventTextGenerationAttempt[];
-  }): Promise<EventExpansionPlan | unknown>;
-}
-
-export interface ExpandNaturalLanguageEventInput {
-  project: VnMakerProject;
-  request: EventExpansionRequest;
-  adapter?: EventTextGenerationAdapter;
-  maxAttempts?: number;
-}
-
-export type ExpandNaturalLanguageEventResult =
-  | {
-      ok: true;
-      plan: EventExpansionPlan;
-      validation: EventExpansionValidationResult;
-      attempts: EventTextGenerationAttempt[];
-    }
-  | {
-      ok: false;
-      attempts: EventTextGenerationAttempt[];
-      error: string;
-    };
 
 export interface CodexAppServerClientOptions {
   codexBinary?: string;
@@ -332,12 +297,6 @@ export async function createCodexImageAssetResult(
   };
 }
 
-function classifyValidationFailure(validation: EventExpansionValidationResult): EventTextGenerationAttempt["failureKind"] {
-  return validation.issues.some((issue) => issue.path.startsWith("decision") || issue.path.includes("newExpressionAssetCount"))
-    ? "quality_rule_failed"
-    : "engine_validation_failed";
-}
-
 function extractTextFromUnknown(value: unknown): string[] {
   if (typeof value === "string") {
     return [value];
@@ -400,69 +359,6 @@ function createEventExpansionPrompt(
     `EventExpansionRequest: ${JSON.stringify(request, null, 2)}`,
     `The Alpha target is sceneCount ${policy.alphaTarget.sceneCount}, choiceCount ${policy.alphaTarget.choiceCount}, cgCount ${policy.alphaTarget.cgCount}, newExpressionAssetCount ${policy.alphaTarget.newExpressionAssetCount} when constraints allow it.`
   ].join("\n\n");
-}
-
-const deterministicEventTextAdapter: EventTextGenerationAdapter = {
-  async generateEventExpansionPlan({ request }) {
-    return createDeterministicEventExpansionPlan(request);
-  }
-};
-
-export async function expandNaturalLanguageEvent(
-  input: ExpandNaturalLanguageEventInput
-): Promise<ExpandNaturalLanguageEventResult> {
-  const adapter = input.adapter || deterministicEventTextAdapter;
-  const maxAttempts = input.maxAttempts ?? 3;
-  const attempts: EventTextGenerationAttempt[] = [];
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const candidate = await adapter.generateEventExpansionPlan({
-      project: input.project,
-      request: input.request,
-      attempt,
-      previousAttempts: attempts
-    });
-
-    const parsed = parseEventExpansionPlan(candidate);
-    if (!parsed.ok) {
-      attempts.push({
-        attempt,
-        ok: false,
-        failureKind: "schema_invalid",
-        issues: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`)
-      });
-      continue;
-    }
-
-    const validation = validateEventExpansionPlan(input.project, input.request, parsed.value);
-    if (!validation.ok) {
-      attempts.push({
-        attempt,
-        ok: false,
-        failureKind: classifyValidationFailure(validation),
-        issues: validation.issues.map((issue) => `${issue.path}: ${issue.message}`)
-      });
-      continue;
-    }
-
-    attempts.push({
-      attempt,
-      ok: true,
-      issues: []
-    });
-    return {
-      ok: true,
-      plan: parsed.value,
-      validation,
-      attempts
-    };
-  }
-
-  return {
-    ok: false,
-    attempts,
-    error: attempts.at(-1)?.issues.join(", ") || "자연어 이벤트 생성에 실패했습니다."
-  };
 }
 
 export class CodexAppServerClient {
@@ -543,12 +439,7 @@ export class CodexAppServerClient {
     return createCodexImageAssetResult(input, imageItem);
   }
 
-  async generateEventExpansionPlan(input: {
-    project: VnMakerProject;
-    request: EventExpansionRequest;
-    attempt: number;
-    previousAttempts: EventTextGenerationAttempt[];
-  }): Promise<EventExpansionPlan> {
+  async generateEventExpansionPlan(input: EventTextGenerationInput): Promise<EventExpansionPlan> {
     const session = await this.readSession(true);
     if (!session.connected) {
       throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");

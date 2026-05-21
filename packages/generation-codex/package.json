@@ -16,7 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@vn-maker/engine-core": "0.1.0"
+    "@vn-maker/engine-core": "0.1.0",
+    "@vn-maker/use-cases": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

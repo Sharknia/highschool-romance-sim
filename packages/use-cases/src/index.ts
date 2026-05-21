@@ -96,6 +96,17 @@ export interface VnMakerUseCaseOptions {
   image?: ProjectImageGenerationAdapter;
 }
 
+export interface ExpandNaturalLanguageEventInput {
+  project: VnMakerProject;
+  request: EventExpansionRequest;
+  adapter?: EventTextGenerationAdapter;
+  maxAttempts?: number;
+}
+
+export type ExpandNaturalLanguageEventResult =
+  | { ok: true; plan: EventExpansionPlan; validation: EventExpansionValidationResult; attempts: EventTextGenerationAttempt[]; rawOutput: unknown }
+  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown };
+
 export class InputValidationError extends Error {
   readonly issues: ValidationIssue[];
 
@@ -275,15 +286,9 @@ function classifyValidationFailure(validation: EventExpansionValidationResult): 
     : "engine_validation_failed";
 }
 
-async function expandNaturalLanguageEvent(input: {
-  project: VnMakerProject;
-  request: EventExpansionRequest;
-  adapter?: EventTextGenerationAdapter;
-  maxAttempts?: number;
-}): Promise<
-  | { ok: true; plan: EventExpansionPlan; validation: EventExpansionValidationResult; attempts: EventTextGenerationAttempt[]; rawOutput: unknown }
-  | { ok: false; attempts: EventTextGenerationAttempt[]; error: string; rawOutput?: unknown }
-> {
+export async function expandNaturalLanguageEvent(
+  input: ExpandNaturalLanguageEventInput
+): Promise<ExpandNaturalLanguageEventResult> {
   const maxAttempts = input.maxAttempts ?? 3;
   const attempts: EventTextGenerationAttempt[] = [];
   let rawOutput: unknown;

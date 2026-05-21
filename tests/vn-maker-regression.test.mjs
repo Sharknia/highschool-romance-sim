@@ -10,11 +10,13 @@ import { build as esbuild } from "esbuild";
 const core = await import("../packages/engine-core/dist/index.js");
 const codexGeneration = await import("../packages/generation-codex/dist/index.js");
 const projectStore = await import("../packages/project-store/dist/index.js");
+const useCasesModule = await import("../packages/use-cases/dist/index.js");
 const webHandlers = await import("../apps/web/dist/server/handlers.js");
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-regression-"));
 const projectDirectory = join(tempRoot, "TestGame.vnmaker");
 const starterOnlyProjectDirectory = join(tempRoot, "StarterOnly.vnmaker");
 const alphaDirectory = join(tempRoot, "AlphaHeroine.vnmaker");
+const cliExpansionDirectory = join(tempRoot, "CliExpansion.vnmaker");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 
 const project = core.createStarterProject({
@@ -193,6 +195,7 @@ assert.equal(codexImageResult.job.status, "completed");
 assert.equal(codexImageResult.asset.source, "generated");
 assert.match(codexImageResult.image.dataUrl, /^data:image\/png;base64,/);
 
+let mockCodexTextCalls = 0;
 const mockCodex = {
   async readSession() {
     return {
@@ -220,6 +223,10 @@ const mockCodex = {
       revisedPrompt: null,
       savedPath: null
     });
+  },
+  async generateEventExpansionPlan({ request }) {
+    mockCodexTextCalls += 1;
+    return core.createDeterministicEventExpansionPlan(request);
   }
 };
 
@@ -328,7 +335,8 @@ const badPatchValidation = core.validateEventExpansionPlan(alphaStore.requirePro
 assert.equal(badPatchValidation.ok, false);
 assert.equal(alphaStore.requireProject().scenes.length, 1);
 
-const generatedEvent = await codexGeneration.expandNaturalLanguageEvent({
+assert.equal("expandNaturalLanguageEvent" in codexGeneration, false);
+const generatedEvent = await useCasesModule.expandNaturalLanguageEvent({
   project: alphaStore.requireProject(),
   request: eventRequest,
   maxAttempts: 2,
@@ -362,6 +370,7 @@ assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.plan.decision.sceneCount, 3);
 assert.equal(apiExpand.body.validation.ok, true);
 assert.equal(alphaStore.requireProject().scenes.length, 1);
+assert.equal(mockCodexTextCalls, 0);
 
 const apiApprove = await mockApi({
   method: "POST",
@@ -428,6 +437,29 @@ const cliPreviewOutput = execFileSync(process.execPath, ["packages/cli/dist/inde
 const cliPreview = JSON.parse(cliPreviewOutput);
 assert.equal(cliPreview.ok, true);
 assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.id === plannedCgJob.outputAssetId), true);
+
+const cliBundle = readFileSync("packages/cli/dist/index.js", "utf8");
+assert.match(cliBundle, /createVnMakerUseCases/);
+assert.match(cliBundle, /useCases\.expandEvent/);
+assert.doesNotMatch(cliBundle, /expandNaturalLanguageEvent/);
+
+const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "expand-event"], {
+  input: JSON.stringify({
+    projectDirectory: cliExpansionDirectory,
+    starter: {
+      id: "cli-expansion",
+      title: "CLI Expansion",
+      premise: "CLI가 공통 expansion use case를 호출하는 회귀 테스트"
+    },
+    userEvent: "방과 후 복도에서 우연히 마주치는 짧은 이벤트"
+  }),
+  encoding: "utf8"
+});
+const cliExpand = JSON.parse(cliExpandOutput);
+assert.equal(cliExpand.ok, true);
+assert.equal(cliExpand.validation.ok, true);
+assert.equal(cliExpand.attempts.length, 1);
+assert.equal(cliExpand.patchHistoryEntry.status, "proposed");
 
 const cliSmokeOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "smoke-export"], {
   input: JSON.stringify({ outputPath: apiExport.body.export.outputDirectory }),
