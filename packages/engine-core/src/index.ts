@@ -513,6 +513,25 @@ function validateSceneEnding(value: unknown, path: string, issues: ValidationIss
   }
 }
 
+function validateOptionalObject(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): void {
+  if (record[key] !== undefined && !isRecord(record[key])) {
+    addSchemaIssue(issues, path, "객체여야 합니다.");
+  }
+}
+
+function parseVnMakerChoice(value: unknown): DtoParseResult<VnMakerChoice> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "choice 입력은 객체여야 합니다." }]);
+  }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "text", "text", issues, { nonEmpty: true });
+  hasString(value, "next", "next", issues, { nonEmpty: true });
+  validateOptionalObject(value, "condition", "condition", issues);
+  validateOptionalObject(value, "effects", "effects", issues);
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerChoice);
+}
+
 function parseVnMakerRoute(value: unknown): DtoParseResult<VnMakerRoute> {
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
@@ -720,13 +739,7 @@ export function parseVnMakerScene(value: unknown): DtoParseResult<VnMakerScene> 
   }
   if (Array.isArray(value.choices)) {
     value.choices.forEach((choice, index) => {
-      if (!isRecord(choice)) {
-        addSchemaIssue(issues, `choices.${index}`, "객체여야 합니다.");
-        return;
-      }
-      hasString(choice, "id", `choices.${index}.id`, issues, { nonEmpty: true });
-      hasString(choice, "text", `choices.${index}.text`, issues, { nonEmpty: true });
-      hasString(choice, "next", `choices.${index}.next`, issues, { nonEmpty: true });
+      addNestedIssues(issues, `choices.${index}`, parseVnMakerChoice(choice).issues);
     });
   }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerScene);
@@ -778,14 +791,19 @@ function validatePatchOperation(operation: unknown, path: string, issues: Valida
     const result = parseVnMakerScene(operation.scene);
     result.issues.forEach((issue) => addSchemaIssue(issues, `${path}.scene.${issue.path}`, issue.message));
   }
-  if (type === "addChoice" && !isRecord(operation.choice)) {
-    addSchemaIssue(issues, `${path}.choice`, "객체여야 합니다.");
+  if (type === "updateSceneLink") {
+    hasString(operation, "sceneId", `${path}.sceneId`, issues, { nonEmpty: true });
+    validateOptionalString(operation, "nextSceneId", `${path}.nextSceneId`, issues);
   }
-  if (type === "addAsset" && !isRecord(operation.asset)) {
-    addSchemaIssue(issues, `${path}.asset`, "객체여야 합니다.");
+  if (type === "addChoice") {
+    hasString(operation, "sceneId", `${path}.sceneId`, issues, { nonEmpty: true });
+    addNestedIssues(issues, `${path}.choice`, parseVnMakerChoice(operation.choice).issues);
   }
-  if (type === "addGenerationJob" && !isRecord(operation.job)) {
-    addSchemaIssue(issues, `${path}.job`, "객체여야 합니다.");
+  if (type === "addAsset") {
+    addNestedIssues(issues, `${path}.asset`, parseVnMakerAsset(operation.asset).issues);
+  }
+  if (type === "addGenerationJob") {
+    addNestedIssues(issues, `${path}.job`, parseVnMakerGenerationJob(operation.job).issues);
   }
 }
 
@@ -1798,7 +1816,23 @@ export function validateEventExpansionPlan(
   plan: EventExpansionPlan
 ): EventExpansionValidationResult {
   const issues: ValidationIssue[] = [];
-  const diff = describeProjectPatch(plan.patch);
+  const parsedPlan = parseEventExpansionPlan(plan);
+  const diff = parsedPlan.ok
+    ? describeProjectPatch(parsedPlan.value.patch)
+    : {
+        text: "패치 schema 검증 실패",
+        sceneCount: 0,
+        choiceCount: 0,
+        assetCount: 0,
+        generationJobCount: 0,
+        operations: []
+      };
+
+  if (!parsedPlan.ok) {
+    return { ok: false, issues: parsedPlan.issues, diff };
+  }
+
+  const eventPlan = parsedPlan.value;
 
   if (project.characters.length !== 1) {
     addIssue(issues, "characters", "Alpha 프로젝트는 히로인 1명만 포함해야 합니다.");
@@ -1819,27 +1853,27 @@ export function validateEventExpansionPlan(
   if (request.baseProjectHash !== hashProjectSnapshot(project)) {
     addIssue(issues, "request.baseProjectHash", "패치 생성 기준 프로젝트와 현재 프로젝트가 다릅니다.");
   }
-  if (plan.decision.newExpressionAssetCount !== 0 || request.constraints.allowNewExpressionAssets !== false) {
+  if (eventPlan.decision.newExpressionAssetCount !== 0 || request.constraints.allowNewExpressionAssets !== false) {
     addIssue(issues, "decision.newExpressionAssetCount", "Alpha에서는 새 표정 에셋을 생성하지 않습니다.");
   }
-  if (diff.sceneCount !== plan.decision.sceneCount || diff.sceneCount > request.constraints.maxScenes) {
+  if (diff.sceneCount !== eventPlan.decision.sceneCount || diff.sceneCount > request.constraints.maxScenes) {
     addIssue(issues, "decision.sceneCount", "패치의 씬 추가 수가 선언 또는 제약과 일치하지 않습니다.");
   }
-  if (diff.choiceCount !== plan.decision.choiceCount || diff.choiceCount > request.constraints.maxChoices) {
+  if (diff.choiceCount !== eventPlan.decision.choiceCount || diff.choiceCount > request.constraints.maxChoices) {
     addIssue(issues, "decision.choiceCount", "패치의 선택지 추가 수가 선언 또는 제약과 일치하지 않습니다.");
   }
-  const cgAssetCount = plan.patch.operations.filter((operation) => operation.type === "addAsset" && operation.asset.kind === "cg").length;
-  if (cgAssetCount !== plan.decision.cgCount || cgAssetCount > request.constraints.maxCgCount) {
+  const cgAssetCount = eventPlan.patch.operations.filter((operation) => operation.type === "addAsset" && operation.asset.kind === "cg").length;
+  if (cgAssetCount !== eventPlan.decision.cgCount || cgAssetCount > request.constraints.maxCgCount) {
     addIssue(issues, "decision.cgCount", "패치의 CG 추가 수가 선언 또는 제약과 일치하지 않습니다.");
   }
-  if (plan.patch.operations.some((operation) => operation.type === "addAsset" && operation.asset.kind === "expression")) {
+  if (eventPlan.patch.operations.some((operation) => operation.type === "addAsset" && operation.asset.kind === "expression")) {
     addIssue(issues, "patch.operations", "Alpha에서는 표정 에셋 추가 연산을 허용하지 않습니다.");
   }
 
   let appliedProject: VnMakerProject | undefined;
   if (issues.length === 0) {
     try {
-      appliedProject = applyProjectPatch(project, plan.patch);
+      appliedProject = applyProjectPatch(project, eventPlan.patch);
     } catch (error) {
       addIssue(issues, "patch.operations", error instanceof Error ? error.message : String(error));
     }

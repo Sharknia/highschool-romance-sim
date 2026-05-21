@@ -426,8 +426,18 @@ assert.equal(sceneWorkbench.selectSceneOptions(branchEndingProject).some((option
 const blankSceneDraft = sceneWorkbench.createBlankSceneDraft(branchEndingProject, "scene-good-ending");
 assert.equal(blankSceneDraft.id.startsWith("scene-good-ending-next"), true);
 assert.equal(blankSceneDraft.choices.length, 0);
+const openingActionState = sceneWorkbench.sceneActionState(branchEndingProject.scenes.find((scene) => scene.id === "scene-haru-branch-opening"));
+assert.equal(openingActionState.canAddNextScene, false);
+assert.match(openingActionState.nextSceneDisabledReason, /선택지가 있는 장면/);
+const goodEndingActionState = sceneWorkbench.sceneActionState(branchEndingProject.scenes.find((scene) => scene.id === "scene-good-ending"));
+assert.equal(goodEndingActionState.endingStatusTone, "neutral");
+assert.match(goodEndingActionState.endingStatusMessage, /엔딩 씬입니다/);
+const missingTargetOptions = sceneWorkbench.selectSceneTargetOptions(branchEndingProject, "scene-good-ending", "scene-missing");
+assert.equal(missingTargetOptions[0].value, "scene-missing");
+assert.equal(missingTargetOptions[0].missing, true);
 const workspacePageSource = readFileSync("apps/web/src/client/pages/WorkspacePage.tsx", "utf8");
 assert.match(workspacePageSource, /패치가 현재 프로젝트의 최신 상태를 기준으로 하지 않습니다\. 다시 제안받아 주세요\./);
+assert.match(workspacePageSource, /setWorkspaceStatus\(`\$\{label\} 실패: \$\{message\}`\)/);
 
 const branchTerminalFailureProject = createBranchEndingProject("branch-terminal-failure");
 delete branchTerminalFailureProject.scenes.find((scene) => scene.id === "scene-normal-ending").ending;
@@ -634,7 +644,14 @@ const nonExplicitEndingValidation = core.validateEventExpansionPlan(alphaStore.r
 assert.equal(nonExplicitEndingValidation.ok, false);
 assert.equal(nonExplicitEndingValidation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
 
-const nonExplicitApiExpand = await webHandlers.handleApiRequest({
+const deterministicApi = webHandlers.createApiRequestHandler({
+  eventText: {
+    async generateEventExpansionPlan({ request }) {
+      return core.createDeterministicEventExpansionPlan(request);
+    }
+  }
+});
+const nonExplicitApiExpand = await deterministicApi({
   method: "POST",
   path: "/api/events/expand",
   body: {
@@ -698,7 +715,7 @@ assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.plan.decision.sceneCount, 3);
 assert.equal(apiExpand.body.validation.ok, true);
 assert.equal(alphaStore.requireProject().scenes.length, 2);
-assert.equal(mockCodexTextCalls, 0);
+assert.equal(mockCodexTextCalls, 1);
 
 const apiApprove = await mockApi({
   method: "POST",
@@ -769,6 +786,7 @@ assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.id === pla
 const cliBundle = readFileSync("packages/cli/dist/index.js", "utf8");
 assert.match(cliBundle, /createVnMakerUseCases/);
 assert.match(cliBundle, /useCases\.expandEvent/);
+assert.match(cliBundle, /generateEventExpansionPlan/);
 assert.doesNotMatch(cliBundle, /expandNaturalLanguageEvent/);
 
 const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "expand-event"], {
@@ -785,7 +803,8 @@ const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index
     heroineId: "haru",
     userEvent: "방과 후 복도에서 우연히 마주치고 노멀 엔딩으로 끝나는 짧은 이벤트"
   }),
-  encoding: "utf8"
+  encoding: "utf8",
+  env: { ...process.env, VN_MAKER_EVENT_TEXT_ADAPTER: "deterministic" }
 });
 const cliExpand = JSON.parse(cliExpandOutput);
 assert.equal(cliExpand.ok, true);

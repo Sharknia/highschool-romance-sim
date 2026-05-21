@@ -41,6 +41,67 @@ const invalidPlan = core.parseEventExpansionPlan({
 assert.equal(invalidPlan.ok, false);
 assert.equal(invalidPlan.issues.some((issue) => issue.path === "decision.sceneCount"), true);
 
+const malformedChoicePlan = core.parseEventExpansionPlan({
+  summary: "선택지 schema가 깨진 패치",
+  decision: {
+    sceneCount: 0,
+    choiceCount: 1,
+    cgCount: 0,
+    newExpressionAssetCount: 0
+  },
+  patch: {
+    operations: [
+      {
+        type: "addChoice",
+        sceneId: "scene-opening",
+        choice: { id: 1, text: "잘못된 선택지", next: "scene-ending" }
+      }
+    ]
+  }
+});
+assert.equal(malformedChoicePlan.ok, false);
+assert.equal(malformedChoicePlan.issues.some((issue) => issue.path === "patch.operations.0.choice.id"), true);
+
+const malformedAssetPlan = core.parseEventExpansionPlan({
+  summary: "에셋 schema가 깨진 패치",
+  decision: {
+    sceneCount: 0,
+    choiceCount: 0,
+    cgCount: 1,
+    newExpressionAssetCount: 0
+  },
+  patch: {
+    operations: [
+      {
+        type: "addAsset",
+        asset: { id: "asset-bad", kind: "not-real", label: "잘못된 에셋" }
+      }
+    ]
+  }
+});
+assert.equal(malformedAssetPlan.ok, false);
+assert.equal(malformedAssetPlan.issues.some((issue) => issue.path === "patch.operations.0.asset.kind"), true);
+
+const malformedJobPlan = core.parseEventExpansionPlan({
+  summary: "생성 작업 schema가 깨진 패치",
+  decision: {
+    sceneCount: 0,
+    choiceCount: 0,
+    cgCount: 0,
+    newExpressionAssetCount: 0
+  },
+  patch: {
+    operations: [
+      {
+        type: "addGenerationJob",
+        job: { id: "job-bad", kind: "cg", targetId: "scene-opening", prompt: "bad", provider: "mock-adapter", status: "queued" }
+      }
+    ]
+  }
+});
+assert.equal(malformedJobPlan.ok, false);
+assert.equal(malformedJobPlan.issues.some((issue) => issue.path === "patch.operations.0.job.status"), true);
+
 const secondCharacter = {
   id: "mira",
   displayName: "미라",

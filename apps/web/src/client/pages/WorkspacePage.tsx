@@ -271,14 +271,17 @@ export function WorkspacePage() {
     if (pendingPatch) {
       return { label: "검증된 패치 승인", reason: patchCanApply ? "검증 통과 패치가 대기 중입니다." : "검증 실패 항목을 먼저 확인해야 합니다.", run: () => void approveEvent(), disabled: !patchCanApply };
     }
-    if (plannedJobCount > 0) {
-      return { label: "선택 이미지 작업 실행", reason: selectedJobIds.length > 0 ? "선택된 작업을 일괄 실행합니다." : "실행할 이미지 작업을 선택하세요.", run: () => void runSelectedGenerationJobs(), disabled: selectedJobIds.length === 0 };
-    }
     if (!runtime) {
       return { label: "플레이 프리뷰 열기", reason: "현재 프로젝트를 제작 화면에서 확인합니다.", run: () => void previewProject() };
     }
+    if (!lastExport) {
+      return { label: "웹 플레이어 export", reason: "검증과 smoke check를 포함해 산출물을 만듭니다.", run: () => void exportProject() };
+    }
+    if (plannedJobCount > 0) {
+      return { label: "선택 이미지 작업 실행", reason: selectedJobIds.length > 0 ? "선택된 작업을 일괄 실행합니다." : "실행할 이미지 작업을 선택하세요.", run: () => void runSelectedGenerationJobs(), disabled: selectedJobIds.length === 0 };
+    }
     return { label: "웹 플레이어 export", reason: "검증과 smoke check를 포함해 산출물을 만듭니다.", run: () => void exportProject() };
-  }, [project, currentHeroine, pendingPatch, patchCanApply, plannedJobCount, selectedJobIds.length, runtime]);
+  }, [project, currentHeroine, pendingPatch, patchCanApply, runtime, lastExport, plannedJobCount, selectedJobIds.length]);
 
   function updateHeroineField(field: keyof HeroineDraft, value: string): void {
     setHeroineDraft((current) => {
@@ -367,9 +370,10 @@ export function WorkspacePage() {
       setWorkspaceStatus(`${label} 완료`);
       return actionResult;
     } catch (error) {
-      const failure = { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof Error ? error.message : String(error);
+      const failure = { ok: false, error: message };
       setResult(formatResult(failure));
-      setWorkspaceStatus(`${label} 실패`);
+      setWorkspaceStatus(`${label} 실패: ${message}`);
       return failure;
     }
   }
@@ -580,10 +584,14 @@ export function WorkspacePage() {
   }
 
   async function previewProject(startSceneId?: string): Promise<void> {
-    await runAction("플레이 프리뷰", async () => postAuthedJson<ApiResult>("/api/project/preview", {
+    const response = await runAction("플레이 프리뷰", async () => postAuthedJson<ApiResult>("/api/project/preview", {
       projectDirectory: projectDirectory || undefined,
       startSceneId
-    }));
+    })) as ApiResult;
+    const validation = response.validation as { ok?: boolean; issues?: Array<{ message?: string }> } | undefined;
+    if (validation?.ok === false) {
+      setWorkspaceStatus(`플레이 프리뷰 완료: 검증 오류가 있습니다${validation.issues?.[0]?.message ? ` - ${validation.issues[0].message}` : "."}`);
+    }
     setPreviewStale(false);
   }
 

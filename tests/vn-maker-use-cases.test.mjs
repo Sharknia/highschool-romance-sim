@@ -120,6 +120,15 @@ const openedBranch = await useCases.saveScene({
 assert.equal(openedBranch.validation.ok, false);
 assert.equal(openedBranch.validation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
 
+const invalidPreview = await useCases.previewProject({
+  projectDirectory: manualProjectDirectory,
+  startSceneId: manualOpening
+});
+assert.equal(invalidPreview.ok, true);
+assert.equal(invalidPreview.runtime.validation.ok, false);
+assert.equal(invalidPreview.validation.ok, false);
+assert.equal(invalidPreview.routeGraphAnalysis.uncoveredTerminalSceneIds.includes(manualOpening), true);
+
 const insertedGood = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
   sourceSceneId: manualOpening,
@@ -267,6 +276,38 @@ assert.equal(generated.asset.id, plannedJob.outputAssetId);
 const opened = await useCases.openProject({ projectDirectory });
 assert.equal(opened.ok, true);
 assert.equal(opened.project.assets.some((asset) => asset.id === plannedJob.outputAssetId), true);
+
+const malformedEventTextUseCases = useCasesModule.createVnMakerUseCases({
+  eventText: {
+    async generateEventExpansionPlan() {
+      return {
+        summary: "깨진 선택지 패치",
+        decision: {
+          sceneCount: 0,
+          choiceCount: 1,
+          cgCount: 0,
+          newExpressionAssetCount: 0
+        },
+        patch: {
+          operations: [
+            {
+              type: "addChoice",
+              sceneId: opened.project.routes[0].entrySceneId,
+              choice: { id: 1, text: "schema invalid", next: "scene-missing" }
+            }
+          ]
+        }
+      };
+    }
+  }
+});
+const malformedExpanded = await malformedEventTextUseCases.expandEvent({
+  projectDirectory,
+  userEvent: "schema가 깨진 선택지를 반환한다."
+});
+assert.equal(malformedExpanded.ok, false);
+assert.equal(malformedExpanded.attempts[0].failureKind, "schema_invalid");
+assert.match(malformedExpanded.error, /patch\.operations\.0\.choice\.id/);
 
 const invalidProject = await useCases.validateProject({
   projectDirectory,

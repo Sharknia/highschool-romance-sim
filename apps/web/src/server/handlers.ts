@@ -122,9 +122,12 @@ class ApiServices {
 
   constructor(options: ApiHandlerOptions = {}) {
     this.codex = options.codex || createDefaultCodexAdapter();
+    const eventText = options.eventText || (this.codex.generateEventExpansionPlan
+      ? { generateEventExpansionPlan: (input: Parameters<EventTextGenerationAdapter["generateEventExpansionPlan"]>[0]) => this.codex.generateEventExpansionPlan!(input) }
+      : undefined);
     this.useCases = createVnMakerUseCases({
       defaultProjectDirectory: options.projectDirectory || getDefaultProjectDirectory(),
-      eventText: options.eventText,
+      eventText,
       image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) }
     });
   }

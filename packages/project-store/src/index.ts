@@ -525,6 +525,16 @@ function statementList(sql: string): string[] {
   return sql.split(";").map((statement) => statement.trim()).filter(Boolean);
 }
 
+function columnExists(db: Database.Database, tableName: string, columnName: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === columnName);
+}
+
+function shouldSkipMigrationStatement(db: Database.Database, statement: string): boolean {
+  const addColumn = statement.match(/^ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+ADD COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\b/i);
+  return Boolean(addColumn && columnExists(db, addColumn[1], addColumn[2]));
+}
+
 export function resolveProjectWorkspacePaths(projectDirectory: string): ProjectWorkspacePaths {
   const root = isAbsolute(projectDirectory) ? projectDirectory : resolve(projectDirectory);
   const assetsDirectory = join(root, "assets");
@@ -569,6 +579,9 @@ CREATE TABLE IF NOT EXISTS migrations (
 
     const runMigration = db.transaction(() => {
       for (const statement of statementList(migration.sql)) {
+        if (shouldSkipMigrationStatement(db, statement)) {
+          continue;
+        }
         db.prepare(statement).run();
       }
       insertMigration.run(migration.id, migration.name, nowIso());

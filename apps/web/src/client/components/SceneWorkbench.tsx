@@ -83,6 +83,7 @@ export interface SceneOption {
   label: string;
   description: string;
   ending?: SceneEnding;
+  missing?: boolean;
 }
 
 export interface RouteRow {
@@ -105,6 +106,16 @@ export interface RouteCompletionSummary {
   cyclesWithoutEndingPath: string[][];
   routeRows: RouteRow[];
   issues: Array<{ severity: string; message: string; sceneIds?: string[]; choiceIds?: string[]; targetSceneId?: string }>;
+}
+
+export interface SceneActionState {
+  canAddNextScene: boolean;
+  nextSceneDisabledReason: string;
+  canAddChoiceBranch: boolean;
+  choiceBranchDisabledReason: string;
+  endingStatusTone: "neutral" | "warning" | null;
+  endingStatusMessage: string;
+  outgoingRemovalSummary: string;
 }
 
 type ManualLink = { type: "none" | "next" | "choice"; preservePreviousNext?: boolean; choiceId?: string; choiceText?: string };
@@ -213,6 +224,65 @@ export function selectSceneOptions(project: ProjectData): SceneOption[] {
     description: `${scene.id}${scene.ending ? ` · 엔딩 ${scene.ending.kind}` : ""}`,
     ending: scene.ending
   }));
+}
+
+export function selectSceneTargetOptions(project: ProjectData, currentSceneId: string, currentTargetId?: string): SceneOption[] {
+  const options = selectSceneOptions(project).filter((option) => option.value !== currentSceneId);
+  if (currentTargetId && !options.some((option) => option.value === currentTargetId)) {
+    return [
+      {
+        value: currentTargetId,
+        label: `누락된 target: ${currentTargetId}`,
+        description: currentTargetId,
+        missing: true
+      },
+      ...options
+    ];
+  }
+  return options;
+}
+
+export function sceneActionState(scene: SceneDraft | null | undefined): SceneActionState {
+  if (!scene) {
+    return {
+      canAddNextScene: false,
+      nextSceneDisabledReason: "편집할 장면을 선택하세요.",
+      canAddChoiceBranch: false,
+      choiceBranchDisabledReason: "편집할 장면을 선택하세요.",
+      endingStatusTone: null,
+      endingStatusMessage: "",
+      outgoingRemovalSummary: ""
+    };
+  }
+
+  const hasChoices = scene.choices.length > 0;
+  const hasNext = Boolean(scene.next);
+  const isEnding = Boolean(scene.ending);
+  const outgoingParts = [
+    hasNext ? `next ${scene.next}` : "",
+    hasChoices ? `선택지 ${scene.choices.length}개` : ""
+  ].filter(Boolean);
+  return {
+    canAddNextScene: !isEnding && !hasChoices,
+    nextSceneDisabledReason: isEnding
+      ? "엔딩 씬 뒤에는 장면을 추가할 수 없습니다."
+      : hasChoices
+        ? "선택지가 있는 장면에는 다음 장면을 직접 추가할 수 없습니다. 분기 추가를 사용하세요."
+        : "",
+    canAddChoiceBranch: !isEnding && !hasNext,
+    choiceBranchDisabledReason: isEnding
+      ? "엔딩 씬 뒤에는 선택지를 추가할 수 없습니다."
+      : hasNext
+        ? "next가 있는 장면에는 선택지를 추가할 수 없습니다. next를 없음으로 바꾼 뒤 분기를 추가하세요."
+        : "",
+    endingStatusTone: isEnding && (hasNext || hasChoices) ? "warning" : isEnding ? "neutral" : null,
+    endingStatusMessage: isEnding && (hasNext || hasChoices)
+      ? "엔딩 장면에는 다음 장면이나 선택지가 있을 수 없습니다."
+      : isEnding
+        ? "엔딩 씬입니다. 다음/선택지 편집은 비활성화됩니다."
+        : "",
+    outgoingRemovalSummary: outgoingParts.length > 0 ? `삭제될 연결: ${outgoingParts.join(" / ")}` : ""
+  };
 }
 
 export function createBlankSceneDraft(project: ProjectData, sourceSceneId?: string): SceneDraft {
@@ -337,6 +407,8 @@ export function SceneWorkbench({
   const isEndingScene = Boolean(sceneDraft?.ending);
   const hasOutgoing = Boolean(sceneDraft?.next || (sceneDraft?.choices.length || 0) > 0);
   const canSetEnding = Boolean(sceneDraft && (!hasOutgoing || clearOutgoing));
+  const actionState = sceneActionState(sceneDraft);
+  const currentTargetOptions = project && sceneDraft ? selectSceneTargetOptions(project, sceneDraft.id, sceneDraft.next) : [];
 
   function manualSceneFromForm(label: string, text: string, sourceSceneId?: string): SceneDraft {
     const draft = createBlankSceneDraft(project!, sourceSceneId);
@@ -349,7 +421,7 @@ export function SceneWorkbench({
   }
 
   function addSceneAfterCurrent(): void {
-    if (!project || !sceneDraft) return;
+    if (!project || !sceneDraft || !actionState.canAddNextScene) return;
     onInsertScene({
       sourceSceneId: sceneDraft.id,
       link: { type: "next", preservePreviousNext: true },
@@ -358,7 +430,7 @@ export function SceneWorkbench({
   }
 
   function addChoiceBranch(): void {
-    if (!project || !sceneDraft || !choiceText.trim()) return;
+    if (!project || !sceneDraft || !actionState.canAddChoiceBranch || !choiceText.trim()) return;
     if (branchTarget === "__new__") {
       onInsertScene({
         sourceSceneId: sceneDraft.id,
@@ -411,7 +483,7 @@ export function SceneWorkbench({
         </div>
         <div className="button-row">
           <Button icon={<Save size={16} />} onClick={onSaveScene}>씬 저장</Button>
-          <Button icon={<Plus size={16} />} onClick={addSceneAfterCurrent} variant="primary">현재 뒤에 장면 추가</Button>
+          <Button disabled={!actionState.canAddNextScene} icon={<Plus size={16} />} onClick={addSceneAfterCurrent} variant="primary">현재 뒤에 장면 추가</Button>
           <Button icon={<ListChecks size={16} />} onClick={onExpandEvent}>패치 제안</Button>
           <Button disabled={!patchCanApply} icon={<CheckCircle2 size={16} />} onClick={onApproveEvent}>승인</Button>
           <Button disabled={!pendingPatch} icon={<XCircle size={16} />} onClick={onCancelPatch}>취소</Button>
@@ -420,6 +492,7 @@ export function SceneWorkbench({
 
       {previewStale ? <div className="inline-status warning">변경 후 프리뷰가 갱신되지 않았습니다. 다시 프리뷰를 실행하세요.</div> : null}
       {pendingPatch ? <div className="inline-status warning">수동 변경 전에 pending natural-language patch를 승인하거나 취소하세요. 수동 변경을 실행하면 패치 제안을 폐기합니다.</div> : null}
+      {sceneDraft && actionState.nextSceneDisabledReason ? <div className="inline-status">{actionState.nextSceneDisabledReason}</div> : null}
 
       {project?.routes.length ? (
         <div className="route-panel">
@@ -440,7 +513,7 @@ export function SceneWorkbench({
         <div className="route-health">
           <div className="coverage-meter">
             <strong>{routeSummary.endingCount}개 엔딩 / 열린 분기 {routeSummary.openBranchCount}개</strong>
-            <span>도달 가능 씬 {routeSummary.routeRows.length}개 · 깨진 target {routeSummary.missingTargets.length}개 · cycle {routeSummary.cyclesWithoutEndingPath.length}개</span>
+            <span>도달 가능 씬 {routeSummary.routeRows.length}개 · 없는 장면 이동 {routeSummary.missingTargets.length}개 · 순환 {routeSummary.cyclesWithoutEndingPath.length}개</span>
           </div>
           <div className="route-tree" aria-label="루트 트리">
             {routeSummary.routeRows.map((row) => (
@@ -464,21 +537,21 @@ export function SceneWorkbench({
               items={routeSummary.uncoveredTerminalSceneIds}
               onAction={setOpenBranchAsEnding}
               onSelect={onSelectScene}
-              secondaryActionLabel="이 branch에 다음 장면 추가"
+              secondaryActionLabel="이 분기에 다음 장면 추가"
               onSecondaryAction={addSceneAfterOpenBranch}
-              title="Open branches"
+              title="엔딩 없는 분기"
             />
             <IssueList
               icon={<AlertTriangle size={16} />}
               items={routeSummary.missingTargets.map((target) => `${target.sourceSceneId} -> ${target.targetSceneId}`)}
               onSelect={(item) => onSelectScene(item.split(" -> ")[0])}
-              title="Missing targets"
+              title="없는 장면으로 이동"
             />
             <IssueList
               icon={<GitBranch size={16} />}
               items={routeSummary.cyclesWithoutEndingPath.map((cycle) => cycle.join(" -> "))}
               onSelect={(item) => onSelectScene(item.split(" -> ")[0])}
-              title="Cycles"
+              title="엔딩 없는 순환"
             />
           </div>
           {routeSummary.issues.filter((issue) => issue.severity === "error").length > 0 ? (
@@ -514,9 +587,9 @@ export function SceneWorkbench({
 
         {sceneDraft ? (
           <div className="scene-editor">
-            {isEndingScene ? <div className="inline-status warning">엔딩 장면에는 다음 장면이나 선택지가 있을 수 없습니다.</div> : null}
+            {actionState.endingStatusTone ? <div className={`inline-status ${actionState.endingStatusTone === "warning" ? "warning" : ""}`}>{actionState.endingStatusMessage}</div> : null}
             <div className="form-grid">
-              <input aria-label="씬 ID" value={sceneDraft.id} onChange={(event) => onSceneDraftChange(updateSceneField(sceneDraft, "id", event.target.value))} />
+              <input aria-label="씬 ID" readOnly title="씬 ID는 다른 장면의 참조 안정성을 위해 직접 편집하지 않습니다." value={sceneDraft.id} />
               <input aria-label="씬 라벨" value={sceneDraft.label} onChange={(event) => onSceneDraftChange(updateSceneField(sceneDraft, "label", event.target.value))} />
               <input aria-label="화자" value={sceneDraft.speaker} onChange={(event) => onSceneDraftChange(updateSceneField(sceneDraft, "speaker", event.target.value))} />
               <select
@@ -526,8 +599,10 @@ export function SceneWorkbench({
                 value={sceneDraft.next || ""}
               >
                 <option value="">다음 없음</option>
-                {sceneOptions.filter((option) => option.value !== sceneDraft.id).map((option) => (
-                  <option key={option.value} value={option.value}>{option.label} ({option.value})</option>
+                {currentTargetOptions.map((option) => (
+                  <option disabled={option.missing} key={option.value} value={option.value}>
+                    {option.missing ? option.label : `${option.label} (${option.value})`}
+                  </option>
                 ))}
               </select>
             </div>
@@ -560,8 +635,10 @@ export function SceneWorkbench({
                     value={choice.next}
                     onChange={(event) => onSceneDraftChange(updateChoice(sceneDraft, index, "next", event.target.value))}
                   >
-                    {sceneOptions.filter((option) => option.value !== sceneDraft.id).map((option) => (
-                      <option key={option.value} value={option.value}>{option.label} ({option.value})</option>
+                    {(project ? selectSceneTargetOptions(project, sceneDraft.id, choice.next) : []).map((option) => (
+                      <option disabled={option.missing} key={option.value} value={option.value}>
+                        {option.missing ? option.label : `${option.label} (${option.value})`}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -573,7 +650,8 @@ export function SceneWorkbench({
                 <strong>현재 뒤에 장면 추가</strong>
                 <input aria-label="새 장면 라벨" value={newSceneLabel} onChange={(event) => setNewSceneLabel(event.target.value)} />
                 <textarea aria-label="새 장면 본문" value={newSceneText} onChange={(event) => setNewSceneText(event.target.value)} />
-                <Button disabled={isEndingScene} icon={<Plus size={16} />} onClick={addSceneAfterCurrent}>추가</Button>
+                <Button disabled={!actionState.canAddNextScene} icon={<Plus size={16} />} onClick={addSceneAfterCurrent}>추가</Button>
+                {actionState.nextSceneDisabledReason ? <small>{actionState.nextSceneDisabledReason}</small> : null}
               </div>
               <div className="manual-action">
                 <strong>선택지 분기 추가</strong>
@@ -590,7 +668,8 @@ export function SceneWorkbench({
                     <textarea aria-label="분기 새 장면 본문" value={branchSceneText} onChange={(event) => setBranchSceneText(event.target.value)} />
                   </>
                 ) : null}
-                <Button disabled={isEndingScene || !choiceText.trim()} icon={<Split size={16} />} onClick={addChoiceBranch}>분기 추가</Button>
+                <Button disabled={!actionState.canAddChoiceBranch || !choiceText.trim()} icon={<Split size={16} />} onClick={addChoiceBranch}>분기 추가</Button>
+                {actionState.choiceBranchDisabledReason ? <small>{actionState.choiceBranchDisabledReason}</small> : null}
               </div>
               <div className="manual-action">
                 <strong>엔딩 지정</strong>
@@ -606,6 +685,7 @@ export function SceneWorkbench({
                     <span>다음/선택지를 제거하고 엔딩으로 만들기</span>
                   </label>
                 ) : null}
+                {clearOutgoing && actionState.outgoingRemovalSummary ? <small>{actionState.outgoingRemovalSummary}</small> : null}
                 <div className="button-row compact">
                   <Button disabled={!canSetEnding} icon={<StopCircle size={16} />} onClick={setCurrentAsEnding}>엔딩으로 지정</Button>
                   {sceneDraft.ending ? <Button icon={<XCircle size={16} />} onClick={() => onSetSceneEnding({ sceneId: sceneDraft.id, ending: null })}>엔딩 해제</Button> : null}

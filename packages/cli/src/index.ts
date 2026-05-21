@@ -6,6 +6,7 @@ import {
 import {
   buildProjectHtml,
   createAssetManifest,
+  createDeterministicEventExpansionPlan,
   createImageGenerationJob,
   createStarterProject,
   parseVnMakerProject,
@@ -80,6 +81,11 @@ function getProject(input: CliInput): VnMakerProject {
 }
 
 const useCases = createVnMakerUseCases({
+  eventText: {
+    generateEventExpansionPlan: (input) => process.env.VN_MAKER_EVENT_TEXT_ADAPTER === "deterministic"
+      ? Promise.resolve(createDeterministicEventExpansionPlan(input.request))
+      : sharedCodexAppServerClient.generateEventExpansionPlan(input)
+  },
   image: {
     generateImageAsset: (input) => sharedCodexAppServerClient.generateImageAsset(input)
   }

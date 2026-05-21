@@ -333,12 +333,12 @@ const apiExpand = await mockApi({
   path: "/api/events/expand",
   body: {
     projectDirectory,
-    userEvent: "브라우저 기본 패치 경로가 Codex 텍스트 turn 없이 검증 가능한 노멀 엔딩 패치를 만든다."
+    userEvent: "브라우저 기본 패치 경로가 Codex 텍스트 어댑터를 통해 검증 가능한 노멀 엔딩 패치를 만든다."
   }
 });
 assert.equal(apiExpand.status, 200);
 assert.equal(apiExpand.body.ok, true);
-assert.equal(codexTextCalls, 0);
+assert.equal(codexTextCalls, 1);
 
 const cliJobsOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "list-generation-jobs"], {
   input: JSON.stringify({ projectDirectory }),

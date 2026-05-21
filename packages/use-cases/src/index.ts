@@ -990,8 +990,16 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
+        const project = store.requireProject();
         const runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined);
-        return { ok: true, projectDirectory: store.paths.projectDirectory, runtime };
+        const routeGraphAnalysis = analyzeRouteGraph(project, typeof record.routeId === "string" ? record.routeId : undefined);
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          runtime,
+          validation: runtime.validation,
+          routeGraphAnalysis
+        };
       } finally {
         store.close();
       }
