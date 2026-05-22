@@ -22,6 +22,7 @@ export function HeroineCreatePage() {
   const [state, setState] = useState<HeroineLoadState>("ready");
   const [status, setStatus] = useState("새 히로인 기본 설정을 입력하세요.");
   const [draft, setDraft] = useState<HeroineDraft>(() => createEmptyHeroineDraft());
+  const draftRef = useRef(draft);
   const [existingIds, setExistingIds] = useState<string[]>([]);
   const [stagedPortraitRef, setStagedPortraitRef] = useState<HeroineLibraryResult["stagedPortraitRef"]>();
   const emptyDraft = useMemo(() => createEmptyHeroineDraft(), []);
@@ -37,6 +38,10 @@ export function HeroineCreatePage() {
   useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 히로인 draft가 있습니다. 페이지를 떠나시겠습니까?");
 
   useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
     void listHeroines(postAuthedJson).then((result) => {
       if (result.ok !== false) {
         setExistingIds((result.heroines || []).map((heroine) => heroine.id));
@@ -45,20 +50,24 @@ export function HeroineCreatePage() {
   }, [postAuthedJson]);
 
   const updateDraft = useCallback((nextDraft: HeroineDraft): void => {
-    if (stagedPortraitRef && nextDraft.id !== draft.id) {
-      setStagedPortraitRef(undefined);
-      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
-      setDraft({
+    const currentDraft = draftRef.current;
+    if (stagedPortraitRef && nextDraft.id !== currentDraft.id) {
+      const clearedDraft = {
         ...nextDraft,
         defaultPortraitAssetId: undefined,
         defaultPortraitUri: undefined,
         portraitAssetIds: [],
         portraitAssetUris: []
-      });
+      };
+      setStagedPortraitRef(undefined);
+      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      draftRef.current = clearedDraft;
+      setDraft(clearedDraft);
       return;
     }
+    draftRef.current = nextDraft;
     setDraft(nextDraft);
-  }, [draft.id, stagedPortraitRef]);
+  }, [stagedPortraitRef]);
 
   async function save(): Promise<void> {
     if (!canSave) {
@@ -78,19 +87,29 @@ export function HeroineCreatePage() {
   }
 
   async function generatePortrait(): Promise<void> {
+    const requestDraft = draftRef.current;
     setState("saving");
     setStatus("기본 포트레이트를 생성하는 중입니다.");
-    const result = await generateHeroinePortrait(postAuthedJson, { draft });
+    const result = await generateHeroinePortrait(postAuthedJson, { draft: requestDraft });
     if (result.ok === false) {
       setState("ready");
       setStatus(`기본 포트레이트를 준비하지 못했습니다. 기본 정보는 저장할 수 있습니다. ${failureText(result, "다시 시도하세요.")}`);
       return;
     }
-    setDraft({
-      ...draft,
-      defaultPortraitAssetId: result.asset?.id || draft.defaultPortraitAssetId,
-      defaultPortraitUri: result.stagedPortraitRef?.previewUri || result.asset?.uri || draft.defaultPortraitUri
-    });
+    const currentDraft = draftRef.current;
+    if (currentDraft.id !== requestDraft.id) {
+      setStagedPortraitRef(undefined);
+      setState("ready");
+      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      return;
+    }
+    const nextDraft = {
+      ...currentDraft,
+      defaultPortraitAssetId: result.asset?.id || currentDraft.defaultPortraitAssetId,
+      defaultPortraitUri: result.stagedPortraitRef?.previewUri || result.asset?.uri || currentDraft.defaultPortraitUri
+    };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
     setStagedPortraitRef(result.stagedPortraitRef);
     setState("ready");
     setStatus("기본 포트레이트가 연결되었습니다. 저장하면 원본 히로인 에셋으로 연결됩니다.");

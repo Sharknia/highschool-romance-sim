@@ -132,6 +132,9 @@ assert.match(heroineRouteSource, /삭제 확인값을 입력해야 합니다/, "
 assert.match(heroineRouteSource, /저장하지 않은 변경 사항이 있어 기본 포트레이트 생성 전에 저장해야 합니다/, "dirty edit 상태에서 포트레이트 생성으로 텍스트 변경을 잃으면 안 됩니다.");
 assert.match(heroineRouteSource, /setStagedPortraitRef\(undefined\)/, "생성 화면에서 히로인 ID가 바뀌면 staged portrait 참조를 해제해야 합니다.");
 assert.match(heroineRouteSource, /히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다/, "생성 화면은 staged portrait 참조 해제 상태를 알려야 합니다.");
+assert.match(heroineRouteSource, /const requestDraft = draftRef\.current/, "포트레이트 생성은 요청 시작 시점의 draft ID를 보관해야 합니다.");
+assert.match(heroineRouteSource, /currentDraft\.id !== requestDraft\.id/, "포트레이트 생성 완료 시 현재 draft ID가 달라졌으면 staged ref를 붙이면 안 됩니다.");
+assert.match(heroineRouteSource, /refreshedDeleteTarget/, "삭제 conflict reload는 dialog의 deleteTarget도 최신 revision으로 교체해야 합니다.");
 assert.match(heroineRouteSource, /heroine-action-bar/, "생성/수정 화면은 sticky action bar를 가져야 합니다.");
 assert.match(heroineRouteSource, /HEROINE_REVISION_CONFLICT/, "revision 충돌은 별도 코드로 처리해야 합니다.");
 assert.doesNotMatch(heroineRouteSource, /generatedAssetPreviewUri/, "기본 포트레이트 프리뷰는 존재 여부를 모르는 경로를 추정 렌더링하면 안 됩니다.");

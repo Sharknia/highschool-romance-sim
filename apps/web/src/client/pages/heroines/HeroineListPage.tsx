@@ -33,14 +33,14 @@ export function HeroineListPage() {
   const [deleteTarget, setDeleteTarget] = useState<HeroineDraft | null>(null);
   const [deleteError, setDeleteError] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<HeroineDraft[] | null> => {
     setState("loading");
     setStatus("히로인 목록을 불러오는 중입니다.");
     const result = await listHeroines(postAuthedJson);
     if (result.ok === false) {
       setState("error");
       setStatus(`히로인 목록을 불러오지 못했습니다. ${failureText(result, "저장소 상태를 확인한 뒤 다시 시도하세요.")}`);
-      return;
+      return null;
     }
     const nextHeroines = result.heroines || [];
     setHeroines(nextHeroines);
@@ -49,6 +49,7 @@ export function HeroineListPage() {
     setStatus(nextHeroines.length > 0
       ? "최근 수정한 히로인부터 표시합니다. 카드를 선택해 상세 정보를 확인하세요."
       : "아직 히로인이 없습니다.");
+    return nextHeroines;
   }, [postAuthedJson]);
 
   useEffect(() => {
@@ -69,6 +70,23 @@ export function HeroineListPage() {
     setCount(result.heroines?.length ?? 0);
     setState(result.heroines && result.heroines.length > 0 ? "ready" : "empty");
     setStatus("히로인을 삭제하는 중입니다. 삭제 후 최근 수정순 목록을 갱신했습니다.");
+  }
+
+  async function reloadDeleteTarget(): Promise<void> {
+    const targetId = deleteTarget?.id;
+    const nextHeroines = await load();
+    if (!targetId || !nextHeroines) {
+      return;
+    }
+    const refreshedDeleteTarget = nextHeroines.find((heroine) => heroine.id === targetId);
+    setDeleteError("");
+    if (refreshedDeleteTarget) {
+      setDeleteTarget(refreshedDeleteTarget);
+      setStatus("최신 히로인 정보를 불러왔습니다. 삭제 확인값을 다시 입력하세요.");
+      return;
+    }
+    setDeleteTarget(null);
+    setStatus("대상 히로인이 이미 목록에서 사라져 삭제 dialog를 닫았습니다.");
   }
 
   return (
@@ -156,7 +174,7 @@ export function HeroineListPage() {
           setDeleteError("");
         }}
         onConfirm={(heroine, confirmation) => void confirmDelete(heroine, confirmation)}
-        onReload={() => void load()}
+        onReload={() => void reloadDeleteTarget()}
       />
     </section>
   );
