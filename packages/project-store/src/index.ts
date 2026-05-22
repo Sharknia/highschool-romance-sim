@@ -621,6 +621,22 @@ function normalizeRecentProjectEntry(value: unknown): RecentProjectIndexEntry | 
   };
 }
 
+function compareRecentProjectEntries(left: RecentProjectIndexEntry, right: RecentProjectIndexEntry): number {
+  const openedAt = right.lastOpenedAt.localeCompare(left.lastOpenedAt);
+  if (openedAt !== 0) {
+    return openedAt;
+  }
+  const title = left.title.localeCompare(right.title);
+  if (title !== 0) {
+    return title;
+  }
+  return left.projectId.localeCompare(right.projectId);
+}
+
+function sortRecentProjectEntries(entries: RecentProjectIndexEntry[]): RecentProjectIndexEntry[] {
+  return [...entries].sort(compareRecentProjectEntries);
+}
+
 async function readRecentProjectEntries(indexFilePath: string): Promise<RecentProjectIndexEntry[]> {
   try {
     const raw = await readFile(indexFilePath, "utf8");
@@ -633,7 +649,7 @@ async function readRecentProjectEntries(indexFilePath: string): Promise<RecentPr
     return entries
       .map(normalizeRecentProjectEntry)
       .filter((entry): entry is RecentProjectIndexEntry => Boolean(entry))
-      .sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt));
+      .sort(compareRecentProjectEntries);
   } catch (error) {
     if (isErrorWithCode(error) && error.code === "ENOENT") {
       return [];
@@ -700,10 +716,10 @@ export class RecentProjectIndexStore {
   async listProjects(): Promise<RecentProjectIndexEntry[]> {
     return withRecentProjectIndexQueue(this.indexFilePath, async () => {
       const entries = await this.readEntries();
-      const refreshed = await Promise.all(entries.map(async (entry) => ({
+      const refreshed = sortRecentProjectEntries(await Promise.all(entries.map(async (entry) => ({
         ...entry,
         missing: !(await projectWorkspaceExists(entry.projectDirectory))
-      })));
+      }))));
       if (JSON.stringify(entries) !== JSON.stringify(refreshed)) {
         await this.writeEntries(refreshed);
       }
@@ -732,7 +748,23 @@ export class RecentProjectIndexStore {
       const nextEntries = [
         entry,
         ...entries.filter((item) => item.projectId !== input.projectId)
-      ].sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt));
+      ].sort(compareRecentProjectEntries);
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
+  }
+
+  async restoreProject(entry: RecentProjectIndexEntry): Promise<RecentProjectIndexEntry[]> {
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const normalized = normalizeRecentProjectEntry(entry);
+      if (!normalized) {
+        return this.readEntries();
+      }
+      const entries = await this.readEntries();
+      const nextEntries = sortRecentProjectEntries([
+        normalized,
+        ...entries.filter((item) => item.projectId !== normalized.projectId)
+      ]);
       await this.writeEntries(nextEntries);
       return nextEntries;
     });

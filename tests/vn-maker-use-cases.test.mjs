@@ -168,11 +168,81 @@ assert.equal(openedAfterLibraryDelete.project.characters[0].defaultPortraitAsset
 
 const recentAfterCreate = await useCases.listRecentProjects();
 assert.equal(recentAfterCreate.ok, true);
+assert.equal(recentAfterCreate.action, "listRecentProjects");
+assert.equal(typeof recentAfterCreate.requestId, "string");
+assert.equal(recentAfterCreate.count, 1);
+assert.equal(recentAfterCreate.missingCount, 0);
+assert.equal(recentAfterCreate.sort, "lastOpenedAtDesc");
+assert.equal(typeof recentAfterCreate.loadedAt, "string");
+assert.equal(Boolean(recentAfterCreate.workflowSummary), true);
 assert.equal(recentAfterCreate.projects[0].projectId, created.project.id);
 assert.equal(recentAfterCreate.projects[0].projectDirectory, projectDirectory);
 assert.equal(recentAfterCreate.projects[0].title, "하루 Use Case");
 assert.equal(recentAfterCreate.projects[0].validationState, "valid");
 assert.equal(recentAfterCreate.projects[0].missing, false);
+
+const removedRecentProject = await useCases.removeRecentProject({
+  projectId: created.project.id
+});
+assert.equal(removedRecentProject.ok, true);
+assert.equal(removedRecentProject.action, "removeRecentProject");
+assert.equal(removedRecentProject.removedProject.projectId, created.project.id);
+assert.equal(removedRecentProject.projects.some((entry) => entry.projectId === created.project.id), false);
+const restoredRecentProject = await useCases.restoreRecentProject({
+  recentProject: removedRecentProject.removedProject
+});
+assert.equal(restoredRecentProject.ok, true);
+assert.equal(restoredRecentProject.action, "restoreRecentProject");
+assert.equal(restoredRecentProject.projects[0].projectId, created.project.id);
+
+const reconnectedProject = await useCases.reconnectRecentProject({
+  projectId: created.project.id,
+  projectDirectory
+});
+assert.equal(reconnectedProject.ok, true);
+assert.equal(reconnectedProject.action, "reconnectRecentProject");
+assert.equal(reconnectedProject.project.id, created.project.id);
+
+await assert.rejects(
+  () => useCases.createProject({
+    projectDirectory: join(tempRoot, "ReservedProject.vnmaker"),
+    starter: {
+      id: "new",
+      title: "예약어 프로젝트",
+      premise: "예약어는 URL 라우트와 충돌한다."
+    }
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "createProject");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.action, "createProject");
+    assert.equal(failure.code, "PROJECT_ID_RESERVED");
+    assert.equal(failure.retryable, false);
+    assert.equal(typeof failure.requestId, "string");
+    return true;
+  }
+);
+
+await assert.rejects(
+  () => useCases.createProject({
+    projectDirectory,
+    starter: {
+      id: "different-project",
+      title: "다른 프로젝트",
+      premise: "기존 프로젝트를 덮어쓰면 안 된다."
+    }
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "createProject");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.action, "createProject");
+    assert.equal(failure.code, "PROJECT_ID_MISMATCH");
+    assert.equal(failure.retryable, false);
+    assert.equal(failure.projectId, created.project.id);
+    assert.equal(failure.projectDirectory, projectDirectory);
+    return true;
+  }
+);
 
 const manualCreated = await useCases.createProjectFromHeroine({
   projectDirectory: manualProjectDirectory,

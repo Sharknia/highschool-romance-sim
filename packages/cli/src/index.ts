@@ -20,7 +20,7 @@ import {
   type VnMakerProject,
   type VnMakerScene
 } from "@vn-maker/engine-core";
-import { createVnMakerUseCases } from "@vn-maker/use-cases";
+import { createVnMakerUseCases, projectActionFailureFromError } from "@vn-maker/use-cases";
 
 interface CliInput {
   projectDirectory?: string;
@@ -51,6 +51,7 @@ interface CliInput {
   replaceCompleted?: boolean;
   job?: unknown;
   image?: unknown;
+  recentProject?: unknown;
   login?: {
     flow?: "browser" | "device";
   };
@@ -111,6 +112,10 @@ function printCapabilities(): void {
       "create-project",
       "create-project-from-heroine",
       "open-project",
+      "reconnect-project",
+      "list-recent-projects",
+      "remove-recent-project",
+      "restore-recent-project",
       "list-heroines",
       "save-heroine",
       "clone-heroine",
@@ -174,6 +179,26 @@ async function run(): Promise<void> {
 
   if (command === "open-project") {
     writeJson(await useCases.openProject(input));
+    return;
+  }
+
+  if (command === "reconnect-project") {
+    writeJson(await useCases.reconnectRecentProject(input));
+    return;
+  }
+
+  if (command === "list-recent-projects") {
+    writeJson(await useCases.listRecentProjects());
+    return;
+  }
+
+  if (command === "remove-recent-project") {
+    writeJson(await useCases.removeRecentProject(input));
+    return;
+  }
+
+  if (command === "restore-recent-project") {
+    writeJson(await useCases.restoreRecentProject(input));
     return;
   }
 
@@ -375,10 +400,7 @@ async function run(): Promise<void> {
 }
 
 run().catch((error: unknown) => {
-  writeJson({
-    ok: false,
-    error: error instanceof Error ? error.message : String(error)
-  });
+  writeJson(projectActionFailureFromError(error));
   process.exitCode = 1;
 }).finally(() => {
   sharedCodexAppServerClient.close();

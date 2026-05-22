@@ -11,6 +11,7 @@ import {
   planExpressionAssetsForHeroine,
   createProjectFromHeroine,
   createStarterProject,
+  hashProjectSnapshot,
   parseCreateImageGenerationJobInput,
   parseEventExpansionPlan,
   parseEventExpansionRequest,
@@ -102,6 +103,76 @@ export interface ProjectImageGenerationAdapter {
   generateImageAsset(input: ProjectImageGenerationInput): Promise<ProjectImageGenerationResult>;
 }
 
+export type MakerActionId =
+  | "createProject"
+  | "createProjectFromHeroine"
+  | "assignHeroineSnapshot"
+  | "openProject"
+  | "reconnectRecentProject"
+  | "listRecentProjects"
+  | "removeRecentProject"
+  | "restoreRecentProject"
+  | "expandEvent"
+  | "approveEvent"
+  | "listGenerationJobs"
+  | "runGenerationJobs"
+  | "previewProject"
+  | "exportProject";
+
+export type MakerValidationState = "unknown" | "valid" | "warning" | "error";
+export type MakerGenerationState = "empty" | "planned" | "running" | "failed" | "completed" | "partialFailed";
+export type MakerPreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
+export type MakerExportState = "empty" | "blocked" | "ready" | "running" | "completed" | "failed";
+
+export interface MakerWorkflowStep {
+  id: "project" | "heroine" | "event" | "assets" | "preview" | "export";
+  label: string;
+  state: "done" | "current" | "blocked" | "waiting";
+}
+
+export interface MakerWorkflowSummary {
+  primaryAction: MakerActionId | "goToHeroine" | "goToEvent" | "goToAssets" | "goToPreview" | "goToExport";
+  primaryLabel: string;
+  blockingIssues: string[];
+  validationState: MakerValidationState;
+  generationState: MakerGenerationState;
+  previewState: MakerPreviewState;
+  exportState: MakerExportState;
+  steps: MakerWorkflowStep[];
+}
+
+export type ProjectActionFailureCode =
+  | "PROJECT_INPUT_INVALID"
+  | "PROJECT_ID_RESERVED"
+  | "PROJECT_ID_CONFLICT"
+  | "PROJECT_NOT_FOUND"
+  | "PROJECT_DIRECTORY_MISSING"
+  | "PROJECT_ID_MISMATCH"
+  | "PROJECT_REVISION_CONFLICT"
+  | "HEROINE_REQUIRED"
+  | "HEROINE_REPLACE_BLOCKED"
+  | "PATCH_STALE"
+  | "JOB_ALREADY_RUNNING"
+  | "EXPORT_BLOCKED"
+  | "OAUTH_REQUIRED"
+  | "SERVER_ERROR";
+
+export interface ProjectActionFailureDto {
+  ok: false;
+  action?: MakerActionId;
+  code: ProjectActionFailureCode;
+  message: string;
+  error: string;
+  requestId: string;
+  projectId?: string;
+  projectDirectory?: string;
+  expectedProjectId?: string;
+  actualProjectId?: string;
+  workflowSummary?: MakerWorkflowSummary;
+  issues?: ValidationIssue[];
+  retryable: boolean;
+}
+
 export interface VnMakerUseCaseOptions {
   defaultProjectDirectory?: string;
   recentProjectIndexFile?: string;
@@ -171,8 +242,249 @@ export class ProjectIdMismatchError extends Error {
   }
 }
 
+export class ProjectIdReservedError extends Error {
+  readonly code = "PROJECT_ID_RESERVED";
+  readonly projectId: string;
+
+  constructor(projectId: string) {
+    super(`예약된 프로젝트 ID입니다: ${projectId}`);
+    this.name = "ProjectIdReservedError";
+    this.projectId = projectId;
+  }
+}
+
+export class ProjectIdConflictError extends Error {
+  readonly code = "PROJECT_ID_CONFLICT";
+  readonly projectId: string;
+  readonly projectDirectory: string;
+
+  constructor(input: { projectId: string; projectDirectory: string }) {
+    super("이미 VN Maker 프로젝트가 있는 위치입니다. 기존 프로젝트를 덮어쓰지 않았습니다.");
+    this.name = "ProjectIdConflictError";
+    this.projectId = input.projectId;
+    this.projectDirectory = input.projectDirectory;
+  }
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+const reservedProjectIds = new Set(["new", "open", "settings", "delete", "create"]);
+
+function createRequestId(): string {
+  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function explicitProjectId(input: unknown): string | undefined {
+  const record = asRecord(input);
+  const projectId = record.projectId;
+  if (typeof projectId === "string" && projectId.trim()) {
+    return projectId.trim();
+  }
+  const starterId = asRecord(record.starter).id;
+  if (typeof starterId === "string" && starterId.trim()) {
+    return starterId.trim();
+  }
+  const projectIdFromProject = asRecord(record.project).id;
+  return typeof projectIdFromProject === "string" && projectIdFromProject.trim()
+    ? projectIdFromProject.trim()
+    : undefined;
+}
+
+function assertProjectIdCanBeCreated(input: unknown): void {
+  const projectId = explicitProjectId(input);
+  if (!projectId) {
+    return;
+  }
+  const normalized = projectId.trim().toLowerCase();
+  if (reservedProjectIds.has(normalized)) {
+    throw new ProjectIdReservedError(normalized);
+  }
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(normalized)) {
+    throw new InputValidationError("projectId 입력이 올바르지 않습니다.", [{
+      severity: "error",
+      path: "projectId",
+      message: "프로젝트 ID는 영문 소문자, 숫자, 하이픈만 사용할 수 있습니다."
+    }]);
+  }
+}
+
+function validationStateForWorkflow(validation?: { ok?: boolean; issues?: ValidationIssue[] }): MakerValidationState {
+  if (!validation) {
+    return "unknown";
+  }
+  if (validation.ok === false) {
+    return "error";
+  }
+  return validation.issues?.some((issue) => issue.severity === "warning") ? "warning" : "valid";
+}
+
+function generationStateForWorkflow(project?: VnMakerProject): MakerGenerationState {
+  const jobs = project?.generationJobs.filter((job) => job.kind === "cg") || [];
+  if (jobs.length === 0) {
+    return "empty";
+  }
+  if (jobs.some((job) => job.status === "running")) {
+    return "running";
+  }
+  const failedCount = jobs.filter((job) => job.status === "failed").length;
+  const completedCount = jobs.filter((job) => job.status === "completed").length;
+  if (failedCount > 0 && completedCount > 0) {
+    return "partialFailed";
+  }
+  if (failedCount > 0) {
+    return "failed";
+  }
+  if (completedCount === jobs.length) {
+    return "completed";
+  }
+  return "planned";
+}
+
+function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boolean; issues?: ValidationIssue[] }): MakerWorkflowSummary {
+  const hasProject = Boolean(project);
+  const hasHeroine = Boolean(project?.characters.length);
+  const hasEvent = Boolean(project && project.scenes.length > 1);
+  const generationState = generationStateForWorkflow(project);
+  const validationState = validationStateForWorkflow(validation);
+  const blockingIssues = [
+    hasProject && !hasHeroine ? "히로인 1명을 먼저 선택해야 합니다." : "",
+    validationState === "error" ? "문제 확인 결과를 먼저 해결해야 합니다." : "",
+    generationState === "planned" || generationState === "failed" || generationState === "partialFailed"
+      ? "완료되지 않은 이미지 작업이 있습니다."
+      : ""
+  ].filter(Boolean);
+  const primaryAction: MakerWorkflowSummary["primaryAction"] = !hasProject
+    ? "createProject"
+    : !hasHeroine
+      ? "goToHeroine"
+      : !hasEvent
+        ? "goToEvent"
+        : generationState === "planned" || generationState === "failed" || generationState === "partialFailed"
+          ? "goToAssets"
+          : "goToPreview";
+  const primaryLabel = primaryAction === "createProject"
+    ? "새 프로젝트 만들기"
+    : primaryAction === "goToHeroine"
+      ? "히로인 스냅샷으로 이동"
+      : primaryAction === "goToEvent"
+        ? "제작/이벤트로 이동"
+        : primaryAction === "goToAssets"
+          ? "이미지 작업으로 이동"
+          : "프리뷰 확인";
+
+  return {
+    primaryAction,
+    primaryLabel,
+    blockingIssues,
+    validationState,
+    generationState,
+    previewState: !hasHeroine || !hasEvent ? "blocked" : "stale",
+    exportState: blockingIssues.length > 0 ? "blocked" : "ready",
+    steps: [
+      { id: "project", label: "프로젝트 생성", state: hasProject ? "done" : "current" },
+      { id: "heroine", label: "히로인 선택", state: hasHeroine ? "done" : hasProject ? "current" : "blocked" },
+      { id: "event", label: "이벤트 작성", state: hasEvent ? "done" : hasHeroine ? "current" : "blocked" },
+      {
+        id: "assets",
+        label: "이미지 만들기",
+        state: generationState === "completed" || generationState === "empty"
+          ? "done"
+          : hasEvent
+            ? "current"
+            : "blocked"
+      },
+      { id: "preview", label: "프리뷰", state: hasHeroine && hasEvent ? "current" : "blocked" },
+      { id: "export", label: "내보내기", state: blockingIssues.length === 0 ? "waiting" : "blocked" }
+    ]
+  };
+}
+
+function withActionState<T extends JsonRecord>(
+  action: MakerActionId,
+  body: T,
+  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] } } = {}
+): T & {
+  ok: boolean;
+  requestId: string;
+  action: MakerActionId;
+  baseProjectHash?: string;
+  projectRevision?: string;
+  workflowSummary: MakerWorkflowSummary;
+} {
+  const project = options.project || (asRecord(body).project as VnMakerProject | undefined);
+  const validation = options.validation || (asRecord(body).validation as { ok?: boolean; issues?: ValidationIssue[] } | undefined);
+  const projectHash = project ? hashProjectSnapshot(project) : undefined;
+  return {
+    ...body,
+    ok: body.ok !== false,
+    requestId: createRequestId(),
+    action,
+    baseProjectHash: projectHash,
+    projectRevision: projectHash,
+    workflowSummary: createWorkflowSummary(project, validation)
+  };
+}
+
+function retryableFailureCode(code: ProjectActionFailureCode): boolean {
+  return code === "SERVER_ERROR" || code === "PROJECT_DIRECTORY_MISSING" || code === "OAUTH_REQUIRED";
+}
+
+function failureCodeFromError(error: unknown): ProjectActionFailureCode {
+  if (error instanceof InputValidationError) {
+    return "PROJECT_INPUT_INVALID";
+  }
+  const errorRecord = asRecord(error);
+  const code = typeof errorRecord.code === "string" ? errorRecord.code : "";
+  if (code === "RECENT_PROJECT_INDEX_MISS") {
+    return "PROJECT_NOT_FOUND";
+  }
+  if (
+    code === "PROJECT_ID_RESERVED"
+    || code === "PROJECT_ID_CONFLICT"
+    || code === "PROJECT_NOT_FOUND"
+    || code === "PROJECT_DIRECTORY_MISSING"
+    || code === "PROJECT_ID_MISMATCH"
+    || code === "PROJECT_REVISION_CONFLICT"
+    || code === "HEROINE_REQUIRED"
+    || code === "HEROINE_REPLACE_BLOCKED"
+    || code === "PATCH_STALE"
+    || code === "JOB_ALREADY_RUNNING"
+    || code === "EXPORT_BLOCKED"
+    || code === "OAUTH_REQUIRED"
+  ) {
+    return code;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("OAuth 로그인이 필요")) {
+    return "OAUTH_REQUIRED";
+  }
+  if (message.includes("현재 프로젝트가 패치 적용 직후 상태와 달라")) {
+    return "PATCH_STALE";
+  }
+  return "SERVER_ERROR";
+}
+
+export function projectActionFailureFromError(error: unknown, action?: MakerActionId): ProjectActionFailureDto {
+  const errorRecord = asRecord(error);
+  const code = failureCodeFromError(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const expectedProjectId = typeof errorRecord.expectedProjectId === "string" ? errorRecord.expectedProjectId : undefined;
+  return {
+    ok: false,
+    action,
+    code,
+    message,
+    error: message,
+    requestId: createRequestId(),
+    projectId: typeof errorRecord.projectId === "string" ? errorRecord.projectId : expectedProjectId,
+    projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
+    expectedProjectId,
+    actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
+    issues: error instanceof InputValidationError ? error.issues : undefined,
+    retryable: retryableFailureCode(code)
+  };
 }
 
 function getDefaultProjectDirectory(): string {
@@ -561,6 +873,36 @@ function assertProjectIdMatches(input: unknown, project: VnMakerProject, project
   }
 }
 
+async function readExistingProject(projectDirectory: string): Promise<VnMakerProject | null> {
+  if (!(await projectWorkspaceExists(projectDirectory))) {
+    return null;
+  }
+  const store = await openProjectStore(projectDirectory);
+  try {
+    return store.getProject();
+  } finally {
+    store.close();
+  }
+}
+
+async function assertProjectCreationTargetAvailable(projectDirectory: string, candidateProject: VnMakerProject): Promise<void> {
+  const existingProject = await readExistingProject(projectDirectory);
+  if (!existingProject) {
+    return;
+  }
+  if (existingProject.id !== candidateProject.id) {
+    throw new ProjectIdMismatchError({
+      expectedProjectId: existingProject.id,
+      actualProjectId: candidateProject.id,
+      projectDirectory
+    });
+  }
+  throw new ProjectIdConflictError({
+    projectId: existingProject.id,
+    projectDirectory
+  });
+}
+
 async function ensureProjectStore(input: unknown, fallbackDirectory: string): Promise<ProjectStore> {
   const projectDirectory = projectDirectoryFrom(input, fallbackDirectory);
   const store = await openProjectStore(projectDirectory);
@@ -738,26 +1080,27 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
   return {
     async createProject(input: unknown) {
       const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
+      assertProjectIdCanBeCreated(input);
+      const project = optionalProject(input) || createStarterProject(optionalStarter(input));
+      await assertProjectCreationTargetAvailable(projectDirectory, project);
       const store = await createProjectWorkspace({
         projectDirectory,
-        starter: optionalStarter(input),
-        project: optionalProject(input)
+        project
       });
       try {
         const validation = store.validateAndStore();
-        const project = store.requireProject();
+        const savedProject = store.requireProject();
         await recordRecentProject(recentProjects, {
-          project,
+          project: savedProject,
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return {
-          ok: true,
+        return withActionState("createProject", {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
-          project,
+          project: savedProject,
           validation
-        };
+        }, { project: savedProject, validation });
       } finally {
         store.close();
       }
@@ -766,6 +1109,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async createProjectFromHeroine(input: unknown) {
       const record = asRecord(input);
       const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
+      assertProjectIdCanBeCreated(input);
       const existingStore = await ensureProjectStore(input, defaultProjectDirectory);
       const heroine = record.heroine
         ? requiredHeroine(input)
@@ -793,20 +1137,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return {
-          ok: true,
+        return withActionState("createProjectFromHeroine", {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           heroine,
           project,
           validation
-        };
+        }, { project, validation });
       } finally {
         store.close();
       }
     },
 
-    async openProject(input: unknown) {
+    async openProjectForAction(action: Extract<MakerActionId, "openProject" | "reconnectRecentProject">, input: unknown) {
       const projectDirectory = await resolveProjectDirectoryForOpen(recentProjects, input, defaultProjectDirectory);
       return withStore(projectDirectory, async (store) => {
         const project = store.requireProject();
@@ -817,18 +1160,32 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return {
-          ok: true,
+        return withActionState(action, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           project,
           validation
-        };
+        }, { project, validation });
       });
     },
 
+    async openProject(input: unknown) {
+      return this.openProjectForAction("openProject", input);
+    },
+
+    async reconnectRecentProject(input: unknown) {
+      return this.openProjectForAction("reconnectRecentProject", input);
+    },
+
     async listRecentProjects() {
-      return { ok: true, projects: await recentProjects.listProjects() };
+      const projects = await recentProjects.listProjects();
+      return withActionState("listRecentProjects", {
+        projects,
+        count: projects.length,
+        missingCount: projects.filter((project) => project.missing).length,
+        loadedAt: new Date().toISOString(),
+        sort: "lastOpenedAtDesc"
+      });
     },
 
     async removeRecentProject(input: unknown) {
@@ -836,7 +1193,27 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       if (!projectId) {
         throw new InputValidationError("projectId 입력이 필요합니다.", [{ severity: "error", path: "projectId", message: "비어 있을 수 없습니다." }]);
       }
-      return { ok: true, projects: await recentProjects.removeProject(projectId) };
+      const removedProject = await recentProjects.findProject(projectId);
+      return withActionState("removeRecentProject", {
+        projects: await recentProjects.removeProject(projectId),
+        removedProject
+      });
+    },
+
+    async restoreRecentProject(input: unknown) {
+      const record = asRecord(input);
+      const recentProject = asRecord(record.recentProject);
+      if (
+        typeof recentProject.projectId !== "string"
+        || typeof recentProject.projectDirectory !== "string"
+        || typeof recentProject.title !== "string"
+        || typeof recentProject.lastOpenedAt !== "string"
+      ) {
+        throw new InputValidationError("recentProject 입력이 필요합니다.", [{ severity: "error", path: "recentProject", message: "복원할 최근 프로젝트 정보가 필요합니다." }]);
+      }
+      return withActionState("restoreRecentProject", {
+        projects: await recentProjects.restoreProject(recentProject as unknown as RecentProjectIndexEntry)
+      });
     },
 
     async listHeroines(input: unknown) {
@@ -1161,7 +1538,14 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             attempts: result.attempts,
             validation
           });
-          return { ok: false, projectDirectory: store.paths.projectDirectory, request, attempts: result.attempts, error: result.error, validation };
+          return withActionState("expandEvent", {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            request,
+            attempts: result.attempts,
+            error: result.error,
+            validation
+          }, { project, validation });
         }
         const patchHistoryEntry = store.recordPatchHistory({
           status: "proposed",
@@ -1175,8 +1559,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           beforeProject: project,
           afterProject: result.validation.appliedProject
         });
-        return {
-          ok: true,
+        return withActionState("expandEvent", {
           projectDirectory: store.paths.projectDirectory,
           request,
           plan: result.plan,
@@ -1185,7 +1568,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           attempts: result.attempts,
           rawOutput: result.rawOutput,
           patchHistoryEntry
-        };
+        }, { project, validation: result.validation });
       } finally {
         store.close();
       }
@@ -1197,7 +1580,10 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       try {
         const sourcePatchHistoryId = typeof record.patchHistoryId === "string" ? record.patchHistoryId : undefined;
         const result = store.applyEventExpansionPlan(requiredEventRequest(input), requiredEventPlan(input), sourcePatchHistoryId);
-        return { ok: true, projectDirectory: store.paths.projectDirectory, ...result };
+        return withActionState("approveEvent", { projectDirectory: store.paths.projectDirectory, ...result }, {
+          project: result.project,
+          validation: result.validation
+        });
       } finally {
         store.close();
       }
@@ -1210,13 +1596,12 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.requireProject();
         const runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined);
         const routeGraphAnalysis = analyzeRouteGraph(project, typeof record.routeId === "string" ? record.routeId : undefined);
-        return {
-          ok: true,
+        return withActionState("previewProject", {
           projectDirectory: store.paths.projectDirectory,
           runtime,
           validation: runtime.validation,
           routeGraphAnalysis
-        };
+        }, { project, validation: runtime.validation });
       } finally {
         store.close();
       }
@@ -1226,8 +1611,12 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
+        const project = store.requireProject();
         const result = await store.exportWebPlayer(typeof record.outputDirectory === "string" ? record.outputDirectory : undefined);
-        return { ok: true, projectDirectory: store.paths.projectDirectory, ...result };
+        return withActionState("exportProject", { projectDirectory: store.paths.projectDirectory, ...result }, {
+          project,
+          validation: result.smoke.ok ? { ok: true, issues: [] } : { ok: false, issues: [] }
+        });
       } finally {
         store.close();
       }
@@ -1303,7 +1692,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             ...job,
             asset: job.outputAssetId ? assetMap.get(job.outputAssetId) : undefined
           }));
-        return { ok: true, projectDirectory: store.paths.projectDirectory, jobs };
+        return withActionState("listGenerationJobs", { projectDirectory: store.paths.projectDirectory, jobs }, { project });
       } finally {
         store.close();
       }
@@ -1360,14 +1749,14 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             errors.push(message);
           }
         }
-        return {
+        return withActionState("runGenerationJobs", {
           ok: errors.length === 0,
           projectDirectory: store.paths.projectDirectory,
           jobs,
           assets,
           errors,
           project: store.requireProject()
-        };
+        }, { project: store.requireProject() });
       } finally {
         store.close();
       }
