@@ -20,10 +20,11 @@ import {
   type VnMakerProject,
   type VnMakerScene
 } from "@vn-maker/engine-core";
-import { createVnMakerUseCases } from "@vn-maker/use-cases";
+import { createVnMakerUseCases, projectActionFailureFromError, type MakerActionId } from "@vn-maker/use-cases";
 
 interface CliInput {
   projectDirectory?: string;
+  sourceProjectDirectory?: string;
   project?: VnMakerProject;
   outputPath?: string;
   character?: VnMakerCharacter;
@@ -56,6 +57,7 @@ interface CliInput {
   replaceCompleted?: boolean;
   job?: unknown;
   image?: unknown;
+  recentProject?: unknown;
   login?: {
     flow?: "browser" | "device";
   };
@@ -115,7 +117,12 @@ function printCapabilities(): void {
       "create-starter",
       "create-project",
       "create-project-from-heroine",
+      "assign-heroine-snapshot",
       "open-project",
+      "reconnect-project",
+      "list-recent-projects",
+      "remove-recent-project",
+      "restore-recent-project",
       "list-heroines",
       "get-heroine",
       "create-heroine",
@@ -156,6 +163,26 @@ function printCapabilities(): void {
   });
 }
 
+function actionForCommand(command: string): MakerActionId | undefined {
+  const actions: Partial<Record<string, MakerActionId>> = {
+    "create-project": "createProject",
+    "create-project-from-heroine": "createProjectFromHeroine",
+    "assign-heroine-snapshot": "assignHeroineSnapshot",
+    "open-project": "openProject",
+    "reconnect-project": "reconnectRecentProject",
+    "list-recent-projects": "listRecentProjects",
+    "remove-recent-project": "removeRecentProject",
+    "restore-recent-project": "restoreRecentProject",
+    "expand-event": "expandEvent",
+    "approve-event": "approveEvent",
+    "preview": "previewProject",
+    "export-web": "exportProject",
+    "list-generation-jobs": "listGenerationJobs",
+    "run-generation-jobs": "runGenerationJobs"
+  };
+  return actions[command];
+}
+
 async function run(): Promise<void> {
   const command = process.argv[2] || "inspect";
 
@@ -181,8 +208,33 @@ async function run(): Promise<void> {
     return;
   }
 
+  if (command === "assign-heroine-snapshot") {
+    writeJson(await useCases.assignHeroineSnapshot(input));
+    return;
+  }
+
   if (command === "open-project") {
     writeJson(await useCases.openProject(input));
+    return;
+  }
+
+  if (command === "reconnect-project") {
+    writeJson(await useCases.reconnectRecentProject(input));
+    return;
+  }
+
+  if (command === "list-recent-projects") {
+    writeJson(await useCases.listRecentProjects());
+    return;
+  }
+
+  if (command === "remove-recent-project") {
+    writeJson(await useCases.removeRecentProject(input));
+    return;
+  }
+
+  if (command === "restore-recent-project") {
+    writeJson(await useCases.restoreRecentProject(input));
     return;
   }
 
@@ -404,10 +456,7 @@ async function run(): Promise<void> {
 }
 
 run().catch((error: unknown) => {
-  writeJson({
-    ok: false,
-    error: error instanceof Error ? error.message : String(error)
-  });
+  writeJson(projectActionFailureFromError(error, actionForCommand(process.argv[2] || "inspect")));
   process.exitCode = 1;
 }).finally(() => {
   sharedCodexAppServerClient.close();

@@ -10,6 +10,7 @@ const webHandlers = await import("../apps/web/dist/server/handlers.js");
 
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-beta-"));
 const projectDirectory = join(tempRoot, "Beta.vnmaker");
+const fromLibraryProjectDirectory = join(tempRoot, "BetaFromLibrary.vnmaker");
 const transientFailures = new Set(["job-haru-festival-expression-shy"]);
 
 const useCases = useCasesModule.createVnMakerUseCases({
@@ -101,7 +102,8 @@ assert.deepEqual(cloned.heroine.tags, ["festival", "quiet"]);
 assert.equal(cloned.heroine.defaultPortraitAssetId, "asset-haru-festival-portrait");
 
 const fromLibrary = await useCases.createProjectFromHeroine({
-  projectDirectory,
+  projectDirectory: fromLibraryProjectDirectory,
+  sourceProjectDirectory: projectDirectory,
   heroineId: "haru-festival",
   title: "하루 Beta",
   premise: "축제 준비 중 반복 제작을 검증하는 프로젝트"
@@ -114,9 +116,11 @@ const reused = await useCases.listHeroines({ projectDirectory, query: "축제" }
 const reusedHeroine = reused.heroines.find((heroine) => heroine.id === "haru-festival");
 assert.equal(reusedHeroine.reuseHistory.length, 1);
 assert.equal(reusedHeroine.reuseHistory[0].projectId, "하루-beta");
+assert.equal(reusedHeroine.reuseHistory[0].projectDirectory, fromLibraryProjectDirectory);
+const activeProjectDirectory = fromLibraryProjectDirectory;
 
 const defaults = await useCases.planDefaultEmotionAssets({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   heroineId: "haru-festival"
 });
 assert.deepEqual(defaults.tags, ["normal", "happy", "sad", "angry", "shy"]);
@@ -125,7 +129,7 @@ assert.equal(defaults.project.characters[0].emotionTags.includes("happy"), true)
 assert.equal(Boolean(defaults.project.characters[0].expressionAssetIds.happy), true);
 
 const tagged = await useCases.planExpressionAssets({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   heroineId: "haru-festival",
   tags: ["embarrassed", "festival_nervous"]
 });
@@ -141,8 +145,8 @@ const expressionScene = {
   characters: [{ characterId: "haru-festival", expression: "happy", position: "center" }],
   choices: []
 };
-await useCases.saveScene({ projectDirectory, scene: expressionScene });
-const expressionPreview = await useCases.previewProject({ projectDirectory, startSceneId: "scene-happy-expression" });
+await useCases.saveScene({ projectDirectory: activeProjectDirectory, scene: expressionScene });
+const expressionPreview = await useCases.previewProject({ projectDirectory: activeProjectDirectory, startSceneId: "scene-happy-expression" });
 const previewScene = expressionPreview.runtime.scenes.find((scene) => scene.id === "scene-happy-expression");
 assert.equal(previewScene.characters[0].asset.id, defaults.project.characters[0].expressionAssetIds.happy);
 
@@ -156,18 +160,18 @@ const expressionSceneWithPortrait = {
     position: "center"
   }]
 };
-await useCases.saveScene({ projectDirectory, scene: expressionSceneWithPortrait });
-const expressionPriorityPreview = await useCases.previewProject({ projectDirectory, startSceneId: "scene-happy-expression-explicit-portrait" });
+await useCases.saveScene({ projectDirectory: activeProjectDirectory, scene: expressionSceneWithPortrait });
+const expressionPriorityPreview = await useCases.previewProject({ projectDirectory: activeProjectDirectory, startSceneId: "scene-happy-expression-explicit-portrait" });
 const priorityScene = expressionPriorityPreview.runtime.scenes.find((scene) => scene.id === "scene-happy-expression-explicit-portrait");
 assert.equal(priorityScene.characters[0].asset.id, defaults.project.characters[0].expressionAssetIds.happy);
 
-const boardBefore = await useCases.listGenerationJobs({ projectDirectory, status: "planned" });
+const boardBefore = await useCases.listGenerationJobs({ projectDirectory: activeProjectDirectory, status: "planned" });
 assert.equal(boardBefore.jobs.some((job) => job.id === "job-haru-festival-expression-shy"), true);
 assert.equal(boardBefore.jobs[0].provider, "image-generation-adapter");
 assert.equal(typeof boardBefore.jobs[0].prompt, "string");
 
 const failedBatch = await useCases.runGenerationJobs({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   jobIds: ["job-haru-festival-expression-shy"]
 });
 assert.equal(failedBatch.ok, false);
@@ -175,7 +179,7 @@ assert.equal(failedBatch.jobs[0].status, "failed");
 assert.match(failedBatch.jobs[0].failureMessage, /transient failure/);
 
 const retriedBatch = await useCases.runGenerationJobs({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   jobIds: ["job-haru-festival-expression-shy"],
   retryFailed: true
 });
@@ -183,12 +187,12 @@ assert.equal(retriedBatch.ok, true);
 assert.equal(retriedBatch.jobs[0].status, "completed");
 assert.equal(retriedBatch.assets[0].kind, "expression");
 assert.match(retriedBatch.assets[0].uri, /^data:image\/png;base64,/);
-const openedAfterRetry = await useCases.openProject({ projectDirectory });
+const openedAfterRetry = await useCases.openProject({ projectDirectory: activeProjectDirectory });
 const retriedAsset = openedAfterRetry.project.assets.find((asset) => asset.id === "asset-haru-festival-expression-shy");
 assert.match(retriedAsset.uri, /^data:image\/png;base64,/);
 
 const replacedBatch = await useCases.runGenerationJobs({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   jobIds: ["job-haru-festival-expression-shy"],
   replaceCompleted: true
 });
@@ -198,13 +202,13 @@ assert.equal(replacedBatch.assets[0].id, "asset-haru-festival-expression-shy");
 assert.match(replacedBatch.assets[0].uri, /^data:image\/png;base64,/);
 
 const expanded = await useCases.expandEvent({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   userEvent: "축제 전날 하루가 도서관에서 대본을 떨어트리고 당황한 뒤 노멀 엔딩으로 끝나는 짧은 이벤트"
 });
 assert.equal(expanded.ok, true);
 assert.equal(Boolean(expanded.patchHistoryEntry?.id), true);
 
-const proposedHistory = await useCases.listPatchHistory({ projectDirectory });
+const proposedHistory = await useCases.listPatchHistory({ projectDirectory: activeProjectDirectory });
 assert.equal(proposedHistory.entries.some((entry) => entry.status === "proposed" && entry.rawOutput), true);
 
 const badPlan = {
@@ -215,14 +219,14 @@ const badPlan = {
   }
 };
 await assert.rejects(
-  () => useCases.approveEvent({ projectDirectory, request: expanded.request, plan: badPlan }),
+  () => useCases.approveEvent({ projectDirectory: activeProjectDirectory, request: expanded.request, plan: badPlan }),
   /패치 검증 실패/
 );
-const failedHistory = await useCases.listPatchHistory({ projectDirectory });
+const failedHistory = await useCases.listPatchHistory({ projectDirectory: activeProjectDirectory });
 assert.equal(failedHistory.entries.some((entry) => entry.status === "failed" && entry.validationIssues.length > 0), true);
 
 const approved = await useCases.approveEvent({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   request: expanded.request,
   plan: expanded.plan,
   patchHistoryId: expanded.patchHistoryEntry.id
@@ -230,7 +234,7 @@ const approved = await useCases.approveEvent({
 assert.equal(approved.ok, true);
 const sceneCountAfterApprove = approved.project.scenes.length;
 
-const appliedHistory = await useCases.listPatchHistory({ projectDirectory });
+const appliedHistory = await useCases.listPatchHistory({ projectDirectory: activeProjectDirectory });
 const appliedEntry = appliedHistory.entries.find((entry) => entry.status === "applied");
 assert.equal(Boolean(appliedEntry), true);
 assert.match(appliedEntry.beforeSummary, /씬/);
@@ -240,22 +244,22 @@ assert.equal(appliedEntry.attempts.length > 0, true);
 assert.match(appliedEntry.diff.text, /씬|CG|생성 작업/);
 
 const undone = await useCases.undoPatch({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   patchHistoryId: appliedEntry.id
 });
 assert.equal(undone.ok, true);
 assert.equal(undone.project.scenes.length, sceneCountAfterApprove - expanded.plan.decision.sceneCount);
 
-const historyAfterUndo = await useCases.listPatchHistory({ projectDirectory });
+const historyAfterUndo = await useCases.listPatchHistory({ projectDirectory: activeProjectDirectory });
 assert.equal(historyAfterUndo.entries.some((entry) => entry.id === appliedEntry.id && entry.revertedAt), true);
 
 const secondExpanded = await useCases.expandEvent({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   userEvent: "되돌린 뒤 하루가 축제 포스터 문구를 다시 고르고 노멀 엔딩으로 끝나는 짧은 이벤트"
 });
 assert.equal(secondExpanded.ok, true);
 const secondApproved = await useCases.approveEvent({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   request: secondExpanded.request,
   plan: secondExpanded.plan,
   patchHistoryId: secondExpanded.patchHistoryEntry.id
@@ -264,17 +268,17 @@ const manuallyEditedScene = {
   ...secondApproved.project.scenes[0],
   text: `${secondApproved.project.scenes[0].text} 수동 수정`
 };
-await useCases.saveScene({ projectDirectory, scene: manuallyEditedScene });
+await useCases.saveScene({ projectDirectory: activeProjectDirectory, scene: manuallyEditedScene });
 await assert.rejects(
-  () => useCases.undoPatch({ projectDirectory, patchHistoryId: secondApproved.patchHistoryEntry.id }),
+  () => useCases.undoPatch({ projectDirectory: activeProjectDirectory, patchHistoryId: secondApproved.patchHistoryEntry.id }),
   /현재 프로젝트가 패치 적용 직후 상태와 달라/
 );
-const openedAfterRejectedUndo = await useCases.openProject({ projectDirectory });
+const openedAfterRejectedUndo = await useCases.openProject({ projectDirectory: activeProjectDirectory });
 assert.equal(openedAfterRejectedUndo.project.scenes.find((scene) => scene.id === manuallyEditedScene.id).text, manuallyEditedScene.text);
 
 let codexTextCalls = 0;
 const mockApi = webHandlers.createApiRequestHandler({
-  projectDirectory,
+  projectDirectory: activeProjectDirectory,
   codex: {
     async readSession() {
       return { connected: true, mode: "chatgpt", account: { email: "beta@example.test" } };
@@ -315,7 +319,7 @@ const mockApi = webHandlers.createApiRequestHandler({
 const apiJobs = await mockApi({
   method: "POST",
   path: "/api/generation/jobs/list",
-  body: { projectDirectory }
+  body: { projectDirectory: activeProjectDirectory }
 });
 assert.equal(apiJobs.status, 200);
 assert.equal(apiJobs.body.jobs.some((job) => job.kind === "expression"), true);
@@ -323,7 +327,7 @@ assert.equal(apiJobs.body.jobs.some((job) => job.kind === "expression"), true);
 const apiHistory = await mockApi({
   method: "POST",
   path: "/api/events/history",
-  body: { projectDirectory }
+  body: { projectDirectory: activeProjectDirectory }
 });
 assert.equal(apiHistory.status, 200);
 assert.equal(apiHistory.body.entries.some((entry) => entry.status === "applied" || entry.status === "proposed"), true);
@@ -332,7 +336,7 @@ const apiExpand = await mockApi({
   method: "POST",
   path: "/api/events/expand",
   body: {
-    projectDirectory,
+    projectDirectory: activeProjectDirectory,
     userEvent: "브라우저 기본 패치 경로가 Codex 텍스트 어댑터를 통해 검증 가능한 노멀 엔딩 패치를 만든다."
   }
 });
@@ -341,7 +345,7 @@ assert.equal(apiExpand.body.ok, true);
 assert.equal(codexTextCalls, 1);
 
 const cliJobsOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "list-generation-jobs"], {
-  input: JSON.stringify({ projectDirectory }),
+  input: JSON.stringify({ projectDirectory: activeProjectDirectory }),
   encoding: "utf8"
 });
 const cliJobs = JSON.parse(cliJobsOutput);
@@ -349,7 +353,7 @@ assert.equal(cliJobs.ok, true);
 assert.equal(cliJobs.jobs.some((job) => job.provider === "image-generation-adapter"), true);
 
 const cliHistoryOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "list-patch-history"], {
-  input: JSON.stringify({ projectDirectory }),
+  input: JSON.stringify({ projectDirectory: activeProjectDirectory }),
   encoding: "utf8"
 });
 const cliHistory = JSON.parse(cliHistoryOutput);

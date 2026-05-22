@@ -11,13 +11,143 @@ export const detailTabs = [
 
 export type ProjectTabId = typeof detailTabs[number]["id"];
 
+export interface ProjectAsset {
+  id?: string;
+  kind?: string;
+  label?: string;
+  uri?: string;
+  source?: string;
+  generationJobId?: string;
+}
+
+export interface ProjectGenerationJob {
+  id?: string;
+  kind?: string;
+  targetId?: string;
+  prompt?: string;
+  style?: string;
+  provider?: string;
+  status?: "planned" | "running" | "failed" | "completed" | string;
+  outputAssetId?: string;
+  failureMessage?: string;
+  asset?: ProjectAsset;
+}
+
 export interface ProjectData {
   id?: string;
   title?: string;
   premise?: string;
-  characters?: unknown[];
-  routes?: unknown[];
-  scenes?: unknown[];
+  characters?: Array<{
+    id?: string;
+    displayName?: string;
+    sourceHeroineId?: string;
+    sourceHeroineName?: string;
+    sourceSnapshotCreatedAt?: string;
+  }>;
+  routes?: Array<{ id?: string; title?: string; entrySceneId?: string; heroineId?: string }>;
+  scenes?: Array<{ id?: string; label?: string; speaker?: string; text?: string; ending?: { title?: string; kind?: string } }>;
+  assets?: ProjectAsset[];
+  generationJobs?: ProjectGenerationJob[];
+}
+
+export interface ProjectIssue {
+  severity?: string;
+  path?: string;
+  message?: string;
+}
+
+export interface ProjectPatchDescription {
+  text?: string;
+  sceneCount?: number;
+  choiceCount?: number;
+  assetCount?: number;
+  generationJobCount?: number;
+  operations?: string[];
+}
+
+export interface ProjectEventRequest {
+  baseProjectHash?: string;
+  routeId?: string;
+  afterSceneId?: string;
+  heroineId?: string;
+  userEvent?: string;
+}
+
+export interface ProjectEventPlan {
+  summary?: string;
+  decision?: {
+    sceneCount?: number;
+    choiceCount?: number;
+    cgCount?: number;
+    newExpressionAssetCount?: number;
+    tone?: string;
+  };
+  patch?: {
+    operations?: Array<{ type?: string }>;
+  };
+}
+
+export interface ProjectPatchHistoryEntry {
+  id?: string;
+  status?: string;
+  summary?: string;
+}
+
+export interface ProjectRuntimeScene {
+  id?: string;
+  label?: string;
+  speaker?: string;
+  text?: string;
+  next?: string;
+  choices?: Array<{ id?: string; text?: string; next?: string }>;
+  ending?: { id?: string; title?: string; kind?: string };
+  cgAsset?: ProjectAsset;
+  backgroundAsset?: ProjectAsset;
+  characters?: Array<{ characterId?: string; asset?: ProjectAsset }>;
+}
+
+export interface ProjectRuntime {
+  projectId?: string;
+  title?: string;
+  startSceneId?: string;
+  routeId?: string;
+  scenes?: ProjectRuntimeScene[];
+  assets?: ProjectAsset[];
+  validation?: {
+    ok?: boolean;
+    issues?: ProjectIssue[];
+  };
+}
+
+export interface ProjectExportResult {
+  outputDirectory?: string;
+  indexPath?: string;
+  projectDataPath?: string;
+  runtimeScriptPath?: string;
+}
+
+export interface ProjectSmokeResult {
+  ok?: boolean;
+  checks?: Record<string, boolean>;
+  issues?: string[];
+  reachableEndingIds?: string[];
+  uncoveredTerminalSceneIds?: string[];
+  cyclesWithoutEndingPath?: string[][];
+}
+
+export interface ProjectWorkflowSummary {
+  primaryAction?: string;
+  primaryLabel?: string;
+  blockingIssues?: string[];
+  validationState?: string;
+  generationState?: string;
+  previewState?: string;
+  exportState?: string;
+  steps?: Array<{
+    id: string;
+    label: string;
+    state: "done" | "current" | "blocked" | "waiting";
+  }>;
 }
 
 export interface RecentProject {
@@ -31,17 +161,46 @@ export interface RecentProject {
 }
 
 export interface ProjectApiResult extends ApiResult {
+  action?: string;
+  baseProjectHash?: string;
   code?: string;
+  message?: string;
   project?: ProjectData;
   projectDirectory?: string;
   projectId?: string;
+  projectRevision?: string;
   projects?: RecentProject[];
+  count?: number;
+  missingCount?: number;
+  loadedAt?: string;
+  sort?: "lastOpenedAtDesc";
   validation?: {
     ok?: boolean;
+    issues?: ProjectIssue[];
+    diff?: ProjectPatchDescription;
   };
+  assets?: ProjectAsset[];
+  diff?: ProjectPatchDescription;
+  errors?: string[];
+  issues?: ProjectIssue[];
+  jobs?: ProjectGenerationJob[];
+  patchHistoryEntry?: ProjectPatchHistoryEntry;
+  plan?: ProjectEventPlan;
+  export?: ProjectExportResult;
   recentProject?: RecentProject;
+  removedProject?: RecentProject;
+  request?: ProjectEventRequest;
+  routeGraphAnalysis?: {
+    issues?: ProjectIssue[];
+    missingTargets?: unknown[];
+    reachableEndingIds?: string[];
+    uncoveredTerminalSceneIds?: string[];
+  };
+  runtime?: ProjectRuntime;
+  smoke?: ProjectSmokeResult;
   expectedProjectId?: string;
   actualProjectId?: string;
+  workflowSummary?: ProjectWorkflowSummary;
 }
 
 export function normalizeTab(value?: string): ProjectTabId {

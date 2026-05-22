@@ -89,6 +89,7 @@ const heroine = core.createHeroineProfile({
 });
 
 const emptyLibraryDirectory = join(tempRoot, "EmptyHeroineLibrary.vnmaker");
+const blankProjectDirectory = join(tempRoot, "BlankProject.vnmaker");
 const emptyLibrary = await useCases.listHeroines({ projectDirectory: emptyLibraryDirectory });
 assert.equal(emptyLibrary.ok, true);
 assert.deepEqual(emptyLibrary.heroines, []);
@@ -410,6 +411,28 @@ assert.equal(created.projectId, created.project.id);
 assert.equal(created.targetRoute, `/projects/${created.project.id}/overview`);
 assert.equal(created.project.characters.length, 1);
 
+await assert.rejects(
+  () => useCases.createProjectFromHeroine({
+    projectDirectory,
+    projectId: "second-project",
+    heroine,
+    title: "Second Project",
+    premise: "기존 히로인 기반 프로젝트를 덮어쓰면 안 된다."
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "createProjectFromHeroine");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.action, "createProjectFromHeroine");
+    assert.equal(failure.code, "PROJECT_ID_MISMATCH");
+    assert.equal(failure.retryable, false);
+    assert.equal(failure.projectId, created.project.id);
+    assert.equal(failure.projectDirectory, projectDirectory);
+    return true;
+  }
+);
+const openedAfterBlockedHeroineCreate = await useCases.openProject({ projectDirectory });
+assert.equal(openedAfterBlockedHeroineCreate.project.id, created.project.id);
+
 const generatedPortrait = await useCases.generateImage({
   projectDirectory,
   kind: "portrait",
@@ -458,11 +481,140 @@ assert.equal(openedAfterLibraryDelete.project.characters[0].defaultPortraitAsset
 
 const recentAfterCreate = await useCases.listRecentProjects();
 assert.equal(recentAfterCreate.ok, true);
+assert.equal(recentAfterCreate.action, "listRecentProjects");
+assert.equal(typeof recentAfterCreate.requestId, "string");
+assert.equal(recentAfterCreate.count, 1);
+assert.equal(recentAfterCreate.missingCount, 0);
+assert.equal(recentAfterCreate.sort, "lastOpenedAtDesc");
+assert.equal(typeof recentAfterCreate.loadedAt, "string");
+assert.equal(Boolean(recentAfterCreate.workflowSummary), true);
 assert.equal(recentAfterCreate.projects[0].projectId, created.project.id);
 assert.equal(recentAfterCreate.projects[0].projectDirectory, projectDirectory);
 assert.equal(recentAfterCreate.projects[0].title, "하루 Use Case");
 assert.equal(recentAfterCreate.projects[0].validationState, "valid");
 assert.equal(recentAfterCreate.projects[0].missing, false);
+
+const removedRecentProject = await useCases.removeRecentProject({
+  projectId: created.project.id
+});
+assert.equal(removedRecentProject.ok, true);
+assert.equal(removedRecentProject.action, "removeRecentProject");
+assert.equal(removedRecentProject.removedProject.projectId, created.project.id);
+assert.equal(removedRecentProject.projects.some((entry) => entry.projectId === created.project.id), false);
+const restoredRecentProject = await useCases.restoreRecentProject({
+  recentProject: removedRecentProject.removedProject
+});
+assert.equal(restoredRecentProject.ok, true);
+assert.equal(restoredRecentProject.action, "restoreRecentProject");
+assert.equal(restoredRecentProject.projects[0].projectId, created.project.id);
+
+const reconnectedProject = await useCases.reconnectRecentProject({
+  projectId: created.project.id,
+  projectDirectory
+});
+assert.equal(reconnectedProject.ok, true);
+assert.equal(reconnectedProject.action, "reconnectRecentProject");
+assert.equal(reconnectedProject.project.id, created.project.id);
+
+await assert.rejects(
+  () => useCases.createProject({
+    projectDirectory: join(tempRoot, "ReservedProject.vnmaker"),
+    starter: {
+      id: "new",
+      title: "예약어 프로젝트",
+      premise: "예약어는 URL 라우트와 충돌한다."
+    }
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "createProject");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.action, "createProject");
+    assert.equal(failure.code, "PROJECT_ID_RESERVED");
+    assert.equal(failure.retryable, false);
+    assert.equal(typeof failure.requestId, "string");
+    return true;
+  }
+);
+
+await assert.rejects(
+  () => useCases.createProject({
+    projectDirectory,
+    starter: {
+      id: "different-project",
+      title: "다른 프로젝트",
+      premise: "기존 프로젝트를 덮어쓰면 안 된다."
+    }
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "createProject");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.action, "createProject");
+    assert.equal(failure.code, "PROJECT_ID_MISMATCH");
+    assert.equal(failure.retryable, false);
+    assert.equal(failure.projectId, created.project.id);
+    assert.equal(failure.projectDirectory, projectDirectory);
+    return true;
+  }
+);
+
+const blankProject = await useCases.createProject({
+  projectDirectory: blankProjectDirectory,
+  project: {
+    version: "vn-maker/v1",
+    id: "blank-alpha",
+    title: "Blank Alpha",
+    premise: "히로인 없이 시작하는 빈 프로젝트",
+    characters: [],
+    routes: [],
+    scenes: [],
+    assets: [],
+    generationJobs: [],
+    settings: {
+      defaultRouteId: "",
+      outputFileName: "index.html",
+      language: "ko"
+    }
+  }
+});
+assert.equal(blankProject.ok, true);
+assert.equal(blankProject.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), true);
+const assignedSnapshot = await useCases.assignHeroineSnapshot({
+  projectDirectory: blankProjectDirectory,
+  heroine
+});
+assert.equal(assignedSnapshot.ok, true);
+assert.equal(assignedSnapshot.action, "assignHeroineSnapshot");
+assert.equal(assignedSnapshot.project.characters.length, 1);
+assert.equal(assignedSnapshot.project.characters[0].sourceHeroineId, heroine.id);
+assert.equal(assignedSnapshot.project.characters[0].sourceHeroineName, heroine.name);
+assert.equal(typeof assignedSnapshot.project.characters[0].sourceSnapshotCreatedAt, "string");
+assert.equal(assignedSnapshot.project.routes.length, 1);
+assert.equal(assignedSnapshot.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), false);
+const changedSourceHeroine = {
+  ...heroine,
+  name: "수정된 하루",
+  personality: "원본이 바뀌어도 스냅샷은 유지된다."
+};
+await useCases.saveHeroine({
+  projectDirectory: blankProjectDirectory,
+  heroine: changedSourceHeroine
+});
+const openedAssignedSnapshot = await useCases.openProject({ projectDirectory: blankProjectDirectory });
+assert.equal(openedAssignedSnapshot.project.characters[0].displayName, heroine.name);
+assert.equal(openedAssignedSnapshot.project.characters[0].personality, heroine.personality);
+await assert.rejects(
+  () => useCases.assignHeroineSnapshot({
+    projectDirectory: blankProjectDirectory,
+    heroine: changedSourceHeroine
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "assignHeroineSnapshot");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.code, "HEROINE_REPLACE_BLOCKED");
+    assert.equal(failure.retryable, false);
+    return true;
+  }
+);
 
 const manualCreated = await useCases.createProjectFromHeroine({
   projectDirectory: manualProjectDirectory,
@@ -657,6 +809,34 @@ assert.equal(approved.project.scenes.length, 5);
 
 const plannedJob = approved.project.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
 assert.equal(Boolean(plannedJob), true);
+const blockedExportWithPlannedCg = await useCases.exportProject({ projectDirectory }).catch((error) => error);
+assert.equal(blockedExportWithPlannedCg.code, "EXPORT_BLOCKED");
+assert.match(blockedExportWithPlannedCg.message, /완료되지 않은 이미지 작업/);
+const runningStore = await projectStoreModule.openProjectStore(projectDirectory);
+try {
+  const project = runningStore.requireProject();
+  runningStore.saveProject({
+    ...project,
+    generationJobs: project.generationJobs.map((job) => job.id === plannedJob.id ? { ...job, status: "running" } : job)
+  });
+} finally {
+  runningStore.close();
+}
+const blockedExportWithRunningCg = await useCases.exportProject({ projectDirectory }).catch((error) => error);
+assert.equal(blockedExportWithRunningCg.code, "EXPORT_BLOCKED");
+assert.equal(blockedExportWithRunningCg.workflowSummary.generationState, "running");
+assert.equal(blockedExportWithRunningCg.workflowSummary.exportState, "blocked");
+assert.equal(blockedExportWithRunningCg.workflowSummary.primaryAction, "goToAssets");
+const plannedStore = await projectStoreModule.openProjectStore(projectDirectory);
+try {
+  const project = plannedStore.requireProject();
+  plannedStore.saveProject({
+    ...project,
+    generationJobs: project.generationJobs.map((job) => job.id === plannedJob.id ? { ...job, status: "planned" } : job)
+  });
+} finally {
+  plannedStore.close();
+}
 const generated = await useCases.generateImage({
   projectDirectory,
   jobId: plannedJob.id

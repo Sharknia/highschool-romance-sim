@@ -136,6 +136,7 @@ try {
   });
   assert.equal(sandboxOffExpansion.status, 401);
   assert.match(String(sandboxOffExpansion.body.error), /OAuth 로그인이 필요/);
+  assert.equal(sandboxOffExpansion.body.action, "expandEvent");
 
   const fakeCodexBin = await createFakeLoggedOutCodexBin(tempRoot);
   const fakeCodexPath = `${fakeCodexBin}:${process.env.PATH || ""}`;
@@ -220,6 +221,81 @@ try {
   assert.equal(apiProject.body.project.characters.length, 1);
   assert.equal(apiProject.body.project.routes.length, 1);
 
+  const apiDuplicateProject = await sandboxApi({
+    method: "POST",
+    path: "/api/projects/from-heroine",
+    body: {
+      projectDirectory: apiProjectDirectory,
+      projectId: "api-second-project",
+      heroine: alphaSandbox.createAlphaSandboxHeroine(),
+      title: "API Second Project",
+      premise: "기존 프로젝트를 덮어쓰면 안 된다."
+    }
+  });
+  assert.equal(apiDuplicateProject.status, 409);
+  assert.equal(apiDuplicateProject.body.action, "createProjectFromHeroine");
+  assert.equal(apiDuplicateProject.body.code, "PROJECT_ID_MISMATCH");
+  const apiProjectAfterDuplicate = await sandboxApi({
+    method: "POST",
+    path: "/api/project/open",
+    body: { projectDirectory: apiProjectDirectory }
+  });
+  assert.equal(apiProjectAfterDuplicate.body.project.id, apiProject.body.project.id);
+
+  const staleProjectDirectory = join(tempRoot, "ApiStaleSandbox.vnmaker");
+  const staleProject = await sandboxApi({
+    method: "POST",
+    path: "/api/projects/from-heroine",
+    body: {
+      projectDirectory: staleProjectDirectory,
+      heroine: alphaSandbox.createAlphaSandboxHeroine(),
+      title: "API Stale Sandbox",
+      premise: "패치 기준 프로젝트 변경을 검증한다."
+    }
+  });
+  assert.equal(staleProject.status, 200);
+  const staleRoute = staleProject.body.project.routes[0];
+  const staleAfterScene = staleProject.body.project.scenes[0];
+  const staleExpansion = await sandboxApi({
+    method: "POST",
+    path: "/api/events/expand",
+    body: {
+      projectDirectory: staleProjectDirectory,
+      routeId: staleRoute.id,
+      afterSceneId: staleAfterScene.id,
+      heroineId: staleRoute.heroineId,
+      userEvent: "하루와 방과 후 도서관에서 손이 겹치는 이벤트를 만들어줘."
+    }
+  });
+  assert.equal(staleExpansion.status, 200);
+  const staleMutation = await sandboxApi({
+    method: "POST",
+    path: "/api/project/scenes",
+    body: {
+      projectDirectory: staleProjectDirectory,
+      scene: {
+        ...staleAfterScene,
+        text: `${staleAfterScene.text} 기준 프로젝트를 바꾼다.`
+      }
+    }
+  });
+  assert.equal(staleMutation.status, 200);
+  const staleApproval = await sandboxApi({
+    method: "POST",
+    path: "/api/events/approve",
+    body: {
+      projectDirectory: staleProjectDirectory,
+      request: staleExpansion.body.request,
+      plan: staleExpansion.body.plan,
+      patchHistoryId: staleExpansion.body.patchHistoryEntry.id
+    }
+  });
+  assert.equal(staleApproval.status, 409);
+  assert.equal(staleApproval.body.action, "approveEvent");
+  assert.equal(staleApproval.body.code, "PATCH_STALE");
+  assert.equal(staleApproval.body.retryable, false);
+  assert.equal(staleApproval.body.workflowSummary.previewState, "stale");
+
   const apiRoute = apiProject.body.project.routes[0];
   const apiAfterSceneId = apiProject.body.project.scenes[0].id;
   const apiExpansion = await sandboxApi({
@@ -251,6 +327,16 @@ try {
   assert.equal(apiApproval.body.validation.ok, true);
   const apiPlannedCgJob = apiApproval.body.project.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
   assert.equal(Boolean(apiPlannedCgJob), true);
+
+  const apiBlockedExport = await sandboxApi({
+    method: "POST",
+    path: "/api/project/export",
+    body: { projectDirectory: apiProjectDirectory }
+  });
+  assert.equal(apiBlockedExport.status, 409);
+  assert.equal(apiBlockedExport.body.action, "exportProject");
+  assert.equal(apiBlockedExport.body.code, "EXPORT_BLOCKED");
+  assert.equal(apiBlockedExport.body.workflowSummary.generationState, "planned");
 
   const apiGeneratedImage = await sandboxApi({
     method: "POST",
@@ -338,6 +424,13 @@ try {
   assert.equal(cliApproval.validation.ok, true);
   const cliPlannedCgJob = cliApproval.project.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
   assert.equal(Boolean(cliPlannedCgJob), true);
+
+  const cliBlockedExport = runCliFailure("export-web", {
+    projectDirectory: cliProjectDirectory
+  }, cliEnv);
+  assert.equal(cliBlockedExport.action, "exportProject");
+  assert.equal(cliBlockedExport.code, "EXPORT_BLOCKED");
+  assert.equal(cliBlockedExport.workflowSummary.generationState, "planned");
 
   const cliGeneratedImage = runCli("generate-image", {
     projectDirectory: cliProjectDirectory,

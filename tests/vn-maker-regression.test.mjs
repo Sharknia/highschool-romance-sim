@@ -23,6 +23,7 @@ const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
+const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
 const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
 const apiRecentDirectory = join(tempRoot, "ApiRecent.vnmaker");
 const apiRecentProjectIndexFile = join(tempRoot, "api-recent-projects.json");
@@ -906,7 +907,8 @@ const apiProjectFromHeroine = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/projects/from-heroine",
   body: {
-    projectDirectory: heroineApiContractDirectory,
+    projectDirectory: heroineApiProjectDirectory,
+    sourceProjectDirectory: heroineApiContractDirectory,
     heroineId: "haru",
     title: "하루 API 프로젝트",
     premise: "상세 화면 이동 계약 검증"

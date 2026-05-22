@@ -1,14 +1,18 @@
-import { AlertTriangle, Clock3, FolderOpen, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock3, FolderOpen, MoreVertical, RotateCw, Search, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Button } from "../../components/ui";
 import type { RecentProject } from "./projectPageTypes";
 
 interface RecentProjectListProps {
   busy: boolean;
+  loadedAt?: string;
+  missingCount: number;
   recentProjects: RecentProject[];
   onOpen: (entry: RecentProject) => void;
   onPrepareReconnect: (entry: RecentProject) => void;
   onRefresh: () => void;
   onRemove: (entry: RecentProject) => void;
+  totalCount: number;
 }
 
 function formatDate(value?: string): string {
@@ -42,12 +46,36 @@ function validationLabel(value?: RecentProject["validationState"]): string {
 
 export function RecentProjectList({
   busy,
+  loadedAt,
+  missingCount,
   recentProjects,
   onOpen,
   onPrepareReconnect,
   onRefresh,
-  onRemove
+  onRemove,
+  totalCount
 }: RecentProjectListProps) {
+  const [query, setQuery] = useState("");
+  const filteredProjects = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return recentProjects;
+    }
+    return recentProjects.filter((entry) => [
+      entry.title,
+      entry.projectDirectory,
+      entry.projectId
+    ].some((value) => value.toLowerCase().includes(normalized)));
+  }, [query, recentProjects]);
+
+  function openFromCard(entry: RecentProject): void {
+    if (entry.missing) {
+      onPrepareReconnect(entry);
+      return;
+    }
+    onOpen(entry);
+  }
+
   return (
     <section className="page-panel recent-project-panel" aria-labelledby="recentProjectsTitle">
       <div className="section-header">
@@ -59,16 +87,41 @@ export function RecentProjectList({
           새로고침
         </Button>
       </div>
+      <div className="recent-project-toolbar">
+        <label className="search-row">
+          <Search size={16} />
+          <input aria-label="최근 프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
+        </label>
+        <div className="recent-project-counts">
+          <span>총 {totalCount}개</span>
+          <span>필터 결과 {filteredProjects.length}개</span>
+          {missingCount > 0 ? <span className="state-chip state-warning">재연결이 필요한 프로젝트 {missingCount}개</span> : null}
+          {loadedAt ? <span>갱신 {formatDate(loadedAt)}</span> : null}
+        </div>
+      </div>
       {recentProjects.length === 0 ? (
         <p className="page-muted">최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.</p>
+      ) : filteredProjects.length === 0 ? (
+        <p className="page-muted">필터 결과가 없습니다. 다른 제목이나 경로로 검색해 주세요.</p>
       ) : (
         <div className="recent-project-list">
-          {recentProjects.map((entry) => (
-            <article className={`recent-project-row${entry.missing ? " missing" : ""}`} key={entry.projectId}>
+          {filteredProjects.map((entry) => (
+            <article
+              className={`recent-project-row${entry.missing ? " missing" : ""}`}
+              key={entry.projectId}
+              onClick={() => openFromCard(entry)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  openFromCard(entry);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+            >
               <div className="recent-project-main">
                 <strong>{entry.title}</strong>
                 <span>{entry.projectDirectory}</span>
-                <small><Clock3 size={14} /> 마지막 열림 {formatDate(entry.lastOpenedAt)} · {validationLabel(entry.validationState)}</small>
+                <small><Clock3 size={14} /> 마지막 열림 {formatDate(entry.lastOpenedAt)} · 마지막 검증 {formatDate(entry.lastValidatedAt)} · {validationLabel(entry.validationState)} · {entry.projectId}</small>
               </div>
               <div className="recent-project-state">
                 {entry.missing ? (
@@ -78,15 +131,26 @@ export function RecentProjectList({
                 )}
               </div>
               <div className="recent-project-actions">
-                <Button disabled={busy || entry.missing} icon={<FolderOpen size={16} />} onClick={() => onOpen(entry)}>
+                <Button disabled={busy || entry.missing} icon={<FolderOpen size={16} />} onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen(entry);
+                }}>
                   열기
                 </Button>
-                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)}>
+                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={(event) => {
+                  event.stopPropagation();
+                  onPrepareReconnect(entry);
+                }} variant={entry.missing ? "primary" : "secondary"}>
                   재연결
                 </Button>
-                <Button disabled={busy} icon={<Trash2 size={16} />} onClick={() => onRemove(entry)} variant="ghost">
-                  목록에서만 제거
-                </Button>
+                <details className="recent-project-menu" onClick={(event) => event.stopPropagation()}>
+                  <summary aria-label={`${entry.title} 추가 작업`}>
+                    <MoreVertical size={17} />
+                  </summary>
+                  <Button disabled={busy} icon={<Trash2 size={16} />} onClick={() => onRemove(entry)} variant="ghost">
+                    목록에서만 제거
+                  </Button>
+                </details>
               </div>
             </article>
           ))}

@@ -19,9 +19,13 @@ assert.match(
 ["/projects", "/heroines", "/settings"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 인증 앱 라우트가 있어야 합니다.`);
 });
-["/projects/:projectId", "/projects/:projectId/:tab"].forEach((path) => {
+["/projects/new", "/projects/:projectId", "/projects/:projectId/:tab"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 프로젝트 상세 deep link 라우트가 있어야 합니다.`);
 });
+assert.ok(
+  appSource.indexOf('path="/projects/new"') < appSource.indexOf('path="/projects/:projectId"'),
+  "`/projects/new`는 `/projects/:projectId`보다 먼저 선언해야 합니다."
+);
 assert.match(appSource, /<Route path="\/heroines\/:heroineId"/, "`/heroines/:heroineId` 히로인 상세 라우트가 있어야 합니다.");
 assert.match(appSource, /<Route path="\/heroines\/new"/, "`/heroines/new` 히로인 생성 라우트가 있어야 합니다.");
 assert.match(appSource, /<Route path="\/heroines\/:heroineId\/edit"/, "`/heroines/:heroineId/edit` 히로인 수정 라우트가 있어야 합니다.");
@@ -68,26 +72,156 @@ assert.match(notFoundSource, /to="\/projects"/, "인증 후 Not Found 복귀 링
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");
+assert.match(projectStartSource, /approveEvent/, "ProjectStartPage는 이벤트 승인 action 결과를 구분해 상태 문구를 표시해야 합니다.");
+assert.match(projectStartSource, /이벤트 제안 승인 완료/, "ProjectStartPage는 이벤트 승인 후 히로인 배정 완료 문구를 재사용하면 안 됩니다.");
 const recentProjectListPath = "apps/web/src/client/pages/projects/RecentProjectList.tsx";
 const projectDetailViewPath = "apps/web/src/client/pages/projects/ProjectDetailView.tsx";
+const projectNewPagePath = "apps/web/src/client/pages/projects/ProjectNewPage.tsx";
 assert.ok(existsSync(join(root, recentProjectListPath)), "최근 프로젝트 목록은 별도 RecentProjectList 컴포넌트로 분리해야 합니다.");
 assert.ok(existsSync(join(root, projectDetailViewPath)), "프로젝트 상세 탭은 별도 ProjectDetailView 컴포넌트로 분리해야 합니다.");
+assert.ok(existsSync(join(root, projectNewPagePath)), "새 프로젝트 생성 화면은 별도 ProjectNewPage 컴포넌트로 분리해야 합니다.");
 const recentProjectListSource = readText(recentProjectListPath);
 const projectDetailViewSource = readText(projectDetailViewPath);
+const projectNewPageSource = readText(projectNewPagePath);
 ["overview", "heroine", "event", "assets", "preview", "export"].forEach((tab) => {
   assert.match(projectDetailViewSource, new RegExp(tab), `ProjectDetailView는 ${tab} 상세 탭 deep link를 다뤄야 합니다.`);
 });
 [
   "/api/projects/recent/list",
   "/api/projects/recent/remove",
+  "/api/projects/recent/restore",
+  "/api/projects/reconnect",
+  "workflowSummary",
   "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
   "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
   "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.",
-  "목록에서만 제거"
+  "목록에서만 제거",
+  "되돌리기",
+  "필터 결과",
+  "재연결이 필요한 프로젝트"
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(`${projectStartSource}\n${recentProjectListSource}\n${projectDetailViewSource}`, pattern, `프로젝트 페이지 소스에 '${requiredText}' 문구 또는 API 호출이 있어야 합니다.`);
 });
+[
+  "/api/heroines/list",
+  "/api/projects/${",
+  "/heroine",
+  "히로인 1명을 먼저 선택해야 합니다.",
+  "선택한 히로인 배정",
+  "제작/이벤트로 이동",
+  "sourceHeroineId",
+  "sourceSnapshotCreatedAt",
+  "완료된 단계",
+  "남은 단계",
+  "blockingIssues",
+  "validationState",
+  "generationState",
+  "previewState",
+  "exportState"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView에 '${requiredText}' 문구 또는 상태 표시가 있어야 합니다.`);
+});
+assert.doesNotMatch(projectDetailViewSource, /후속 이슈에서 편집 흐름을 연결합니다/, "히로인 탭은 placeholder가 아니라 실제 배정 흐름이어야 합니다.");
+[
+  "/api/events/expand",
+  "/api/events/approve",
+  "blockedNoHeroine",
+  "patchPending",
+  "patchInvalid",
+  "patchStale",
+  "baseProjectHash",
+  "이벤트 제안 받기",
+  "제안 승인",
+  "제안 취소",
+  "바뀔 내용",
+  "문제 확인",
+  "Alpha는 작은 이벤트 삽입만 허용",
+  "CG 작업이 있으면 에셋/생성 탭으로 이동합니다."
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView 이벤트 탭에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.doesNotMatch(projectDetailViewSource, /제작\/이벤트 탭입니다\. 자연어 이벤트 패치를 연결합니다\./, "이벤트 탭은 placeholder가 아니라 실제 제안-검토-승인 흐름이어야 합니다.");
+[
+  "/api/generation/jobs/list",
+  "/api/generation/jobs/run",
+  "assetState",
+  "partialFailed",
+  "planned",
+  "running",
+  "failed",
+  "completed",
+  "retryFailed",
+  "replaceCompleted",
+  "OAUTH_REQUIRED",
+  "Codex ChatGPT OAuth",
+  "이벤트 CG 작업",
+  "이미지 만들기",
+  "실패 작업 재시도",
+  "완료된 작업은 다시 호출하지 않습니다.",
+  "결과 에셋",
+  "프리뷰로 이동"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView 에셋/생성 탭에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.doesNotMatch(projectDetailViewSource, /에셋\/생성 탭입니다\. CG 작업을 연결합니다\./, "에셋/생성 탭은 placeholder가 아니라 실제 CG 작업 실행 흐름이어야 합니다.");
+[
+  "/api/project/preview",
+  "/api/project/validate",
+  "/api/project/export",
+  "previewState",
+  "exportState",
+  "resetPreviewAndExportState",
+  "hasBlockingPreviewErrors",
+  "previewRuntime",
+  "exportResult",
+  "smokeResult",
+  "EXPORT_BLOCKED",
+  "프리뷰 생성",
+  "처음부터 플레이",
+  "현재 씬",
+  "검증 실행",
+  "내보내기 실행",
+  "산출물 위치",
+  "실행 확인 결과",
+  "필수 CG 미완료",
+  "다음 action",
+  "개발자 상세",
+  "runtime JSON"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView 프리뷰/내보내기 탭에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.match(projectDetailViewSource, /severity === "error"/, "프리뷰 검증은 warning이 아니라 error severity만 차단해야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /프리뷰 탭입니다\. 플레이 검증을 연결합니다\./, "프리뷰 탭은 placeholder가 아니라 실제 runtime 확인 흐름이어야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /내보내기 탭입니다\. export와 실행 확인 결과를 연결합니다\./, "내보내기 탭은 placeholder가 아니라 실제 export/smoke 흐름이어야 합니다.");
+[
+  "/api/projects",
+  "/api/projects/from-heroine",
+  "프로젝트 제목",
+  "프로젝트 ID",
+  "저장 후 프로젝트 ID는 변경할 수 없습니다.",
+  "빈 프로젝트로 시작",
+  "히로인 스냅샷을 선택해 시작",
+  "기존 프로젝트 열기",
+  "다른 위치 선택",
+  "생성 취소",
+  "저장 위치가 이미 존재합니다.",
+  "저장 실패 시 입력값은 유지됩니다.",
+  "beforeunload"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectNewPageSource, pattern, `ProjectNewPage에 '${requiredText}' 문구 또는 호출이 있어야 합니다.`);
+});
+assert.match(projectNewPageSource, /mode === "heroine" && selectedHeroineId/, "히로인 목록 로드만으로 빈 프로젝트 모드 dirty 상태가 되면 안 됩니다.");
+assert.match(projectNewPageSource, /sourceProjectDirectory:\s*mode === "heroine"/, "히로인 기반 프로젝트 생성은 원본 라이브러리 디렉터리를 서버에 전달해야 합니다.");
+assert.doesNotMatch(projectNewPageSource, /heroine:\s*mode === "heroine"/, "히로인 기반 프로젝트 생성은 Web UI가 스냅샷 객체를 복사하지 말고 use-case가 heroineId로 원본을 읽어야 합니다.");
+assert.doesNotMatch(projectNewPageSource, /version:\s*"vn-maker\/v1"/, "빈 프로젝트 기본 스키마 조립 책임은 Web UI가 아니라 core/use-case 경계에 있어야 합니다.");
+assert.doesNotMatch(projectStartSource, /샘플 프로젝트 생성/, "프로젝트 관리 primary action은 sample 생성이 아니라 새 프로젝트 생성이어야 합니다.");
+assert.match(projectStartSource, /\/projects\/new/, "프로젝트 관리 primary action은 /projects/new로 이동해야 합니다.");
 
 const heroineComponentPaths = [
   "apps/web/src/client/pages/heroines/HeroineListPage.tsx",
