@@ -49,6 +49,31 @@ export interface CreateProjectWorkspaceInput {
   project?: VnMakerProject;
 }
 
+export type RecentProjectValidationState = "unchecked" | "valid" | "invalid" | "stale";
+
+export interface RecentProjectIndexEntry {
+  projectId: string;
+  projectDirectory: string;
+  title: string;
+  lastOpenedAt: string;
+  lastValidatedAt?: string;
+  validationState?: RecentProjectValidationState;
+  missing?: boolean;
+}
+
+export interface RecentProjectIndexStoreOptions {
+  indexFilePath?: string;
+  clock?: () => Date;
+}
+
+export interface UpsertRecentProjectInput {
+  projectId: string;
+  projectDirectory: string;
+  title: string;
+  lastValidatedAt?: string;
+  validationState?: RecentProjectValidationState;
+}
+
 export interface StoredGenerationAssetMetadata {
   relativePath?: string;
   hash?: string;
@@ -556,6 +581,180 @@ export async function ensureProjectWorkspaceDirectories(paths: ProjectWorkspaceP
   await mkdir(paths.generatedAssetsDirectory, { recursive: true });
   await mkdir(paths.exportsDirectory, { recursive: true });
   await mkdir(paths.cacheDirectory, { recursive: true });
+}
+
+export function getDefaultRecentProjectIndexPath(): string {
+  return process.env.VN_MAKER_RECENT_PROJECTS_FILE || join(process.cwd(), "workspace", "recent-projects.json");
+}
+
+function isErrorWithCode(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+function normalizeRecentProjectEntry(value: unknown): RecentProjectIndexEntry | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.projectId !== "string"
+    || typeof record.projectDirectory !== "string"
+    || typeof record.title !== "string"
+    || typeof record.lastOpenedAt !== "string"
+  ) {
+    return null;
+  }
+  const validationState = record.validationState === "valid"
+    || record.validationState === "invalid"
+    || record.validationState === "stale"
+    || record.validationState === "unchecked"
+    ? record.validationState
+    : "unchecked";
+  return {
+    projectId: record.projectId,
+    projectDirectory: resolveProjectWorkspacePaths(record.projectDirectory).projectDirectory,
+    title: record.title,
+    lastOpenedAt: record.lastOpenedAt,
+    lastValidatedAt: typeof record.lastValidatedAt === "string" ? record.lastValidatedAt : undefined,
+    validationState,
+    missing: Boolean(record.missing)
+  };
+}
+
+async function readRecentProjectEntries(indexFilePath: string): Promise<RecentProjectIndexEntry[]> {
+  try {
+    const raw = await readFile(indexFilePath, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    const entries = Array.isArray((parsed as { projects?: unknown }).projects)
+      ? (parsed as { projects: unknown[] }).projects
+      : Array.isArray(parsed)
+        ? parsed
+        : [];
+    return entries
+      .map(normalizeRecentProjectEntry)
+      .filter((entry): entry is RecentProjectIndexEntry => Boolean(entry))
+      .sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt));
+  } catch (error) {
+    if (isErrorWithCode(error) && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writeRecentProjectEntries(indexFilePath: string, projects: RecentProjectIndexEntry[]): Promise<void> {
+  await mkdir(dirname(indexFilePath), { recursive: true });
+  await writeFile(indexFilePath, `${JSON.stringify({ projects }, null, 2)}\n`, "utf8");
+}
+
+const recentProjectIndexQueues = new Map<string, Promise<unknown>>();
+
+async function withRecentProjectIndexQueue<T>(indexFilePath: string, operation: () => Promise<T>): Promise<T> {
+  const previous = recentProjectIndexQueues.get(indexFilePath) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  const queued = next.catch(() => undefined);
+  recentProjectIndexQueues.set(indexFilePath, queued);
+  try {
+    return await next;
+  } finally {
+    if (recentProjectIndexQueues.get(indexFilePath) === queued) {
+      recentProjectIndexQueues.delete(indexFilePath);
+    }
+  }
+}
+
+export async function projectWorkspaceExists(projectDirectory: string): Promise<boolean> {
+  try {
+    const paths = resolveProjectWorkspacePaths(projectDirectory);
+    const databaseStat = await stat(paths.databasePath);
+    return databaseStat.isFile();
+  } catch (error) {
+    if (isErrorWithCode(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export class RecentProjectIndexStore {
+  private readonly indexFilePath: string;
+  private readonly clock: () => Date;
+
+  constructor(options: RecentProjectIndexStoreOptions = {}) {
+    this.indexFilePath = resolve(options.indexFilePath || getDefaultRecentProjectIndexPath());
+    this.clock = options.clock || (() => new Date());
+  }
+
+  private now(): string {
+    return this.clock().toISOString();
+  }
+
+  private async readEntries(): Promise<RecentProjectIndexEntry[]> {
+    return readRecentProjectEntries(this.indexFilePath);
+  }
+
+  private async writeEntries(projects: RecentProjectIndexEntry[]): Promise<void> {
+    await writeRecentProjectEntries(this.indexFilePath, projects);
+  }
+
+  async listProjects(): Promise<RecentProjectIndexEntry[]> {
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const refreshed = await Promise.all(entries.map(async (entry) => ({
+        ...entry,
+        missing: !(await projectWorkspaceExists(entry.projectDirectory))
+      })));
+      if (JSON.stringify(entries) !== JSON.stringify(refreshed)) {
+        await this.writeEntries(refreshed);
+      }
+      return refreshed;
+    });
+  }
+
+  async findProject(projectId: string): Promise<RecentProjectIndexEntry | null> {
+    return (await this.listProjects()).find((entry) => entry.projectId === projectId) || null;
+  }
+
+  async upsertProject(input: UpsertRecentProjectInput): Promise<RecentProjectIndexEntry[]> {
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const previous = entries.find((entry) => entry.projectId === input.projectId);
+      const now = this.now();
+      const entry: RecentProjectIndexEntry = {
+        projectId: input.projectId,
+        projectDirectory: resolveProjectWorkspacePaths(input.projectDirectory).projectDirectory,
+        title: input.title,
+        lastOpenedAt: now,
+        lastValidatedAt: input.lastValidatedAt || (input.validationState ? now : previous?.lastValidatedAt),
+        validationState: input.validationState || previous?.validationState || "unchecked",
+        missing: false
+      };
+      const nextEntries = [
+        entry,
+        ...entries.filter((item) => item.projectId !== input.projectId)
+      ].sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt));
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
+  }
+
+  async markProjectMissing(projectId: string, missing = true): Promise<RecentProjectIndexEntry[]> {
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const nextEntries = entries.map((entry) => entry.projectId === projectId ? { ...entry, missing } : entry);
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
+  }
+
+  async removeProject(projectId: string): Promise<RecentProjectIndexEntry[]> {
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const nextEntries = entries.filter((entry) => entry.projectId !== projectId);
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
+  }
 }
 
 function applyMigrations(db: Database.Database): void {

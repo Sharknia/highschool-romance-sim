@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const core = await import("../packages/engine-core/dist/index.js");
+const projectStoreModule = await import("../packages/project-store/dist/index.js");
 const useCasesModule = await import("../packages/use-cases/dist/index.js");
 
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-use-cases-"));
 const projectDirectory = join(tempRoot, "UseCase.vnmaker");
 const manualProjectDirectory = join(tempRoot, "ManualScenes.vnmaker");
 const preserveNextProjectDirectory = join(tempRoot, "PreserveNext.vnmaker");
+const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
+const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
+const recentProjectIndexFile = join(tempRoot, "recent-projects.json");
 const useCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile,
   eventText: {
     async generateEventExpansionPlan({ request }) {
       return core.createDeterministicEventExpansionPlan(request);
@@ -53,6 +58,25 @@ const useCases = useCasesModule.createVnMakerUseCases({
   }
 });
 
+const concurrentRecentProjectCount = 16;
+const concurrentRecentProjectIndexFile = join(tempRoot, "concurrent-recent-projects.json");
+await Promise.all(Array.from({ length: concurrentRecentProjectCount }, async (_, index) => {
+  const store = new projectStoreModule.RecentProjectIndexStore({
+    indexFilePath: concurrentRecentProjectIndexFile,
+    clock: () => new Date(Date.UTC(2026, 0, 1, 0, 0, index))
+  });
+  await store.upsertProject({
+    projectId: `concurrent-${index}`,
+    projectDirectory: join(tempRoot, `Concurrent${index}.vnmaker`),
+    title: `Concurrent ${index}`,
+    validationState: "valid"
+  });
+}));
+const concurrentRecentProjects = await new projectStoreModule.RecentProjectIndexStore({
+  indexFilePath: concurrentRecentProjectIndexFile
+}).listProjects();
+assert.equal(concurrentRecentProjects.length, concurrentRecentProjectCount);
+
 const heroine = core.createHeroineProfile({
   id: "haru",
   name: "하루",
@@ -71,6 +95,14 @@ const created = await useCases.createProjectFromHeroine({
 assert.equal(created.ok, true);
 assert.equal(created.projectDirectory, projectDirectory);
 assert.equal(created.project.characters.length, 1);
+
+const recentAfterCreate = await useCases.listRecentProjects();
+assert.equal(recentAfterCreate.ok, true);
+assert.equal(recentAfterCreate.projects[0].projectId, created.project.id);
+assert.equal(recentAfterCreate.projects[0].projectDirectory, projectDirectory);
+assert.equal(recentAfterCreate.projects[0].title, "하루 Use Case");
+assert.equal(recentAfterCreate.projects[0].validationState, "valid");
+assert.equal(recentAfterCreate.projects[0].missing, false);
 
 const manualCreated = await useCases.createProjectFromHeroine({
   projectDirectory: manualProjectDirectory,
@@ -276,6 +308,94 @@ assert.equal(generated.asset.id, plannedJob.outputAssetId);
 const opened = await useCases.openProject({ projectDirectory });
 assert.equal(opened.ok, true);
 assert.equal(opened.project.assets.some((asset) => asset.id === plannedJob.outputAssetId), true);
+
+const readOnlyRecentIndexDirectory = join(tempRoot, "ReadOnlyRecentIndex");
+await mkdir(readOnlyRecentIndexDirectory, { recursive: true });
+await chmod(readOnlyRecentIndexDirectory, 0o500);
+try {
+  const readOnlyRecentIndexUseCases = useCasesModule.createVnMakerUseCases({
+    recentProjectIndexFile: join(readOnlyRecentIndexDirectory, "recent-projects.json")
+  });
+  const openedWithReadOnlyRecentIndex = await readOnlyRecentIndexUseCases.openProject({ projectDirectory });
+  assert.equal(openedWithReadOnlyRecentIndex.ok, true);
+  assert.equal(openedWithReadOnlyRecentIndex.project.id, created.project.id);
+} finally {
+  await chmod(readOnlyRecentIndexDirectory, 0o700);
+}
+
+const openedByProjectId = await useCases.openProject({ projectId: created.project.id });
+assert.equal(openedByProjectId.ok, true);
+assert.equal(openedByProjectId.projectDirectory, projectDirectory);
+assert.equal(openedByProjectId.project.id, created.project.id);
+
+const missingCreated = await useCases.createProject({
+  projectDirectory: missingRecentProjectDirectory,
+  starter: {
+    id: "missing-recent",
+    title: "Missing Recent",
+    premise: "최근 인덱스 missing 테스트"
+  }
+});
+assert.equal(missingCreated.ok, true);
+await rm(missingRecentProjectDirectory, { recursive: true, force: true });
+await assert.rejects(
+  () => useCases.openProject({ projectId: "missing-recent" }),
+  (error) => {
+    assert.equal(error.code, "PROJECT_DIRECTORY_MISSING");
+    assert.match(error.message, /프로젝트 폴더를 찾을 수 없습니다/);
+    return true;
+  }
+);
+const recentAfterMissing = await useCases.listRecentProjects();
+assert.equal(recentAfterMissing.projects.find((entry) => entry.projectId === "missing-recent").missing, true);
+const wrongReconnectDirectory = join(tempRoot, "WrongReconnect.vnmaker");
+await assert.rejects(
+  () => useCases.openProject({ projectId: "missing-recent", projectDirectory: wrongReconnectDirectory }),
+  (error) => {
+    assert.equal(error.code, "PROJECT_DIRECTORY_MISSING");
+    assert.match(error.message, /프로젝트 폴더를 찾을 수 없습니다/);
+    return true;
+  }
+);
+assert.equal(existsSync(join(wrongReconnectDirectory, "project.sqlite")), false);
+
+const mismatchCreated = await useCases.createProject({
+  projectDirectory: mismatchRecentProjectDirectory,
+  starter: {
+    id: "expected-recent",
+    title: "Expected Recent",
+    premise: "최근 인덱스 ID 불일치 테스트"
+  }
+});
+assert.equal(mismatchCreated.ok, true);
+const mismatchStore = await projectStoreModule.createProjectWorkspace({
+  projectDirectory: mismatchRecentProjectDirectory,
+  project: core.createStarterProject({
+    id: "actual-recent",
+    title: "Actual Recent",
+    premise: "인덱스와 다른 프로젝트"
+  })
+});
+mismatchStore.close();
+await assert.rejects(
+  () => useCases.openProject({ projectId: "expected-recent" }),
+  (error) => {
+    assert.equal(error.code, "PROJECT_ID_MISMATCH");
+    assert.equal(error.expectedProjectId, "expected-recent");
+    assert.equal(error.actualProjectId, "actual-recent");
+    assert.match(error.message, /프로젝트 ID가 일치하지 않습니다/);
+    return true;
+  }
+);
+const recentAfterMismatch = await useCases.listRecentProjects();
+const mismatchEntry = recentAfterMismatch.projects.find((entry) => entry.projectId === "expected-recent");
+assert.equal(mismatchEntry.projectDirectory, mismatchRecentProjectDirectory);
+assert.equal(mismatchEntry.title, "Expected Recent");
+
+const removedRecent = await useCases.removeRecentProject({ projectId: manualCreated.project.id });
+assert.equal(removedRecent.ok, true);
+assert.equal(removedRecent.projects.some((entry) => entry.projectId === manualCreated.project.id), false);
+assert.equal(existsSync(join(manualProjectDirectory, "project.sqlite")), true);
 
 const malformedEventTextUseCases = useCasesModule.createVnMakerUseCases({
   eventText: {
