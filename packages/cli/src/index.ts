@@ -4,9 +4,14 @@ import {
   sharedCodexAppServerClient
 } from "@vn-maker/generation-codex";
 import {
+  ALPHA_SANDBOX_PROVENANCE,
+  createAlphaSandboxEventTextAdapter,
+  createAlphaSandboxImageAdapter,
+  createAlphaSandboxSession
+} from "@vn-maker/alpha-sandbox";
+import {
   buildProjectHtml,
   createAssetManifest,
-  createDeterministicEventExpansionPlan,
   createImageGenerationJob,
   createStarterProject,
   parseVnMakerProject,
@@ -80,13 +85,19 @@ function getProject(input: CliInput): VnMakerProject {
   return parsed.value;
 }
 
+function isAlphaSandboxEnabled(): boolean {
+  return process.env.VN_MAKER_ALPHA_SANDBOX === "1";
+}
+
+const sandboxEnabled = isAlphaSandboxEnabled();
+const sandboxEventText = sandboxEnabled ? createAlphaSandboxEventTextAdapter() : undefined;
+const sandboxImage = sandboxEnabled ? createAlphaSandboxImageAdapter() : undefined;
+
 const useCases = createVnMakerUseCases({
-  eventText: {
-    generateEventExpansionPlan: (input) => process.env.VN_MAKER_EVENT_TEXT_ADAPTER === "deterministic"
-      ? Promise.resolve(createDeterministicEventExpansionPlan(input.request))
-      : sharedCodexAppServerClient.generateEventExpansionPlan(input)
+  eventText: sandboxEventText || {
+    generateEventExpansionPlan: (input) => sharedCodexAppServerClient.generateEventExpansionPlan(input)
   },
-  image: {
+  image: sandboxImage || {
     generateImageAsset: (input) => sharedCodexAppServerClient.generateImageAsset(input)
   }
 });
@@ -131,7 +142,8 @@ function printCapabilities(): void {
       "generate-image"
     ],
     io: "stdin-json/stdout-json",
-    purpose: "Codex/AI가 VN Maker Core를 안정적으로 호출하기 위한 기계용 인터페이스"
+    purpose: "Codex/AI가 VN Maker Core를 안정적으로 호출하기 위한 기계용 인터페이스",
+    sandbox: sandboxEnabled ? { enabled: true, provenance: ALPHA_SANDBOX_PROVENANCE } : { enabled: false }
   });
 }
 
@@ -316,16 +328,36 @@ async function run(): Promise<void> {
   }
 
   if (command === "codex-auth-status") {
+    if (sandboxEnabled) {
+      writeJson({ ok: true, session: createAlphaSandboxSession() });
+      return;
+    }
     writeJson({ ok: true, session: await sharedCodexAppServerClient.readSession(false) });
     return;
   }
 
   if (command === "codex-login") {
+    if (sandboxEnabled) {
+      writeJson({
+        ok: true,
+        login: {
+          type: "alphaSandbox",
+          loginId: ALPHA_SANDBOX_PROVENANCE
+        },
+        session: createAlphaSandboxSession(),
+        note: "Alpha Sandbox fixture generation이 활성화되어 있다. Codex OAuth 로그인으로 표현하지 않는다."
+      });
+      return;
+    }
     writeJson({ ok: true, login: await sharedCodexAppServerClient.startLogin(input.login?.flow || "browser") });
     return;
   }
 
   if (command === "codex-logout") {
+    if (sandboxEnabled) {
+      writeJson({ ok: true, session: createAlphaSandboxSession() });
+      return;
+    }
     await sharedCodexAppServerClient.logout();
     writeJson({ ok: true });
     return;
