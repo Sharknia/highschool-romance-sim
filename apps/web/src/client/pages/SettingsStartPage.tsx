@@ -41,8 +41,8 @@ export function SettingsStartPage() {
         </article>
         <article className="page-panel">
           <div className="page-panel-icon"><SlidersHorizontal size={18} /></div>
-          <h2>생성 기본값</h2>
-          <p className="page-muted">Alpha 제작에 필요한 기본 설정을 확인합니다.</p>
+          <h2>작업 환경</h2>
+          <p className="page-muted">Alpha 제작에 필요한 환경 정보를 확인합니다.</p>
         </article>
       </section>
     </section>

@@ -1,39 +1,14 @@
-import { Heart, ImagePlus, Save } from "lucide-react";
+import { CheckCircle2, Heart, ImagePlus } from "lucide-react";
 import { useState } from "react";
-import type { ApiResult } from "../api/types";
-import { useAuth } from "../auth/AuthProvider";
 import { Button, StatusBanner } from "../components/ui";
 
 export function HeroineStartPage() {
-  const { postAuthedJson } = useAuth();
   const [heroineName, setHeroineName] = useState("하루");
   const [status, setStatus] = useState("히로인 라이브러리 시작점입니다.");
-  const [busy, setBusy] = useState(false);
 
-  async function saveStarterHeroine(): Promise<void> {
-    setBusy(true);
-    setStatus("첫 히로인 저장 중");
-    try {
-      const result = await postAuthedJson<ApiResult>("/api/heroines/save", {
-        heroine: {
-          id: heroineName.trim().toLowerCase() || "haru",
-          name: heroineName,
-          description: "도서관에서 자주 만나는 조용한 같은 반 학생.",
-          personality: "차분하지만 당황하면 솔직한 반응이 먼저 나온다.",
-          speechStyle: "짧고 조심스럽게 말한다.",
-          appearance: "단정한 교복, 어깨까지 오는 검은 머리, 연한 분홍색 머리핀.",
-          tags: ["alpha"]
-        }
-      });
-      if (result.ok === false) {
-        throw new Error(result.error || "히로인 저장 요청이 실패했습니다.");
-      }
-      setStatus("첫 히로인 저장 완료");
-    } catch (error) {
-      setStatus(`첫 히로인 저장 실패: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
+  function confirmHeroineWorkspace(): void {
+    const name = heroineName.trim();
+    setStatus(name ? `${name} 프로필 작업 영역 준비 완료` : "히로인 이름을 입력해야 합니다.");
   }
 
   return (
@@ -45,9 +20,9 @@ export function HeroineStartPage() {
           <p>라이브러리 원본 히로인을 준비합니다.</p>
         </div>
         <div className="page-primary-action">
-          <span>첫 히로인 프로필을 저장합니다.</span>
-          <Button disabled={busy || !heroineName.trim()} icon={<Save size={18} />} onClick={() => void saveStarterHeroine()} variant="primary">
-            첫 히로인 저장
+          <span>프로필 입력 상태를 확인합니다.</span>
+          <Button disabled={!heroineName.trim()} icon={<CheckCircle2 size={18} />} onClick={confirmHeroineWorkspace} variant="primary">
+            작업 영역 확인
           </Button>
         </div>
       </header>
