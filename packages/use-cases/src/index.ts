@@ -478,21 +478,43 @@ async function resolveProjectDirectoryForOpen(
 ): Promise<string> {
   const record = asRecord(input);
   const projectId = optionalProjectId(input);
-  if (typeof record.projectDirectory === "string" && record.projectDirectory.trim()) {
-    return projectDirectoryFrom(input, fallbackDirectory);
+  const projectDirectory = typeof record.projectDirectory === "string" && record.projectDirectory.trim()
+    ? projectDirectoryFrom(input, fallbackDirectory)
+    : undefined;
+
+  if (projectDirectory) {
+    if (projectId && !(await projectWorkspaceExists(projectDirectory))) {
+      const entry = await recentProjects.findProject(projectId);
+      if (entry) {
+        await recentProjects.markProjectMissing(projectId, true);
+      }
+      throw new ProjectDirectoryMissingError({
+        ...(entry || {
+          projectId,
+          projectDirectory,
+          title: projectId,
+          lastOpenedAt: new Date().toISOString()
+        }),
+        projectDirectory,
+        missing: true
+      });
+    }
+    return projectDirectory;
   }
-  if (!projectId) {
-    return projectDirectoryFrom(input, fallbackDirectory);
+
+  if (projectId) {
+    const entry = await recentProjects.findProject(projectId);
+    if (!entry) {
+      throw new RecentProjectIndexMissError(projectId);
+    }
+    if (entry.missing || !(await projectWorkspaceExists(entry.projectDirectory))) {
+      await recentProjects.markProjectMissing(projectId, true);
+      throw new ProjectDirectoryMissingError({ ...entry, missing: true });
+    }
+    return entry.projectDirectory;
   }
-  const entry = await recentProjects.findProject(projectId);
-  if (!entry) {
-    throw new RecentProjectIndexMissError(projectId);
-  }
-  if (entry.missing || !(await projectWorkspaceExists(entry.projectDirectory))) {
-    await recentProjects.markProjectMissing(projectId, true);
-    throw new ProjectDirectoryMissingError({ ...entry, missing: true });
-  }
-  return entry.projectDirectory;
+
+  return fallbackDirectory;
 }
 
 function assertProjectIdMatches(input: unknown, project: VnMakerProject, projectDirectory: string): void {

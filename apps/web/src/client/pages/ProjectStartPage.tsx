@@ -1,93 +1,18 @@
-import { AlertTriangle, CheckCircle2, Clock3, Database, FolderOpen, RotateCw, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, Database, FolderOpen, RotateCw, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, useNavigate, useParams } from "react-router-dom";
-import type { ApiResult } from "../api/types";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, StatusBanner } from "../components/ui";
 import { useWorkspaceShell } from "../components/WorkspaceLayout";
+import { ProjectDetailView } from "./projects/ProjectDetailView";
+import { RecentProjectList } from "./projects/RecentProjectList";
+import { normalizeTab, type ProjectApiResult, type ProjectData, type RecentProject } from "./projects/projectPageTypes";
 
 const starterProject = {
   id: "web-starter",
   title: "웹 제작툴 샘플",
   premise: "Codex와 함께 미연시를 제작하는 첫 프로젝트"
 };
-
-const detailTabs = [
-  { id: "overview", label: "개요" },
-  { id: "heroine", label: "히로인 스냅샷" },
-  { id: "event", label: "제작/이벤트" },
-  { id: "assets", label: "에셋/생성" },
-  { id: "preview", label: "프리뷰" },
-  { id: "export", label: "내보내기" }
-] as const;
-
-type ProjectTabId = typeof detailTabs[number]["id"];
-
-interface ProjectData {
-  id?: string;
-  title?: string;
-  premise?: string;
-  characters?: unknown[];
-  routes?: unknown[];
-  scenes?: unknown[];
-}
-
-interface RecentProject {
-  projectId: string;
-  projectDirectory: string;
-  title: string;
-  lastOpenedAt: string;
-  lastValidatedAt?: string;
-  validationState?: "unchecked" | "valid" | "invalid" | "stale";
-  missing?: boolean;
-}
-
-interface ProjectApiResult extends ApiResult {
-  code?: string;
-  project?: ProjectData;
-  projectDirectory?: string;
-  projectId?: string;
-  projects?: RecentProject[];
-  validation?: {
-    ok?: boolean;
-  };
-  recentProject?: RecentProject;
-  expectedProjectId?: string;
-  actualProjectId?: string;
-}
-
-function normalizeTab(value?: string): ProjectTabId {
-  return detailTabs.some((tab) => tab.id === value) ? value as ProjectTabId : "overview";
-}
-
-function formatDate(value?: string): string {
-  if (!value) {
-    return "기록 없음";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString("ko-KR", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
-function validationLabel(value?: RecentProject["validationState"]): string {
-  if (value === "valid") {
-    return "검증 통과";
-  }
-  if (value === "invalid") {
-    return "검증 필요";
-  }
-  if (value === "stale") {
-    return "다시 검증 필요";
-  }
-  return "검증 대기";
-}
 
 function validationStatusFrom(result: ProjectApiResult): string {
   if (result.validation?.ok === true) {
@@ -322,92 +247,26 @@ export function ProjectStartPage() {
         </article>
       </section>
 
-      <section className="page-panel recent-project-panel" aria-labelledby="recentProjectsTitle">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Recent</p>
-            <h2 id="recentProjectsTitle">최근 프로젝트</h2>
-          </div>
-          <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => void refreshRecentProjects()}>
-            새로고침
-          </Button>
-        </div>
-        {recentProjects.length === 0 ? (
-          <p className="page-muted">최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.</p>
-        ) : (
-          <div className="recent-project-list">
-            {recentProjects.map((entry) => (
-              <article className={`recent-project-row${entry.missing ? " missing" : ""}`} key={entry.projectId}>
-                <div className="recent-project-main">
-                  <strong>{entry.title}</strong>
-                  <span>{entry.projectDirectory}</span>
-                  <small><Clock3 size={14} /> 마지막 열림 {formatDate(entry.lastOpenedAt)} · {validationLabel(entry.validationState)}</small>
-                </div>
-                <div className="recent-project-state">
-                  {entry.missing ? (
-                    <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
-                  ) : (
-                    <span className="state-chip">ready</span>
-                  )}
-                </div>
-                <div className="recent-project-actions">
-                  <Button disabled={busy || entry.missing} icon={<FolderOpen size={16} />} onClick={() => void openProject("최근 프로젝트 열기", {
-                    projectId: entry.projectId
-                  })}>
-                    열기
-                  </Button>
-                  <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => {
-                    setReconnectProjectId(entry.projectId);
-                    setProjectDirectoryInput(entry.missing ? "" : entry.projectDirectory);
-                    setStatus("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
-                  }}>
-                    재연결
-                  </Button>
-                  <Button disabled={busy} icon={<Trash2 size={16} />} onClick={() => void removeRecentProject(entry)} variant="ghost">
-                    목록에서만 제거
-                  </Button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+      <RecentProjectList
+        busy={busy}
+        onOpen={(entry) => void openProject("최근 프로젝트 열기", { projectId: entry.projectId })}
+        onPrepareReconnect={(entry) => {
+          setReconnectProjectId(entry.projectId);
+          setProjectDirectoryInput(entry.missing ? "" : entry.projectDirectory);
+          setStatus("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
+        }}
+        onRefresh={() => void refreshRecentProjects()}
+        onRemove={(entry) => void removeRecentProject(entry)}
+        recentProjects={recentProjects}
+      />
 
       {projectId || currentProject ? (
-        <section className="page-panel project-detail-panel" aria-labelledby="projectDetailTitle">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">Project Detail</p>
-              <h2 id="projectDetailTitle">{currentProject?.title || shellState.projectTitle}</h2>
-            </div>
-            <span className="state-chip">{activeTab}</span>
-          </div>
-          {currentProject ? (
-            <dl className="summary-list detail-summary">
-              <div><dt>ID</dt><dd>{currentProject.id}</dd></div>
-              <div><dt>개요</dt><dd>{currentProject.premise || "개요 없음"}</dd></div>
-              <div><dt>히로인</dt><dd>{currentProject.characters?.length ?? 0}명</dd></div>
-              <div><dt>루트/씬</dt><dd>{currentProject.routes?.length ?? 0}개 / {currentProject.scenes?.length ?? 0}개</dd></div>
-            </dl>
-          ) : (
-            <p className="page-muted">상세 URL의 프로젝트를 복원하는 중입니다.</p>
-          )}
-          <nav className="project-tab-list" aria-label="프로젝트 상세 탭">
-            {detailTabs.map((item) => (
-              <NavLink className={({ isActive }) => isActive ? "project-tab active" : "project-tab"} key={item.id} to={`/projects/${currentProject?.id || projectId}/${item.id}`}>
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="detail-tab-body">
-            {activeTab === "overview" ? "프로젝트 개요와 다음 행동을 확인합니다." : null}
-            {activeTab === "heroine" ? "히로인 스냅샷 탭입니다. 후속 이슈에서 편집 흐름을 연결합니다." : null}
-            {activeTab === "event" ? "제작/이벤트 탭입니다. 후속 이슈에서 자연어 이벤트 패치를 연결합니다." : null}
-            {activeTab === "assets" ? "에셋/생성 탭입니다. 후속 이슈에서 CG 작업을 연결합니다." : null}
-            {activeTab === "preview" ? "프리뷰 탭입니다. 후속 이슈에서 플레이 검증을 연결합니다." : null}
-            {activeTab === "export" ? "내보내기 탭입니다. 후속 이슈에서 export와 smoke 결과를 연결합니다." : null}
-          </div>
-        </section>
+        <ProjectDetailView
+          activeTab={activeTab}
+          currentProject={currentProject}
+          projectId={projectId}
+          shellProjectTitle={shellState.projectTitle}
+        />
       ) : null}
     </section>
   );

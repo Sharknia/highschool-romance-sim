@@ -583,7 +583,7 @@ export async function ensureProjectWorkspaceDirectories(paths: ProjectWorkspaceP
   await mkdir(paths.cacheDirectory, { recursive: true });
 }
 
-function getDefaultRecentProjectIndexPath(): string {
+export function getDefaultRecentProjectIndexPath(): string {
   return process.env.VN_MAKER_RECENT_PROJECTS_FILE || join(process.cwd(), "workspace", "recent-projects.json");
 }
 

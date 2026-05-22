@@ -631,6 +631,35 @@ assert.equal(apiRecentRemoved.status, 200);
 assert.equal(apiRecentRemoved.body.projects.some((entry) => entry.projectId === "api-recent"), false);
 assert.equal(existsSync(join(apiRecentDirectory, "project.sqlite")), true);
 
+const apiMissingRecentDirectory = join(tempRoot, "ApiMissingRecent.vnmaker");
+const apiWrongReconnectDirectory = join(tempRoot, "ApiWrongReconnect.vnmaker");
+const apiMissingRecent = await mockApi({
+  method: "POST",
+  path: "/api/projects",
+  body: {
+    projectDirectory: apiMissingRecentDirectory,
+    starter: {
+      id: "api-missing-recent",
+      title: "API Missing Recent",
+      premise: "최근 프로젝트 재연결 실패 테스트"
+    }
+  }
+});
+assert.equal(apiMissingRecent.status, 200);
+await rm(apiMissingRecentDirectory, { recursive: true, force: true });
+const apiWrongReconnect = await mockApi({
+  method: "POST",
+  path: "/api/projects/open",
+  body: {
+    projectId: "api-missing-recent",
+    projectDirectory: apiWrongReconnectDirectory
+  }
+});
+assert.equal(apiWrongReconnect.status, 404);
+assert.equal(apiWrongReconnect.body.code, "PROJECT_DIRECTORY_MISSING");
+assert.match(apiWrongReconnect.body.error, /프로젝트 폴더를 찾을 수 없습니다/);
+assert.equal(existsSync(join(apiWrongReconnectDirectory, "project.sqlite")), false);
+
 const apiImage = await mockApi({
   method: "POST",
   path: "/api/generation/images",

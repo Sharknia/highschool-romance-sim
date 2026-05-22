@@ -315,6 +315,16 @@ await assert.rejects(
 );
 const recentAfterMissing = await useCases.listRecentProjects();
 assert.equal(recentAfterMissing.projects.find((entry) => entry.projectId === "missing-recent").missing, true);
+const wrongReconnectDirectory = join(tempRoot, "WrongReconnect.vnmaker");
+await assert.rejects(
+  () => useCases.openProject({ projectId: "missing-recent", projectDirectory: wrongReconnectDirectory }),
+  (error) => {
+    assert.equal(error.code, "PROJECT_DIRECTORY_MISSING");
+    assert.match(error.message, /프로젝트 폴더를 찾을 수 없습니다/);
+    return true;
+  }
+);
+assert.equal(existsSync(join(wrongReconnectDirectory, "project.sqlite")), false);
 
 const mismatchCreated = await useCases.createProject({
   projectDirectory: mismatchRecentProjectDirectory,
