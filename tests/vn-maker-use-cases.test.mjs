@@ -134,6 +134,17 @@ assert.equal(created.ok, true);
 assert.equal(created.projectDirectory, projectDirectory);
 assert.equal(created.project.characters.length, 1);
 
+const deletedLibraryHeroine = await useCases.deleteHeroine({
+  projectDirectory,
+  heroineId: heroine.id
+});
+assert.equal(deletedLibraryHeroine.ok, true);
+assert.equal(deletedLibraryHeroine.heroines.some((item) => item.id === heroine.id), false);
+const openedAfterLibraryDelete = await useCases.openProject({ projectDirectory });
+assert.equal(openedAfterLibraryDelete.project.characters[0].sourceHeroineId, heroine.id);
+assert.equal(openedAfterLibraryDelete.project.characters[0].displayName, heroine.name);
+assert.equal(openedAfterLibraryDelete.project.characters[0].defaultPortraitAssetId, heroine.defaultPortraitAssetId);
+
 const recentAfterCreate = await useCases.listRecentProjects();
 assert.equal(recentAfterCreate.ok, true);
 assert.equal(recentAfterCreate.projects[0].projectId, created.project.id);

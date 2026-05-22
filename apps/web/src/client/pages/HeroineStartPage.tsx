@@ -400,6 +400,9 @@ export function HeroineStartPage() {
           <div className="page-panel-icon"><Trash2 size={18} /></div>
           <h2>삭제</h2>
           <p className="page-muted">
+            삭제해도 기존 프로젝트 스냅샷은 유지됩니다. 라이브러리 목록에서만 제거됩니다.
+          </p>
+          <p className="page-muted">
             {hasSavedSelection ? `${selectedHeroine?.name || selectedHeroineId}을 라이브러리 목록에서 삭제할 수 있습니다.` : "삭제할 히로인을 먼저 선택해야 합니다."}
           </p>
           <div className="panel-actions">

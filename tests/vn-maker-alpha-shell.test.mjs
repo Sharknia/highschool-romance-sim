@@ -102,7 +102,9 @@ assert.doesNotMatch(heroineStartSource, /API key|API 키/, "API key 흐름을 Co
   "Codex 연결",
   "imageGeneration 가능",
   "기본 포트레이트 생성",
-  "생성 불가"
+  "생성 불가",
+  "기존 프로젝트 스냅샷은 유지됩니다.",
+  "라이브러리 목록에서만 제거됩니다."
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(heroineStartSource, pattern, `HeroineStartPage에 '${requiredText}' 문구가 있어야 합니다.`);
