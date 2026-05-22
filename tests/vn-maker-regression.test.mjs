@@ -31,7 +31,6 @@ const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
 const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
 const webDevEnvKeys = ["PORT", "API_PORT", "VITE_API_PORT", "VN_MAKER_ALPHA_SANDBOX"];
-
 async function loadWebViteConfigWithEnv(env) {
   const previousEnv = new Map(webDevEnvKeys.map((key) => [key, process.env[key]]));
   for (const key of webDevEnvKeys) {
@@ -536,6 +535,26 @@ const codexImageResult = await codexGeneration.createCodexImageAssetResult(
 assert.equal(codexImageResult.job.status, "completed");
 assert.equal(codexImageResult.asset.source, "generated");
 assert.match(codexImageResult.image.dataUrl, /^data:image\/png;base64,/);
+const codexBackgroundImageResult = await codexGeneration.createCodexImageAssetResult(
+  {
+    kind: "background",
+    targetId: "project-background",
+    prompt: "sunset classroom background",
+    outputAssetId: "asset-codex-background"
+  },
+  {
+    id: "codex-background-image-item",
+    type: "imageGeneration",
+    result: sampleImageBase64,
+    status: "completed",
+    revisedPrompt: "revised sunset classroom background",
+    savedPath: null
+  }
+);
+assert.equal(codexBackgroundImageResult.job.kind, "background");
+assert.equal(codexBackgroundImageResult.asset.kind, "background");
+assert.equal(codexBackgroundImageResult.job.status, "completed");
+assert.equal(codexBackgroundImageResult.image.revisedPrompt, "revised sunset classroom background");
 
 let mockCodexTextCalls = 0;
 const mockCodex = {
@@ -632,7 +651,66 @@ const apiRecentRemoved = await mockApi({
 });
 assert.equal(apiRecentRemoved.status, 200);
 assert.equal(apiRecentRemoved.body.projects.some((entry) => entry.projectId === "api-recent"), false);
+assert.equal(apiRecentRemoved.body.deletionPolicy.mode, "recentIndexOnly");
 assert.equal(existsSync(join(apiRecentDirectory, "project.sqlite")), true);
+
+const apiDeleteDirectory = join(tempRoot, "Issue20ApiDelete.vnmaker");
+const apiDeleteCreate = await mockApi({
+  method: "POST",
+  path: "/api/projects",
+  body: { projectDirectory: apiDeleteDirectory, starter: { id: "issue20-api-delete", title: "Issue 20 API 삭제", premise: "삭제 계약" } }
+});
+assert.equal(apiDeleteCreate.status, 200);
+const apiDeleteBlocked = await mockApi({
+  method: "POST",
+  path: "/api/projects/delete",
+  body: { projectDirectory: apiDeleteDirectory, projectId: "issue20-api-delete", confirmTitle: "틀린 제목", deleteFiles: true }
+});
+assert.equal(apiDeleteBlocked.status, 400);
+assert.equal(apiDeleteBlocked.body.ok, false);
+assert.equal(apiDeleteBlocked.body.code, "PROJECT_INPUT_INVALID");
+assert.equal(existsSync(join(apiDeleteDirectory, "project.sqlite")), true);
+const apiDeleteMissingProjectId = await mockApi({
+  method: "POST",
+  path: "/api/projects/delete",
+  body: { projectDirectory: apiDeleteDirectory, confirmTitle: "Issue 20 API 삭제", deleteFiles: true }
+});
+assert.equal(apiDeleteMissingProjectId.status, 400);
+assert.equal(apiDeleteMissingProjectId.body.ok, false);
+assert.equal(apiDeleteMissingProjectId.body.code, "PROJECT_INPUT_INVALID");
+const apiDeleteResult = await mockApi({
+  method: "POST",
+  path: "/api/projects/delete",
+  body: { projectDirectory: apiDeleteDirectory, projectId: "issue20-api-delete", confirmTitle: "Issue 20 API 삭제", deleteFiles: true }
+});
+assert.equal(apiDeleteResult.status, 200);
+assert.equal(apiDeleteResult.body.ok, true);
+assert.equal(apiDeleteResult.body.deletionPolicy.mode, "localProjectFiles");
+assert.equal(apiDeleteResult.body.deletionPolicy.reversible, false);
+assert.equal(existsSync(join(apiDeleteDirectory, "project.sqlite")), false);
+
+const cliDeleteDirectory = join(tempRoot, "Issue20CliDelete.vnmaker");
+const cliCreated = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-project"], {
+  input: JSON.stringify({
+    projectDirectory: cliDeleteDirectory,
+    starter: { id: "issue20-cli-delete", title: "Issue 20 CLI 삭제", premise: "CLI 삭제 계약" }
+  }),
+  encoding: "utf8"
+}));
+assert.equal(cliCreated.ok, true);
+const cliDeleted = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "delete-project"], {
+  input: JSON.stringify({
+    projectDirectory: cliDeleteDirectory,
+    projectId: "issue20-cli-delete",
+    confirmTitle: "Issue 20 CLI 삭제",
+    deleteFiles: true
+  }),
+  encoding: "utf8"
+}));
+assert.equal(cliDeleted.ok, true);
+assert.equal(cliDeleted.deletionPolicy.mode, "localProjectFiles");
+assert.equal(cliDeleted.deletionPolicy.reversible, false);
+assert.equal(existsSync(join(cliDeleteDirectory, "project.sqlite")), false);
 
 const apiMissingRecentDirectory = join(tempRoot, "ApiMissingRecent.vnmaker");
 const apiWrongReconnectDirectory = join(tempRoot, "ApiWrongReconnect.vnmaker");
@@ -1309,31 +1387,193 @@ await esbuild({
 });
 const clientApi = await import(pathToFileURL(bundledClientApiPath).href);
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async () => new Response("", {
-  status: 500,
-  headers: { "Content-Type": "text/plain" }
-});
-const emptyLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
-assert.equal(emptyLoginResponse.ok, false);
-assert.equal(emptyLoginResponse.httpStatus, 500);
-assert.match(emptyLoginResponse.error, /응답이 비어 있습니다|JSON/);
-globalThis.fetch = async () => new Response("<!doctype html>proxy error", {
-  status: 502,
-  headers: { "Content-Type": "text/html" }
-});
-const nonJsonLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
-assert.equal(nonJsonLoginResponse.ok, false);
-assert.equal(nonJsonLoginResponse.httpStatus, 502);
-assert.match(nonJsonLoginResponse.error, /JSON으로 읽을 수 없습니다/);
-globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, connected: true }), {
-  status: 503,
-  headers: { "Content-Type": "application/json" }
-});
-const json5xxLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
-assert.equal(json5xxLoginResponse.ok, false);
-assert.equal(json5xxLoginResponse.httpStatus, 503);
-assert.match(json5xxLoginResponse.error, /요청이 실패했습니다/);
-globalThis.fetch = originalFetch;
+try {
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, project: { id: "json-ok" } }), {
+    headers: { "Content-Type": "application/json" },
+    status: 200
+  });
+  const jsonOk = await clientApi.postJson("/api/json-ok", {});
+  assert.equal(jsonOk.ok, true);
+  assert.equal(jsonOk.project.id, "json-ok");
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: false,
+    code: "PROJECT_INPUT_INVALID",
+    message: "입력 오류",
+    error: "title is required",
+    retryable: false,
+    userSummary: "프로젝트 정보를 확인해 주세요.",
+    technicalDetail: "title is required",
+    nextAction: "필수 입력을 채운 뒤 다시 시도하세요."
+  }), {
+    headers: { "Content-Type": "application/json" },
+    status: 400
+  });
+  const json4xx = await clientApi.postJson("/api/json-4xx", {});
+  assert.equal(json4xx.ok, false);
+  assert.equal(json4xx.code, "PROJECT_INPUT_INVALID");
+  assert.equal(json4xx.httpStatus, 400);
+  assert.equal(json4xx.retryable, false);
+  assert.equal(json4xx.userSummary, "프로젝트 정보를 확인해 주세요.");
+  assert.equal(json4xx.technicalDetail, "title is required");
+  assert.equal(json4xx.nextAction, "필수 입력을 채운 뒤 다시 시도하세요.");
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: false,
+    code: "SERVER_ERROR",
+    message: "서버 오류",
+    retryable: true,
+    userSummary: "잠시 후 다시 시도해 주세요.",
+    technicalDetail: "boom",
+    nextAction: "다시 시도"
+  }), {
+    headers: { "Content-Type": "application/json" },
+    status: 503
+  });
+  const json5xx = await clientApi.postJson("/api/json-5xx", {});
+  assert.equal(json5xx.ok, false);
+  assert.equal(json5xx.httpStatus, 503);
+  assert.equal(json5xx.retryable, true);
+  assert.equal(json5xx.userSummary, "잠시 후 다시 시도해 주세요.");
+  assert.equal(json5xx.technicalDetail, "boom");
+  assert.equal(json5xx.nextAction, "다시 시도");
+
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  const emptyResult = await clientApi.postJson("/api/empty", {});
+  assert.equal(emptyResult.ok, false);
+  assert.equal(emptyResult.code, "EMPTY_RESPONSE");
+  assert.equal(emptyResult.httpStatus, 204);
+  assert.equal(emptyResult.retryable, true);
+  assert.equal(emptyResult.userSummary, "서버 응답이 비어 있습니다.");
+  assert.equal(emptyResult.technicalDetail, "HTTP 204 returned an empty response body.");
+  assert.equal(emptyResult.nextAction, "요청을 다시 시도하세요.");
+
+  globalThis.fetch = async () => new Response("<html>fail</html>", { status: 502 });
+  const nonJsonResult = await clientApi.postJson("/api/non-json", {});
+  assert.equal(nonJsonResult.ok, false);
+  assert.equal(nonJsonResult.code, "NON_JSON_RESPONSE");
+  assert.equal(nonJsonResult.httpStatus, 502);
+  assert.equal(nonJsonResult.retryable, true);
+  assert.equal(nonJsonResult.userSummary, "서버 응답을 해석하지 못했습니다.");
+  assert.equal(nonJsonResult.technicalDetail, "<html>fail</html>");
+  assert.equal(nonJsonResult.nextAction, "API 서버 상태를 확인한 뒤 다시 시도하세요.");
+
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  const networkResult = await clientApi.postJson("/api/network", {});
+  assert.equal(networkResult.ok, false);
+  assert.equal(networkResult.code, "NETWORK_ERROR");
+  assert.equal(networkResult.retryable, true);
+  assert.equal(networkResult.userSummary, "네트워크 연결을 확인해 주세요.");
+  assert.equal(networkResult.technicalDetail, "fetch failed");
+  assert.equal(networkResult.nextAction, "네트워크 상태를 확인한 뒤 다시 시도하세요.");
+
+  globalThis.fetch = async () => {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  };
+  const abortResult = await clientApi.postJson("/api/abort", {});
+  assert.equal(abortResult.ok, false);
+  assert.equal(abortResult.code, "REQUEST_ABORTED");
+  assert.equal(abortResult.retryable, false);
+  assert.equal(abortResult.userSummary, "요청이 취소되었습니다.");
+  assert.equal(abortResult.technicalDetail, "The operation was aborted.");
+  assert.equal(abortResult.nextAction, "필요하면 다시 실행하세요.");
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, connected: 1, mode: 123 }), {
+    headers: { "Content-Type": "application/json" },
+    status: 200
+  });
+  const codexSessionSuccess = await clientApi.readCodexSession();
+  assert.equal(codexSessionSuccess.connected, true);
+  assert.equal(codexSessionSuccess.mode, null);
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: false,
+    code: "OAUTH_REQUIRED",
+    message: "로그인이 필요합니다.",
+    error: "Codex ChatGPT OAuth 로그인이 필요합니다.",
+    retryable: true,
+    userSummary: "Codex 연결이 필요합니다.",
+    technicalDetail: "missing session",
+    nextAction: "Codex에 로그인하세요."
+  }), {
+    headers: { "Content-Type": "application/json" },
+    status: 401
+  });
+  const codexSession4xx = await clientApi.readCodexSession();
+  assert.equal(codexSession4xx.ok, false);
+  assert.equal(codexSession4xx.connected, false);
+  assert.equal(codexSession4xx.mode, null);
+  assert.equal(codexSession4xx.code, "OAUTH_REQUIRED");
+  assert.equal(codexSession4xx.httpStatus, 401);
+  assert.equal(codexSession4xx.retryable, true);
+  assert.equal(codexSession4xx.userSummary, "Codex 연결이 필요합니다.");
+  assert.equal(codexSession4xx.technicalDetail, "missing session");
+  assert.equal(codexSession4xx.nextAction, "Codex에 로그인하세요.");
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: false,
+    code: "SERVER_ERROR",
+    message: "세션 서버 오류",
+    retryable: true,
+    userSummary: "잠시 후 다시 시도해 주세요.",
+    technicalDetail: "session boom",
+    nextAction: "다시 시도"
+  }), {
+    headers: { "Content-Type": "application/json" },
+    status: 503
+  });
+  const codexSession5xx = await clientApi.readCodexSession();
+  assert.equal(codexSession5xx.ok, false);
+  assert.equal(codexSession5xx.connected, false);
+  assert.equal(codexSession5xx.mode, null);
+  assert.equal(codexSession5xx.code, "SERVER_ERROR");
+  assert.equal(codexSession5xx.httpStatus, 503);
+  assert.equal(codexSession5xx.retryable, true);
+  assert.equal(codexSession5xx.technicalDetail, "session boom");
+
+  globalThis.fetch = async () => new Response("<html>session fail</html>", { status: 502 });
+  const codexSessionNonJson = await clientApi.readCodexSession();
+  assert.equal(codexSessionNonJson.ok, false);
+  assert.equal(codexSessionNonJson.connected, false);
+  assert.equal(codexSessionNonJson.mode, null);
+  assert.equal(codexSessionNonJson.code, "NON_JSON_RESPONSE");
+  assert.equal(codexSessionNonJson.httpStatus, 502);
+  assert.equal(codexSessionNonJson.retryable, true);
+
+  globalThis.fetch = async () => {
+    throw new TypeError("session fetch failed");
+  };
+  const codexSessionNetwork = await clientApi.readCodexSession();
+  assert.equal(codexSessionNetwork.ok, false);
+  assert.equal(codexSessionNetwork.connected, false);
+  assert.equal(codexSessionNetwork.mode, null);
+  assert.equal(codexSessionNetwork.code, "NETWORK_ERROR");
+  assert.equal(codexSessionNetwork.retryable, true);
+  assert.equal(codexSessionNetwork.technicalDetail, "session fetch failed");
+
+  globalThis.fetch = async () => {
+    throw new DOMException("Session aborted.", "AbortError");
+  };
+  const codexSessionAbort = await clientApi.readCodexSession();
+  assert.equal(codexSessionAbort.ok, false);
+  assert.equal(codexSessionAbort.connected, false);
+  assert.equal(codexSessionAbort.mode, null);
+  assert.equal(codexSessionAbort.code, "REQUEST_ABORTED");
+  assert.equal(codexSessionAbort.retryable, false);
+  assert.equal(codexSessionAbort.technicalDetail, "Session aborted.");
+
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  const codexSessionResult = await clientApi.readCodexSession();
+  assert.equal(codexSessionResult.ok, false);
+  assert.equal(codexSessionResult.connected, false);
+  assert.equal(codexSessionResult.mode, null);
+  assert.equal(codexSessionResult.code, "EMPTY_RESPONSE");
+  assert.equal(codexSessionResult.httpStatus, 204);
+} finally {
+  globalThis.fetch = originalFetch;
+}
 
 await esbuild({
   entryPoints: ["apps/web/src/client/pages/WorkspacePage.tsx"],

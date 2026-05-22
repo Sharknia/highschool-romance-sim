@@ -1,7 +1,9 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   analyzeRouteGraph,
   buildPlayerRuntimeScript,
@@ -770,6 +772,33 @@ export async function projectWorkspaceExists(projectDirectory: string): Promise<
     }
     throw error;
   }
+}
+
+class ProjectDirectoryDeleteSafetyError extends Error {
+  readonly code = "PROJECT_INPUT_INVALID";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectDirectoryDeleteSafetyError";
+  }
+}
+
+export async function deleteLocalProjectDirectory(projectDirectory: string): Promise<void> {
+  const resolvedProjectDirectory = await realpath(projectDirectory);
+  const resolvedRoot = await realpath(dirname(projectDirectory));
+  if (!basename(resolvedProjectDirectory).endsWith(".vnmaker")) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 폴더명은 .vnmaker로 끝나야 삭제할 수 있습니다.");
+  }
+  if (!resolvedProjectDirectory.startsWith(`${resolvedRoot}${sep}`)) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 폴더 경계가 안전하지 않아 삭제할 수 없습니다.");
+  }
+  if (resolvedProjectDirectory === resolvedRoot || resolvedProjectDirectory === homedir() || resolvedProjectDirectory === sep) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 루트가 아닌 위치는 삭제할 수 없습니다.");
+  }
+  if (!existsSync(join(resolvedProjectDirectory, "project.sqlite"))) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 데이터베이스가 있는 폴더만 삭제할 수 있습니다.");
+  }
+  await rm(resolvedProjectDirectory, { recursive: true, force: false });
 }
 
 export class RecentProjectIndexStore {

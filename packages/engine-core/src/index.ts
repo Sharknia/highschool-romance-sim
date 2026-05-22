@@ -1,7 +1,9 @@
 export type VnMakerProjectVersion = "vn-maker/v1";
 export type ValidationSeverity = "error" | "warning";
 export type AssetKind = "background" | "portrait" | "expression" | "cg" | "audio" | "other";
-export type GenerationJobKind = "character" | "route" | "scene" | "dialogue" | "portrait" | "expression" | "cg";
+export type GenerationJobKind = "character" | "route" | "scene" | "dialogue" | "portrait" | "expression" | "cg" | "background";
+
+const GENERATION_JOB_KINDS: readonly GenerationJobKind[] = ["character", "route", "scene", "dialogue", "portrait", "expression", "cg", "background"];
 
 export const DEFAULT_EMOTION_TAGS = ["normal", "happy", "sad", "angry", "shy"] as const;
 
@@ -242,7 +244,7 @@ export interface CreateStarterProjectInput {
 
 export interface CreateImageGenerationJobInput {
   id: string;
-  kind: Extract<GenerationJobKind, "portrait" | "expression" | "cg">;
+  kind: Extract<GenerationJobKind, "portrait" | "expression" | "cg" | "background">;
   targetId: string;
   prompt: string;
   style?: string;
@@ -598,6 +600,9 @@ function parseVnMakerGenerationJob(value: unknown): DtoParseResult<VnMakerGenera
   validateOptionalString(value, "style", "style", issues);
   validateOptionalString(value, "outputAssetId", "outputAssetId", issues);
   validateOptionalString(value, "failureMessage", "failureMessage", issues);
+  if (typeof value.kind === "string" && !GENERATION_JOB_KINDS.includes(value.kind as GenerationJobKind)) {
+    addSchemaIssue(issues, "kind", `지원하지 않는 생성 작업 종류입니다: ${value.kind}`);
+  }
   if (typeof value.provider === "string" && !["codex-text-adapter", "image-generation-adapter", "mock-adapter"].includes(value.provider)) {
     addSchemaIssue(issues, "provider", `지원하지 않는 생성 provider입니다: ${value.provider}`);
   }
@@ -760,7 +765,7 @@ export function parseCreateImageGenerationJobInput(value: unknown): DtoParseResu
   hasString(value, "kind", "kind", issues, { nonEmpty: true });
   hasString(value, "targetId", "targetId", issues, { nonEmpty: true });
   hasString(value, "prompt", "prompt", issues, { nonEmpty: true });
-  if (typeof value.kind === "string" && !["portrait", "expression", "cg"].includes(value.kind)) {
+  if (typeof value.kind === "string" && !["portrait", "expression", "cg", "background"].includes(value.kind)) {
     addSchemaIssue(issues, "kind", `지원하지 않는 이미지 생성 작업 종류입니다: ${value.kind}`);
   }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as CreateImageGenerationJobInput);

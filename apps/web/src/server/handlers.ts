@@ -111,14 +111,20 @@ function statusForError(error: unknown): number {
     return 400;
   }
   const errorRecord = asRecord(error);
+  if (errorRecord.code === "PROJECT_INPUT_INVALID" || errorRecord.code === "PROJECT_ID_RESERVED") {
+    return 400;
+  }
   if (errorRecord.code === "RECENT_PROJECT_INDEX_MISS" || errorRecord.code === "PROJECT_DIRECTORY_MISSING" || errorRecord.code === "PROJECT_NOT_FOUND") {
     return 404;
   }
-  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "EXPORT_BLOCKED") {
+  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "EXPORT_BLOCKED" || errorRecord.code === "JOB_ALREADY_RUNNING") {
     return 409;
   }
-  if (errorRecord.code === "PROJECT_ID_RESERVED") {
-    return 400;
+  if (errorRecord.code === "OAUTH_REQUIRED") {
+    return 401;
+  }
+  if (errorRecord.code === "SERVER_ERROR") {
+    return 500;
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("OAuth 로그인이 필요")) {
@@ -163,7 +169,17 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function statusForBody(body: unknown): number {
-  return isHeroineActionFailure(body) ? heroineFailureStatus(body.code) : 200;
+  const record = asRecord(body);
+  if (record.ok !== false || typeof record.code !== "string") {
+    return 200;
+  }
+  if (record.code.startsWith("PROJECT_") || record.code === "EXPORT_BLOCKED" || record.code === "PATCH_STALE" || record.code === "JOB_ALREADY_RUNNING") {
+    return statusForError({ code: record.code, message: record.message });
+  }
+  if (isHeroineActionFailure(body)) {
+    return heroineFailureStatus(body.code);
+  }
+  return statusForError({ code: record.code, message: record.message });
 }
 
 async function jsonRoute(operation: () => Promise<unknown> | unknown, action?: MakerActionId): Promise<Response> {
@@ -286,6 +302,10 @@ class ApiServices {
     return this.useCases.removeRecentProject(body);
   }
 
+  deleteProjectWorkspace(body: unknown): Promise<unknown> {
+    return this.useCases.deleteProjectWorkspace(body);
+  }
+
   restoreRecentProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.restoreRecentProject(body);
   }
@@ -384,6 +404,7 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/projects/reconnect", (context) => jsonBodyRoute(context, (body) => services.reconnectRecentProject(body), "reconnectRecentProject"));
   app.post("/api/projects/recent/list", () => jsonRoute(() => services.listRecentProjects(), "listRecentProjects"));
   app.post("/api/projects/recent/remove", (context) => jsonBodyRoute(context, (body) => services.removeRecentProject(body), "removeRecentProject"));
+  app.post("/api/projects/delete", (context) => jsonBodyRoute(context, (body) => services.deleteProjectWorkspace(body), "deleteProjectWorkspace"));
   app.post("/api/projects/recent/restore", (context) => jsonBodyRoute(context, (body) => services.restoreRecentProject(body), "restoreRecentProject"));
   app.post("/api/project/starter", (context) => jsonBodyRoute(context, (body) => services.createProject(body), "createProject"));
   app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body), "openProject"));

@@ -157,6 +157,50 @@ assert.equal(withGenerationResult.generationJobs.some((job) => job.id === "job-d
 assert.equal(withGenerationResult.assets.some((asset) => asset.id === "asset-domain-cg" && asset.source === "generated"), true);
 assert.equal(starter.generationJobs.some((job) => job.id === "job-domain-cg"), false);
 
+const parsedBackgroundInput = core.parseCreateImageGenerationJobInput({
+  id: "job-domain-background",
+  kind: "background",
+  targetId: starter.id,
+  prompt: "after school classroom background",
+  outputAssetId: "asset-domain-background"
+});
+assert.equal(parsedBackgroundInput.ok, true);
+
+const backgroundJob = core.createImageGenerationJob({
+  id: "job-domain-background",
+  kind: "background",
+  targetId: starter.id,
+  prompt: "after school classroom background",
+  outputAssetId: "asset-domain-background"
+});
+assert.equal(backgroundJob.kind, "background");
+assert.equal(backgroundJob.outputAssetId, "asset-domain-background");
+
+const parsedBackgroundJob = core.parseVnMakerProject({
+  ...starter,
+  generationJobs: [backgroundJob],
+  assets: [{
+    id: "asset-domain-background",
+    kind: "background",
+    label: "도메인 배경",
+    uri: "/generated-assets/asset-domain-background.png",
+    source: "generated",
+    generationJobId: "job-domain-background"
+  }]
+});
+assert.equal(parsedBackgroundJob.ok, true);
+
+const parsedUnsupportedGenerationJobKindProject = core.parseVnMakerProject({
+  ...starter,
+  generationJobs: [{
+    ...backgroundJob,
+    id: "job-domain-unsupported-kind",
+    kind: "soundtrack"
+  }]
+});
+assert.equal(parsedUnsupportedGenerationJobKindProject.ok, false);
+assert.equal(parsedUnsupportedGenerationJobKindProject.issues.some((issue) => issue.path === "generationJobs.0.kind"), true);
+
 const policy = core.describeEventExpansionPolicy();
 assert.equal(policy.allowedOperationTypes.includes("addScene"), true);
 assert.equal(policy.alphaTarget.sceneCount, 3);

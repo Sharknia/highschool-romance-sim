@@ -352,6 +352,21 @@ try {
   assert.equal(apiGeneratedImage.body.asset.source, "generated");
   assert.equal(existsSync(join(apiProjectDirectory, "assets", "generated", `${apiPlannedCgJob.outputAssetId}.png`)), true);
 
+  const apiBackgroundImage = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/images",
+    body: {
+      projectDirectory: apiProjectDirectory,
+      kind: "background",
+      targetId: apiProject.body.project.id,
+      prompt: "shared API background",
+      outputAssetId: "asset-api-direct-background"
+    }
+  });
+  assert.equal(apiBackgroundImage.status, 200);
+  assert.equal(apiBackgroundImage.body.asset.kind, "background");
+  assert.equal(apiBackgroundImage.body.job.kind, "background");
+
   const apiPreview = await sandboxApi({
     method: "POST",
     path: "/api/project/preview",
@@ -439,6 +454,17 @@ try {
   assert.equal(cliGeneratedImage.ok, true);
   assert.equal(cliGeneratedImage.job.provider, "mock-adapter");
   assert.equal(cliGeneratedImage.raw.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
+
+  const cliGenerateBackground = runCli("generate-image", {
+    projectDirectory: cliProjectDirectory,
+    kind: "background",
+    targetId: cliProject.project.id,
+    prompt: "shared CLI background",
+    outputAssetId: "asset-cli-direct-background"
+  }, cliEnv);
+  assert.equal(cliGenerateBackground.ok, true);
+  assert.equal(cliGenerateBackground.asset.kind, "background");
+  assert.equal(cliGenerateBackground.job.kind, "background");
 
   const cliPreview = runCli("preview", {
     projectDirectory: cliProjectDirectory,

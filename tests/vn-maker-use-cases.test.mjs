@@ -440,6 +440,30 @@ const generatedPortrait = await useCases.generateImage({
 });
 assert.equal(generatedPortrait.ok, true);
 assert.equal(generatedPortrait.asset.id, heroine.defaultPortraitAssetId);
+
+const plannedBackground = await useCases.createGenerationJob({
+  projectDirectory,
+  id: "job-usecase-background",
+  kind: "background",
+  targetId: created.project.id,
+  prompt: "library classroom at sunset",
+  outputAssetId: "asset-usecase-background"
+});
+assert.equal(plannedBackground.ok, true);
+assert.equal(plannedBackground.job.kind, "background");
+
+const generatedBackground = await useCases.generateImage({
+  projectDirectory,
+  kind: "background",
+  targetId: created.project.id,
+  prompt: "library classroom at sunset",
+  outputAssetId: "asset-direct-background"
+});
+assert.equal(generatedBackground.ok, true);
+assert.equal(generatedBackground.asset.kind, "background");
+assert.equal(generatedBackground.job.kind, "background");
+assert.equal(generatedBackground.project.assets.some((asset) => asset.kind === "background"), true);
+
 const heroineBeforeGeneratedPortrait = await useCases.getHeroine({
   projectDirectory,
   heroineId: heroine.id
@@ -501,6 +525,10 @@ assert.equal(removedRecentProject.ok, true);
 assert.equal(removedRecentProject.action, "removeRecentProject");
 assert.equal(removedRecentProject.removedProject.projectId, created.project.id);
 assert.equal(removedRecentProject.projects.some((entry) => entry.projectId === created.project.id), false);
+assert.equal(removedRecentProject.deletionPolicy.mode, "recentIndexOnly");
+assert.equal(removedRecentProject.deletionPolicy.reversible, true);
+assert.equal(Array.isArray(removedRecentProject.deletionPolicy.impact), true);
+assert.equal(existsSync(join(projectDirectory, "project.sqlite")), true);
 const restoredRecentProject = await useCases.restoreRecentProject({
   recentProject: removedRecentProject.removedProject
 });
@@ -935,7 +963,103 @@ assert.equal(mismatchEntry.title, "Expected Recent");
 const removedRecent = await useCases.removeRecentProject({ projectId: manualCreated.project.id });
 assert.equal(removedRecent.ok, true);
 assert.equal(removedRecent.projects.some((entry) => entry.projectId === manualCreated.project.id), false);
+assert.equal(removedRecent.deletionPolicy.mode, "recentIndexOnly");
+assert.equal(removedRecent.deletionPolicy.reversible, true);
 assert.equal(existsSync(join(manualProjectDirectory, "project.sqlite")), true);
+
+const blockedDeleteDirectory = join(tempRoot, "BlockedProject");
+const blockedDeleteTarget = await useCases.createProject({
+  projectDirectory: blockedDeleteDirectory,
+  starter: { id: "blocked-project", title: "차단 대상", premise: "삭제 차단 검증" }
+});
+assert.equal(blockedDeleteTarget.ok, true);
+const blockedDelete = await useCases.deleteProjectWorkspace({
+  projectDirectory: blockedDeleteDirectory,
+  projectId: blockedDeleteTarget.project.id,
+  confirmTitle: blockedDeleteTarget.project.title,
+  deleteFiles: true
+});
+assert.equal(blockedDelete.ok, false);
+assert.equal(blockedDelete.code, "PROJECT_INPUT_INVALID");
+assert.equal(blockedDelete.action, "deleteProjectWorkspace");
+assert.equal(existsSync(join(blockedDeleteDirectory, "project.sqlite")), true);
+
+const deleteTargetDirectory = join(tempRoot, "DeleteProject.vnmaker");
+const deleteTarget = await useCases.createProject({
+  projectDirectory: deleteTargetDirectory,
+  starter: { id: "delete-project", title: "삭제 대상", premise: "삭제 정책 검증" }
+});
+const deleteWithoutFiles = await useCases.deleteProjectWorkspace({
+  projectDirectory: deleteTargetDirectory,
+  projectId: deleteTarget.project.id,
+  confirmTitle: deleteTarget.project.title,
+  deleteFiles: false
+});
+assert.equal(deleteWithoutFiles.ok, false);
+assert.equal(deleteWithoutFiles.code, "PROJECT_INPUT_INVALID");
+const deleteOmittedFiles = await useCases.deleteProjectWorkspace({
+  projectDirectory: deleteTargetDirectory,
+  projectId: deleteTarget.project.id,
+  confirmTitle: deleteTarget.project.title
+});
+assert.equal(deleteOmittedFiles.ok, false);
+assert.equal(deleteOmittedFiles.code, "PROJECT_INPUT_INVALID");
+const deleteWithoutProjectId = await useCases.deleteProjectWorkspace({
+  projectDirectory: deleteTargetDirectory,
+  confirmTitle: deleteTarget.project.title,
+  deleteFiles: true
+});
+assert.equal(deleteWithoutProjectId.ok, false);
+assert.equal(deleteWithoutProjectId.code, "PROJECT_INPUT_INVALID");
+const deleteWithoutDirectory = await useCases.deleteProjectWorkspace({
+  projectId: deleteTarget.project.id,
+  confirmTitle: deleteTarget.project.title,
+  deleteFiles: true
+});
+assert.equal(deleteWithoutDirectory.ok, false);
+assert.equal(deleteWithoutDirectory.code, "PROJECT_INPUT_INVALID");
+const wrongTitleDelete = await useCases.deleteProjectWorkspace({
+  projectDirectory: deleteTargetDirectory,
+  projectId: "delete-project",
+  confirmTitle: "틀린 제목",
+  deleteFiles: true
+});
+assert.equal(wrongTitleDelete.ok, false);
+assert.equal(wrongTitleDelete.code, "PROJECT_INPUT_INVALID");
+const deletedProject = await useCases.deleteProjectWorkspace({
+  projectDirectory: deleteTargetDirectory,
+  projectId: deleteTarget.project.id,
+  confirmTitle: deleteTarget.project.title,
+  deleteFiles: true
+});
+assert.equal(deletedProject.ok, true);
+assert.equal(deletedProject.action, "deleteProjectWorkspace");
+assert.equal(deletedProject.deletionPolicy.mode, "localProjectFiles");
+assert.equal(deletedProject.deletionPolicy.reversible, false);
+assert.equal(Array.isArray(deletedProject.deletionPolicy.impact), true);
+assert.equal(existsSync(join(deleteTargetDirectory, "project.sqlite")), false);
+
+const brokenDeleteIndexPath = join(tempRoot, "BrokenDeleteIndexAsFile");
+await mkdir(brokenDeleteIndexPath, { recursive: true });
+const brokenDeleteIndexUseCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile: brokenDeleteIndexPath
+});
+const brokenIndexDeleteDirectory = join(tempRoot, "BrokenIndexDelete.vnmaker");
+const brokenIndexDeleteTarget = await brokenDeleteIndexUseCases.createProject({
+  projectDirectory: brokenIndexDeleteDirectory,
+  starter: { id: "broken-index-delete", title: "최근 인덱스 실패 삭제", premise: "삭제 후 인덱스 실패 검증" }
+});
+assert.equal(brokenIndexDeleteTarget.ok, true);
+const deletedWithBrokenRecentIndex = await brokenDeleteIndexUseCases.deleteProjectWorkspace({
+  projectDirectory: brokenIndexDeleteDirectory,
+  projectId: brokenIndexDeleteTarget.project.id,
+  confirmTitle: brokenIndexDeleteTarget.project.title,
+  deleteFiles: true
+});
+assert.equal(deletedWithBrokenRecentIndex.ok, true);
+assert.equal(deletedWithBrokenRecentIndex.recentIndexRemoval.ok, false);
+assert.match(deletedWithBrokenRecentIndex.recentIndexRemoval.error, /EISDIR|illegal operation|directory/i);
+assert.equal(existsSync(join(brokenIndexDeleteDirectory, "project.sqlite")), false);
 
 const malformedEventTextUseCases = useCasesModule.createVnMakerUseCases({
   eventText: {

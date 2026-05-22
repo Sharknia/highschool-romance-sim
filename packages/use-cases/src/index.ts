@@ -42,6 +42,7 @@ import {
 } from "@vn-maker/engine-core";
 import {
   createProjectWorkspace,
+  deleteLocalProjectDirectory,
   openProjectStore,
   projectWorkspaceExists,
   RecentProjectIndexStore,
@@ -111,7 +112,7 @@ export interface EventTextGenerationAdapter {
 }
 
 export interface ProjectImageGenerationInput {
-  kind: Extract<VnMakerAsset["kind"], "portrait" | "expression" | "cg">;
+  kind: Extract<VnMakerAsset["kind"], "portrait" | "expression" | "cg" | "background">;
   targetId: string;
   prompt: string;
   style?: string;
@@ -151,6 +152,7 @@ export type MakerActionId =
   | "reconnectRecentProject"
   | "listRecentProjects"
   | "removeRecentProject"
+  | "deleteProjectWorkspace"
   | "restoreRecentProject"
   | "expandEvent"
   | "approveEvent"
@@ -179,6 +181,12 @@ export interface MakerWorkflowSummary {
   previewState: MakerPreviewState;
   exportState: MakerExportState;
   steps: MakerWorkflowStep[];
+}
+
+export interface ProjectDeletionPolicyDto {
+  mode: "recentIndexOnly" | "localProjectFiles";
+  reversible: boolean;
+  impact: string[];
 }
 
 export type ProjectActionFailureCode =
@@ -529,7 +537,8 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
     return "PROJECT_NOT_FOUND";
   }
   if (
-    code === "PROJECT_ID_RESERVED"
+    code === "PROJECT_INPUT_INVALID"
+    || code === "PROJECT_ID_RESERVED"
     || code === "PROJECT_ID_CONFLICT"
     || code === "PROJECT_NOT_FOUND"
     || code === "PROJECT_DIRECTORY_MISSING"
@@ -593,6 +602,14 @@ function projectDirectoryFrom(input: unknown, fallback: string): string {
   return typeof record.projectDirectory === "string" && record.projectDirectory.trim()
     ? record.projectDirectory
     : fallback;
+}
+
+function requiredProjectDirectoryForDelete(input: unknown): string {
+  const projectDirectory = asRecord(input).projectDirectory;
+  if (typeof projectDirectory !== "string" || !projectDirectory.trim()) {
+    throw projectDeleteInputError("projectDirectory", "삭제할 프로젝트 저장 위치가 필요합니다.");
+  }
+  return projectDirectory.trim();
 }
 
 function sourceProjectDirectoryFrom(input: unknown, fallback: string): string {
@@ -1235,6 +1252,39 @@ async function recordRecentProject(
   }
 }
 
+function messageFromError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function removeRecentProjectAfterLocalDelete(
+  recentProjects: RecentProjectIndexStore,
+  projectId: string
+): Promise<{
+  projects: RecentProjectIndexEntry[];
+  recentIndexRemoval: { ok: true } | { ok: false; error: string };
+}> {
+  try {
+    return {
+      projects: await recentProjects.removeProject(projectId),
+      recentIndexRemoval: { ok: true }
+    };
+  } catch (error) {
+    let projects: RecentProjectIndexEntry[] = [];
+    try {
+      projects = await recentProjects.listProjects();
+    } catch {
+      projects = [];
+    }
+    return {
+      projects,
+      recentIndexRemoval: {
+        ok: false,
+        error: messageFromError(error)
+      }
+    };
+  }
+}
+
 async function resolveProjectDirectoryForOpen(
   recentProjects: RecentProjectIndexStore,
   input: unknown,
@@ -1289,6 +1339,32 @@ function assertProjectIdMatches(input: unknown, project: VnMakerProject, project
       actualProjectId: project.id,
       projectDirectory
     });
+  }
+}
+
+function projectDeleteInputError(path: string, message: string): InputValidationError {
+  return new InputValidationError("프로젝트 삭제 입력이 올바르지 않습니다.", [{ severity: "error", path, message }]);
+}
+
+function assertProjectDeleteConfirmed(input: unknown, project: VnMakerProject): void {
+  const record = asRecord(input);
+  const projectId = typeof record.projectId === "string" ? record.projectId.trim() : "";
+  if (!projectId) {
+    throw projectDeleteInputError("projectId", "프로젝트 ID 확인이 필요합니다.");
+  }
+  if (projectId !== project.id) {
+    throw new ProjectIdMismatchError({
+      expectedProjectId: projectId,
+      actualProjectId: project.id,
+      projectDirectory: projectDirectoryFrom(input, "")
+    });
+  }
+  if (record.deleteFiles !== true) {
+    throw projectDeleteInputError("deleteFiles", "로컬 프로젝트 파일 삭제 확인이 필요합니다.");
+  }
+  const confirmTitle = typeof record.confirmTitle === "string" ? record.confirmTitle.trim() : "";
+  if (confirmTitle !== project.title) {
+    throw projectDeleteInputError("confirmTitle", "프로젝트 제목 확인값이 일치해야 합니다.");
   }
 }
 
@@ -1466,7 +1542,7 @@ function selectGenerationInput(project: VnMakerProject, store: ProjectStore, inp
     || (typeof record.prompt === "string" ? record.prompt : undefined)
     || (heroine ? createHeroinePortraitPrompt(heroine) : "");
 
-  if (!["portrait", "expression", "cg"].includes(kind)) {
+  if (!["portrait", "expression", "cg", "background"].includes(kind)) {
     throw new InputValidationError("image.kind 입력이 올바르지 않습니다.", [{ severity: "error", path: "kind", message: `지원하지 않는 이미지 종류입니다: ${String(kind)}` }]);
   }
   if (!prompt.trim()) {
@@ -1666,8 +1742,61 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const removedProject = await recentProjects.findProject(projectId);
       return withActionState("removeRecentProject", {
         projects: await recentProjects.removeProject(projectId),
-        removedProject
+        removedProject,
+        deletionPolicy: {
+          mode: "recentIndexOnly",
+          reversible: true,
+          impact: ["recentProjectIndex"]
+        } satisfies ProjectDeletionPolicyDto
       });
+    },
+
+    async deleteProjectWorkspace(input: unknown) {
+      const action: Extract<MakerActionId, "deleteProjectWorkspace"> = "deleteProjectWorkspace";
+      let projectDirectory = projectDirectoryFrom(input, "");
+      let project: VnMakerProject | undefined;
+      let resolvedProjectDirectory = projectDirectory;
+      try {
+        projectDirectory = requiredProjectDirectoryForDelete(input);
+        resolvedProjectDirectory = projectDirectory;
+        if (!(await projectWorkspaceExists(projectDirectory))) {
+          const error = new Error("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
+          Object.assign(error, { code: "PROJECT_DIRECTORY_MISSING", projectDirectory });
+          throw error;
+        }
+        const store = await openProjectStore(projectDirectory);
+        try {
+          project = store.requireProject();
+          resolvedProjectDirectory = store.paths.projectDirectory;
+          assertProjectDeleteConfirmed(input, project);
+        } finally {
+          store.close();
+        }
+
+        await deleteLocalProjectDirectory(resolvedProjectDirectory);
+        const { projects, recentIndexRemoval } = await removeRecentProjectAfterLocalDelete(recentProjects, project.id);
+        return withActionState(action, {
+          projectDirectory: resolvedProjectDirectory,
+          projectId: project.id,
+          deletedProject: {
+            id: project.id,
+            title: project.title
+          },
+          projects,
+          recentIndexRemoval,
+          deletionPolicy: {
+            mode: "localProjectFiles",
+            reversible: false,
+            impact: ["projectDirectory", "project.sqlite", "assets", "exports", "cache", "recentProjectIndex"]
+          } satisfies ProjectDeletionPolicyDto
+        }, { project });
+      } catch (error) {
+        const enrichedError = attachProjectFailureContext(error, {
+          projectDirectory: resolvedProjectDirectory,
+          project
+        });
+        return projectActionFailureFromError(enrichedError, action);
+      }
     },
 
     async restoreRecentProject(input: unknown) {

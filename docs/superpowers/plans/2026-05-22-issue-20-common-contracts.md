@@ -33,7 +33,7 @@ No React component, API handler, or CLI command should recompute domain state, d
 - Modify: `packages/engine-core/src/index.ts`
 - Modify: `tests/vn-maker-domain.test.mjs`
 
-- [ ] **Step 1: Write the failing domain test**
+- [x] **Step 1: Write the failing domain test**
 
 Append this assertion after the existing `generationJob` test in `tests/vn-maker-domain.test.mjs`:
 
@@ -63,7 +63,7 @@ const parsedBackgroundJob = core.parseVnMakerProject({
 assert.equal(parsedBackgroundJob.ok, true);
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -73,7 +73,7 @@ npm run build -w @vn-maker/engine-core && node tests/vn-maker-domain.test.mjs
 
 Expected: FAIL with unsupported image generation kind `background`.
 
-- [ ] **Step 3: Add background to core image job schema**
+- [x] **Step 3: Add background to core image job schema**
 
 In `packages/engine-core/src/index.ts`, update:
 
@@ -104,7 +104,7 @@ Also update `parseCreateImageGenerationJobInput()` so the allowed list is:
 ["portrait", "expression", "cg", "background"]
 ```
 
-- [ ] **Step 4: Run test to verify GREEN**
+- [x] **Step 4: Run test to verify GREEN**
 
 Run:
 
@@ -125,7 +125,7 @@ Expected: PASS.
 - Modify: `tests/vn-maker-alpha-sandbox.test.mjs`
 - Modify: `tests/vn-maker-regression.test.mjs`
 
-- [ ] **Step 1: Write the failing use-case assertions**
+- [x] **Step 1: Write the failing use-case assertions**
 
 Append near the existing `generatedPortrait` assertions in `tests/vn-maker-use-cases.test.mjs`:
 
@@ -203,7 +203,7 @@ assert.match(
 );
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -213,7 +213,7 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs && VN_MAKER_ALPHA_
 
 Expected: FAIL because `selectGenerationInput()`, Web API, CLI, or adapter typing rejects `background`.
 
-- [ ] **Step 3: Update shared use-case and Codex adapter types**
+- [x] **Step 3: Update shared use-case and Codex adapter types**
 
 In `packages/use-cases/src/index.ts`, update `ProjectImageGenerationInput.kind` to:
 
@@ -245,7 +245,7 @@ type: "imageGeneration"
 
 Wire the existing Web API route `/api/generation/images` and CLI command `generate-image` to the same `generateImage()` use case. Do not add a background-only domain branch in the handler or CLI.
 
-- [ ] **Step 4: Run use-case test to verify GREEN**
+- [x] **Step 4: Run use-case test to verify GREEN**
 
 Run:
 
@@ -262,7 +262,7 @@ Expected: PASS.
 - Modify: `apps/web/src/client/api/client.ts`
 - Modify: `tests/vn-maker-regression.test.mjs`
 
-- [ ] **Step 1: Write failing bundled client API tests**
+- [x] **Step 1: Write failing bundled client API tests**
 
 In `tests/vn-maker-regression.test.mjs`, after the existing esbuild setup for `client-api.mjs`, add:
 
@@ -364,7 +364,7 @@ try {
 }
 ```
 
-- [ ] **Step 2: Run regression test to verify RED**
+- [x] **Step 2: Run regression test to verify RED**
 
 Run:
 
@@ -374,7 +374,7 @@ npm run build:maker && node tests/vn-maker-regression.test.mjs
 
 Expected: FAIL because `postJson()` throws on network and abort errors and does not set stable error codes.
 
-- [ ] **Step 3: Extend `ApiResult` and parser helpers**
+- [x] **Step 3: Extend `ApiResult` and parser helpers**
 
 In `apps/web/src/client/api/types.ts`, add:
 
@@ -416,7 +416,7 @@ try {
 }
 ```
 
-- [ ] **Step 4: Run regression test to verify GREEN**
+- [x] **Step 4: Run regression test to verify GREEN**
 
 Run:
 
@@ -436,7 +436,7 @@ Expected: PASS.
 - Modify: `tests/vn-maker-use-cases.test.mjs`
 - Modify: `tests/vn-maker-regression.test.mjs`
 
-- [ ] **Step 1: Write failing use-case/API/CLI assertions**
+- [x] **Step 1: Write failing use-case/API/CLI assertions**
 
 Add to `tests/vn-maker-use-cases.test.mjs` after recent-project removal tests:
 
@@ -514,7 +514,7 @@ assert.equal(cliDeleted.ok, true);
 assert.equal(cliDeleted.deletionPolicy.mode, "localProjectFiles");
 ```
 
-- [ ] **Step 2: Run use-case test to verify RED**
+- [x] **Step 2: Run use-case test to verify RED**
 
 Run:
 
@@ -524,7 +524,7 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs
 
 Expected: FAIL because `deleteProjectWorkspace()` and deletion policy DTOs do not exist.
 
-- [ ] **Step 3: Implement the use case and transport adapters**
+- [x] **Step 3: Implement the use case and transport adapters**
 
 In `packages/use-cases/src/index.ts`, add `deleteProjectWorkspace` to `MakerActionId` and return policy DTOs:
 
@@ -560,7 +560,7 @@ Do not call `rm()` directly from the use-case, CLI, API handler, or React client
 
 Wire CLI command `delete-project` and Web API route `/api/projects/delete` to the same use case.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -576,7 +576,7 @@ Expected: PASS.
 - All files modified in Tasks 1-4
 - This plan file
 
-- [ ] **Step 1: Run required verification**
+- [x] **Step 1: Run required verification**
 
 Run:
 
