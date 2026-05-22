@@ -8,6 +8,12 @@ export interface ApiResult {
 export interface CodexSessionResult extends ApiResult {
   connected: boolean;
   mode: string | null;
+  requiresOpenaiAuth?: boolean;
+  capabilities?: {
+    imageGeneration?: boolean;
+    namespaceTools?: boolean;
+    webSearch?: boolean;
+  } | null;
   account?: {
     email?: string;
     planType?: string | null;
@@ -30,6 +36,16 @@ export interface ImagePreviewResult {
     uri?: string;
   };
   asset?: {
+    id?: string;
     uri?: string;
+  };
+}
+
+export interface ImageGenerationResult extends ApiResult, ImagePreviewResult {
+  projectDirectory?: string;
+  job?: {
+    id?: string;
+    outputAssetId?: string;
+    status?: string;
   };
 }

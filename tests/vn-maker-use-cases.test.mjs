@@ -86,6 +86,44 @@ const heroine = core.createHeroineProfile({
   appearance: "단정한 교복."
 });
 
+const emptyLibraryDirectory = join(tempRoot, "EmptyHeroineLibrary.vnmaker");
+const emptyLibrary = await useCases.listHeroines({ projectDirectory: emptyLibraryDirectory });
+assert.equal(emptyLibrary.ok, true);
+assert.deepEqual(emptyLibrary.heroines, []);
+
+async function assertHeroineFieldRequired(field, value = "") {
+  await assert.rejects(
+    () => useCases.saveHeroine({
+      projectDirectory: emptyLibraryDirectory,
+      heroine: {
+        id: "required-contract",
+        name: "필수 검증",
+        description: "필수 필드 검증용 히로인.",
+        personality: "차분하다.",
+        speechStyle: "정중하게 말한다.",
+        appearance: "단정한 교복.",
+        [field]: value
+      }
+    }),
+    (error) => {
+      assert.equal(error.name, "InputValidationError");
+      assert.equal(
+        error.issues.some((issue) => issue.path === field && issue.message.includes("비어 있을 수 없습니다")),
+        true,
+        `${field} 필수값 누락을 검증해야 합니다.`
+      );
+      return true;
+    }
+  );
+}
+
+await assertHeroineFieldRequired("id");
+await assertHeroineFieldRequired("name");
+await assertHeroineFieldRequired("description", "   ");
+await assertHeroineFieldRequired("personality", "   ");
+await assertHeroineFieldRequired("speechStyle", "   ");
+await assertHeroineFieldRequired("appearance", "   ");
+
 const created = await useCases.createProjectFromHeroine({
   projectDirectory,
   heroine,
@@ -95,6 +133,38 @@ const created = await useCases.createProjectFromHeroine({
 assert.equal(created.ok, true);
 assert.equal(created.projectDirectory, projectDirectory);
 assert.equal(created.project.characters.length, 1);
+
+const generatedPortrait = await useCases.generateImage({
+  projectDirectory,
+  kind: "portrait",
+  heroine
+});
+assert.equal(generatedPortrait.ok, true);
+assert.equal(generatedPortrait.asset.id, heroine.defaultPortraitAssetId);
+const heroineWithGeneratedPortrait = await useCases.saveHeroine({
+  projectDirectory,
+  heroine: {
+    ...heroine,
+    defaultPortraitAssetId: generatedPortrait.asset.id,
+    portraitAssetIds: [generatedPortrait.asset.id]
+  }
+});
+assert.equal(heroineWithGeneratedPortrait.ok, true);
+const heroineLibraryAfterPortrait = await useCases.listHeroines({ projectDirectory });
+assert.equal(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.defaultPortraitAssetId, generatedPortrait.asset.id);
+assert.equal(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.defaultPortraitUri, generatedPortrait.asset.uri);
+assert.deepEqual(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.portraitAssetIds, [generatedPortrait.asset.id]);
+
+const deletedLibraryHeroine = await useCases.deleteHeroine({
+  projectDirectory,
+  heroineId: heroine.id
+});
+assert.equal(deletedLibraryHeroine.ok, true);
+assert.equal(deletedLibraryHeroine.heroines.some((item) => item.id === heroine.id), false);
+const openedAfterLibraryDelete = await useCases.openProject({ projectDirectory });
+assert.equal(openedAfterLibraryDelete.project.characters[0].sourceHeroineId, heroine.id);
+assert.equal(openedAfterLibraryDelete.project.characters[0].displayName, heroine.name);
+assert.equal(openedAfterLibraryDelete.project.characters[0].defaultPortraitAssetId, heroine.defaultPortraitAssetId);
 
 const recentAfterCreate = await useCases.listRecentProjects();
 assert.equal(recentAfterCreate.ok, true);

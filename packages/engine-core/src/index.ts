@@ -656,14 +656,12 @@ export function parseHeroineProfileInput(value: unknown): DtoParseResult<CreateH
   if (!isRecord(value)) {
     return parseFail([{ severity: "error", path: "$", message: "heroine 입력은 객체여야 합니다." }]);
   }
+  hasString(value, "id", "id", issues, { nonEmpty: true });
   hasString(value, "name", "name", issues, { nonEmpty: true });
-  hasString(value, "description", "description", issues);
-  hasString(value, "personality", "personality", issues);
-  hasString(value, "speechStyle", "speechStyle", issues);
-  hasString(value, "appearance", "appearance", issues);
-  if (value.id !== undefined && typeof value.id !== "string") {
-    addSchemaIssue(issues, "id", "문자열이어야 합니다.");
-  }
+  hasString(value, "description", "description", issues, { nonEmpty: true });
+  hasString(value, "personality", "personality", issues, { nonEmpty: true });
+  hasString(value, "speechStyle", "speechStyle", issues, { nonEmpty: true });
+  hasString(value, "appearance", "appearance", issues, { nonEmpty: true });
   if (value.defaultPortraitAssetId !== undefined && typeof value.defaultPortraitAssetId !== "string") {
     addSchemaIssue(issues, "defaultPortraitAssetId", "문자열이어야 합니다.");
   }

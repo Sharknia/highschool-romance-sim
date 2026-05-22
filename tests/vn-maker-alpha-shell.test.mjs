@@ -22,6 +22,7 @@ assert.match(
 ["/projects/:projectId", "/projects/:projectId/:tab"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 프로젝트 상세 deep link 라우트가 있어야 합니다.`);
 });
+assert.match(appSource, /<Route path="\/heroines\/:heroineId"/, "`/heroines/:heroineId` 히로인 상세 라우트가 있어야 합니다.");
 assert.doesNotMatch(
   appSource,
   /<Route path="\/" element={<WorkspacePage \/?>} \/>/,
@@ -81,7 +82,44 @@ const projectDetailViewSource = readText(projectDetailViewPath);
 const heroineStartSource = readText("apps/web/src/client/pages/HeroineStartPage.tsx");
 const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
 assert.doesNotMatch(heroineStartSource, /setShellState/, "HeroineStartPage는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
-assert.doesNotMatch(heroineStartSource, /postAuthedJson|\/api\/heroines\//, "HeroineStartPage는 SA-101 히로인 저장 API 범위를 선점하면 안 됩니다.");
+assert.match(heroineStartSource, /\/api\/heroines\/list/, "HeroineStartPage는 히로인 목록 API를 호출해야 합니다.");
+assert.match(heroineStartSource, /\/api\/heroines\/save/, "HeroineStartPage는 히로인 저장 API를 호출해야 합니다.");
+assert.match(heroineStartSource, /\/api\/heroines\/delete/, "HeroineStartPage는 히로인 삭제 API를 호출해야 합니다.");
+assert.match(heroineStartSource, /session/, "HeroineStartPage는 Codex 연결 세션을 읽어야 합니다.");
+assert.match(heroineStartSource, /capabilities/, "HeroineStartPage는 Codex capability를 표시해야 합니다.");
+assert.match(heroineStartSource, /imageGeneration/, "HeroineStartPage는 imageGeneration 가능 여부를 표시해야 합니다.");
+assert.match(heroineStartSource, /\/api\/generation\/images/, "HeroineStartPage는 기본 포트레이트 생성 API를 호출해야 합니다.");
+assert.match(heroineStartSource, /readOnly=\{hasSavedSelection\}/, "저장된 히로인을 편집할 때 ID 필드는 읽기 전용이어야 합니다.");
+assert.match(heroineStartSource, /heroineToSave/, "저장된 히로인을 저장할 때 payload ID는 선택된 원본 ID로 고정해야 합니다.");
+assert.match(heroineStartSource, /idAlreadyExists/, "신규 히로인 생성 시 기존 ID 충돌은 저장 전에 차단해야 합니다.");
+assert.match(heroineStartSource, /defaultPortraitUri/, "저장된 기본 포트레이트 에셋은 실제 asset URI로 선택 시 기존 프리뷰를 복원해야 합니다.");
+assert.doesNotMatch(heroineStartSource, /generatedAssetPreviewUri/, "기본 포트레이트 프리뷰는 존재 여부를 모르는 경로를 추정 렌더링하면 안 됩니다.");
+assert.doesNotMatch(heroineStartSource, /:\s*nextHeroines\[0\]\s*\|\|\s*null/, "신규 히로인 드래프트는 목록 재로딩으로 첫 히로인에 덮이면 안 됩니다.");
+assert.doesNotMatch(heroineStartSource, /API key|API 키/, "API key 흐름을 Codex OAuth 로그인처럼 표현하면 안 됩니다.");
+[
+  "아직 히로인이 없습니다.",
+  "히로인 목록을 불러오는 중입니다.",
+  "히로인 목록을 불러오지 못했습니다.",
+  "히로인을 선택하거나 새로 만드세요.",
+  "필수값을 모두 입력해야 저장할 수 있습니다.",
+  "히로인 ID",
+  "말투",
+  "외형 설명",
+  "Codex 연결",
+  "imageGeneration 가능",
+  "기본 포트레이트 생성",
+  "생성 불가",
+  "기존 프로젝트 스냅샷은 유지됩니다.",
+  "라이브러리 목록에서만 제거됩니다."
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(heroineStartSource, pattern, `HeroineStartPage에 '${requiredText}' 문구가 있어야 합니다.`);
+});
+assert.doesNotMatch(
+  heroineStartSource,
+  /히로인 검색|태그 필터|히로인 정렬|복제|기본 감정|추가 태그/,
+  "Alpha 히로인 화면은 Beta 기능을 전면 노출하면 안 됩니다."
+);
 assert.doesNotMatch(settingsStartSource, /setShellState/, "SettingsStartPage는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
 assert.doesNotMatch(settingsStartSource, /describeSession|session\?|logout\(/, "SettingsStartPage는 SA-108의 Codex 상세/로그아웃 범위를 선점하면 안 됩니다.");
 assert.doesNotMatch(settingsStartSource, /생성 기본값|soft visual novel|Codex imageGeneration/, "SettingsStartPage는 SA-108의 생성 기본값 범위를 선점하면 안 됩니다.");

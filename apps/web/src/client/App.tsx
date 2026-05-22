@@ -36,6 +36,7 @@ export function App() {
               <Route path="/projects/:projectId" element={<ProjectStartPage />} />
               <Route path="/projects/:projectId/:tab" element={<ProjectStartPage />} />
               <Route path="/heroines" element={<HeroineStartPage />} />
+              <Route path="/heroines/:heroineId" element={<HeroineStartPage />} />
               <Route path="/settings" element={<SettingsStartPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
