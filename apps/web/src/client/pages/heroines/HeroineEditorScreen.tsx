@@ -28,6 +28,7 @@ interface HeroineEditorScreenProps {
   conflict?: boolean;
   error?: boolean;
   existingIds?: string[];
+  loading?: boolean;
   notFound?: boolean;
   notFoundTitle?: string;
   onReload?: () => void;
@@ -44,6 +45,7 @@ export function HeroineEditorScreen({
   error = false,
   existingIds,
   eyebrow,
+  loading = false,
   mode,
   notFound = false,
   notFoundTitle = "히로인을 찾을 수 없습니다.",
@@ -63,7 +65,7 @@ export function HeroineEditorScreen({
   title,
   titleId
 }: HeroineEditorScreenProps) {
-  const showEditor = !notFound && !error;
+  const showEditor = !loading && !notFound && !error;
 
   return (
     <section className="app-page heroine-page" aria-labelledby={titleId}>

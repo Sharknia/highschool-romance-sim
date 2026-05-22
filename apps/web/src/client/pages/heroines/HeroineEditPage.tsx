@@ -142,6 +142,7 @@ export function HeroineEditPage() {
       draft={draft}
       error={state === "error"}
       eyebrow="Edit Heroine"
+      loading={state === "loading"}
       mode="edit"
       notFound={state === "notFound"}
       onBackToList={() => navigate("/heroines")}
