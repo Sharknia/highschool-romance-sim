@@ -617,7 +617,10 @@ try {
   const sandboxSession = await sandboxApi({ method: "GET", path: "/api/codex/session" });
   assert.equal(sandboxSession.status, 200);
   assert.equal(sandboxSession.body.connected, true);
-  assert.equal(sandboxSession.body.account.email, "alpha-sandbox@local");
+  assert.equal(sandboxSession.body.mode, "alpha-sandbox");
+  assert.equal(sandboxSession.body.account, null);
+  assert.equal(sandboxSession.body.sandbox.provenance, "alpha-sandbox-pack@0.1.0");
+  assert.doesNotMatch(String(sandboxSession.body.note), /Codex OAuth 로그인처럼/);
   const sandboxImage = await sandboxApi({
     method: "POST",
     path: "/api/generation/images",
@@ -632,6 +635,7 @@ try {
   assert.equal(sandboxImage.status, 200);
   assert.equal(sandboxImage.body.job.status, "completed");
   assert.equal(sandboxImage.body.job.provider, "mock-adapter");
+  assert.equal(sandboxImage.body.raw.provenance, "alpha-sandbox-pack@0.1.0");
   assert.match(sandboxImage.body.image.uri, /^\/generated-assets\//);
 } finally {
   if (previousAlphaSandboxEnv === undefined) {
@@ -890,7 +894,7 @@ const cliExpandOutput = execFileSync(process.execPath, ["packages/cli/dist/index
     userEvent: "방과 후 복도에서 우연히 마주치고 노멀 엔딩으로 끝나는 짧은 이벤트"
   }),
   encoding: "utf8",
-  env: { ...process.env, VN_MAKER_EVENT_TEXT_ADAPTER: "deterministic" }
+  env: { ...process.env, VN_MAKER_ALPHA_SANDBOX: "1" }
 });
 const cliExpand = JSON.parse(cliExpandOutput);
 assert.equal(cliExpand.ok, true);
