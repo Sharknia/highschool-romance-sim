@@ -463,12 +463,16 @@ async function recordRecentProject(
     validation: { ok: boolean };
   }
 ): Promise<void> {
-  await recentProjects.upsertProject({
-    projectId: input.project.id,
-    projectDirectory: input.projectDirectory,
-    title: input.project.title,
-    validationState: validationStateFrom(input.validation)
-  });
+  try {
+    await recentProjects.upsertProject({
+      projectId: input.project.id,
+      projectDirectory: input.projectDirectory,
+      title: input.project.title,
+      validationState: validationStateFrom(input.validation)
+    });
+  } catch {
+    // Recent projects are an auxiliary index; project creation/opening must not fail because this write failed.
+  }
 }
 
 async function resolveProjectDirectoryForOpen(

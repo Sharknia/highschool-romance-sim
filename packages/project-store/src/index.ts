@@ -647,6 +647,22 @@ async function writeRecentProjectEntries(indexFilePath: string, projects: Recent
   await writeFile(indexFilePath, `${JSON.stringify({ projects }, null, 2)}\n`, "utf8");
 }
 
+const recentProjectIndexQueues = new Map<string, Promise<unknown>>();
+
+async function withRecentProjectIndexQueue<T>(indexFilePath: string, operation: () => Promise<T>): Promise<T> {
+  const previous = recentProjectIndexQueues.get(indexFilePath) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  const queued = next.catch(() => undefined);
+  recentProjectIndexQueues.set(indexFilePath, queued);
+  try {
+    return await next;
+  } finally {
+    if (recentProjectIndexQueues.get(indexFilePath) === queued) {
+      recentProjectIndexQueues.delete(indexFilePath);
+    }
+  }
+}
+
 export async function projectWorkspaceExists(projectDirectory: string): Promise<boolean> {
   try {
     const paths = resolveProjectWorkspacePaths(projectDirectory);
@@ -665,7 +681,7 @@ export class RecentProjectIndexStore {
   private readonly clock: () => Date;
 
   constructor(options: RecentProjectIndexStoreOptions = {}) {
-    this.indexFilePath = options.indexFilePath || getDefaultRecentProjectIndexPath();
+    this.indexFilePath = resolve(options.indexFilePath || getDefaultRecentProjectIndexPath());
     this.clock = options.clock || (() => new Date());
   }
 
@@ -682,15 +698,17 @@ export class RecentProjectIndexStore {
   }
 
   async listProjects(): Promise<RecentProjectIndexEntry[]> {
-    const entries = await this.readEntries();
-    const refreshed = await Promise.all(entries.map(async (entry) => ({
-      ...entry,
-      missing: !(await projectWorkspaceExists(entry.projectDirectory))
-    })));
-    if (JSON.stringify(entries) !== JSON.stringify(refreshed)) {
-      await this.writeEntries(refreshed);
-    }
-    return refreshed;
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const refreshed = await Promise.all(entries.map(async (entry) => ({
+        ...entry,
+        missing: !(await projectWorkspaceExists(entry.projectDirectory))
+      })));
+      if (JSON.stringify(entries) !== JSON.stringify(refreshed)) {
+        await this.writeEntries(refreshed);
+      }
+      return refreshed;
+    });
   }
 
   async findProject(projectId: string): Promise<RecentProjectIndexEntry | null> {
@@ -698,38 +716,44 @@ export class RecentProjectIndexStore {
   }
 
   async upsertProject(input: UpsertRecentProjectInput): Promise<RecentProjectIndexEntry[]> {
-    const entries = await this.readEntries();
-    const previous = entries.find((entry) => entry.projectId === input.projectId);
-    const now = this.now();
-    const entry: RecentProjectIndexEntry = {
-      projectId: input.projectId,
-      projectDirectory: resolveProjectWorkspacePaths(input.projectDirectory).projectDirectory,
-      title: input.title,
-      lastOpenedAt: now,
-      lastValidatedAt: input.lastValidatedAt || (input.validationState ? now : previous?.lastValidatedAt),
-      validationState: input.validationState || previous?.validationState || "unchecked",
-      missing: false
-    };
-    const nextEntries = [
-      entry,
-      ...entries.filter((item) => item.projectId !== input.projectId)
-    ].sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt));
-    await this.writeEntries(nextEntries);
-    return nextEntries;
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const previous = entries.find((entry) => entry.projectId === input.projectId);
+      const now = this.now();
+      const entry: RecentProjectIndexEntry = {
+        projectId: input.projectId,
+        projectDirectory: resolveProjectWorkspacePaths(input.projectDirectory).projectDirectory,
+        title: input.title,
+        lastOpenedAt: now,
+        lastValidatedAt: input.lastValidatedAt || (input.validationState ? now : previous?.lastValidatedAt),
+        validationState: input.validationState || previous?.validationState || "unchecked",
+        missing: false
+      };
+      const nextEntries = [
+        entry,
+        ...entries.filter((item) => item.projectId !== input.projectId)
+      ].sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt));
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
   }
 
   async markProjectMissing(projectId: string, missing = true): Promise<RecentProjectIndexEntry[]> {
-    const entries = await this.readEntries();
-    const nextEntries = entries.map((entry) => entry.projectId === projectId ? { ...entry, missing } : entry);
-    await this.writeEntries(nextEntries);
-    return nextEntries;
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const nextEntries = entries.map((entry) => entry.projectId === projectId ? { ...entry, missing } : entry);
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
   }
 
   async removeProject(projectId: string): Promise<RecentProjectIndexEntry[]> {
-    const entries = await this.readEntries();
-    const nextEntries = entries.filter((entry) => entry.projectId !== projectId);
-    await this.writeEntries(nextEntries);
-    return nextEntries;
+    return withRecentProjectIndexQueue(this.indexFilePath, async () => {
+      const entries = await this.readEntries();
+      const nextEntries = entries.filter((entry) => entry.projectId !== projectId);
+      await this.writeEntries(nextEntries);
+      return nextEntries;
+    });
   }
 }
 

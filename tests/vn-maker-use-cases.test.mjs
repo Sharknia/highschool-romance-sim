@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -57,6 +57,25 @@ const useCases = useCasesModule.createVnMakerUseCases({
     }
   }
 });
+
+const concurrentRecentProjectCount = 16;
+const concurrentRecentProjectIndexFile = join(tempRoot, "concurrent-recent-projects.json");
+await Promise.all(Array.from({ length: concurrentRecentProjectCount }, async (_, index) => {
+  const store = new projectStoreModule.RecentProjectIndexStore({
+    indexFilePath: concurrentRecentProjectIndexFile,
+    clock: () => new Date(Date.UTC(2026, 0, 1, 0, 0, index))
+  });
+  await store.upsertProject({
+    projectId: `concurrent-${index}`,
+    projectDirectory: join(tempRoot, `Concurrent${index}.vnmaker`),
+    title: `Concurrent ${index}`,
+    validationState: "valid"
+  });
+}));
+const concurrentRecentProjects = await new projectStoreModule.RecentProjectIndexStore({
+  indexFilePath: concurrentRecentProjectIndexFile
+}).listProjects();
+assert.equal(concurrentRecentProjects.length, concurrentRecentProjectCount);
 
 const heroine = core.createHeroineProfile({
   id: "haru",
@@ -289,6 +308,20 @@ assert.equal(generated.asset.id, plannedJob.outputAssetId);
 const opened = await useCases.openProject({ projectDirectory });
 assert.equal(opened.ok, true);
 assert.equal(opened.project.assets.some((asset) => asset.id === plannedJob.outputAssetId), true);
+
+const readOnlyRecentIndexDirectory = join(tempRoot, "ReadOnlyRecentIndex");
+await mkdir(readOnlyRecentIndexDirectory, { recursive: true });
+await chmod(readOnlyRecentIndexDirectory, 0o500);
+try {
+  const readOnlyRecentIndexUseCases = useCasesModule.createVnMakerUseCases({
+    recentProjectIndexFile: join(readOnlyRecentIndexDirectory, "recent-projects.json")
+  });
+  const openedWithReadOnlyRecentIndex = await readOnlyRecentIndexUseCases.openProject({ projectDirectory });
+  assert.equal(openedWithReadOnlyRecentIndex.ok, true);
+  assert.equal(openedWithReadOnlyRecentIndex.project.id, created.project.id);
+} finally {
+  await chmod(readOnlyRecentIndexDirectory, 0o700);
+}
 
 const openedByProjectId = await useCases.openProject({ projectId: created.project.id });
 assert.equal(openedByProjectId.ok, true);
