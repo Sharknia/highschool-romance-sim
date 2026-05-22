@@ -152,6 +152,17 @@ const projectPageTypesSource = readText("apps/web/src/client/pages/projects/proj
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
 const clientStylesSource = readText("apps/web/src/client/styles.css");
+const detailTabsBlock = projectPageTypesSource.match(/export const detailTabs = \[[\s\S]*?\] as const;/)?.[0] || "";
+const visibleShellStart = projectDetailViewSource.indexOf("<TabList");
+const visibleShellEnd = projectDetailViewSource.indexOf('activeTab === "preview"', visibleShellStart);
+const visibleShellBlock = visibleShellStart >= 0 && visibleShellEnd > visibleShellStart
+  ? projectDetailViewSource.slice(visibleShellStart, visibleShellEnd)
+  : projectDetailViewSource;
+const studioStart = projectDetailViewSource.indexOf('data-testid="studio-under-construction"');
+const studioEndCandidate = studioStart >= 0 ? projectDetailViewSource.indexOf('activeTab === "background"', studioStart) : -1;
+const studioBranch = studioStart >= 0 && studioEndCandidate > studioStart
+  ? projectDetailViewSource.slice(studioStart, studioEndCandidate)
+  : "";
 assert.match(recentProjectListSource, /ContentList/, "RecentProjectList는 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(
   projectStartSource.includes('type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";'),
@@ -221,7 +232,7 @@ assert.doesNotMatch(projectStartSource, /confirmationTitle:\s*confirmationTitle\
   assert.match(projectDetailViewSource, new RegExp(`activeTab === "${tab}"`), `${tab} 탭 body가 있어야 합니다.`);
 });
 ["event", "assets"].forEach((legacyTab) => {
-  assert.doesNotMatch(projectPageTypesSource, new RegExp(`id: "${legacyTab}"`), `${legacyTab}는 Alpha visible IA 탭이면 안 됩니다.`);
+  assert.doesNotMatch(detailTabsBlock, new RegExp(`id: "${legacyTab}"`), `${legacyTab}는 Alpha visible IA 탭이면 안 됩니다.`);
 });
 assert.doesNotMatch(projectDetailViewSource, /project-tab-list/, "ProjectDetailView는 로컬 project-tab-list를 렌더링하면 안 됩니다.");
 assert.match(projectDetailViewSource, /<TabList/, "ProjectDetailView는 중앙 TabList를 사용해야 합니다.");
@@ -265,6 +276,28 @@ assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:project
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `배경 화면 생성 탭에 '${requiredText}' 처리가 있어야 합니다.`);
+});
+[
+  'data-testid="studio-under-construction"',
+  'activeTab === "studio"',
+  "제작 탭은 준비 중입니다.",
+  "시나리오 작성",
+  "분기 편집",
+  "장면 구성",
+  "실제 동작하지 않는 제작 버튼은 제공하지 않습니다."
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `제작 탭에 '${requiredText}' 표시가 있어야 합니다.`);
+});
+[
+  "이벤트 제안 받기",
+  "제안 승인",
+  "가짜 진행",
+  "완료율",
+  "제작 시작"
+].forEach((blockedText) => {
+  const pattern = new RegExp(blockedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.doesNotMatch(studioBranch, pattern, `studio 탭은 '${blockedText}'를 노출하면 안 됩니다.`);
 });
 [
   "detail-tab-grid",
@@ -351,23 +384,17 @@ assert.match(projectDetailViewSource, /<Button/, "Project detail actions must us
 });
 assert.doesNotMatch(projectDetailViewSource, /후속 이슈에서 편집 흐름을 연결합니다/, "히로인 탭은 placeholder가 아니라 실제 배정 흐름이어야 합니다.");
 [
-  "/api/events/expand",
-  "/api/events/approve",
-  "blockedNoHeroine",
-  "patchPending",
-  "patchInvalid",
-  "patchStale",
-  "baseProjectHash",
+  "/event",
+  "/assets",
+  "goToEvent",
+  "goToAssets",
+  "제작/이벤트로 이동",
   "이벤트 제안 받기",
   "제안 승인",
-  "제안 취소",
-  "바뀔 내용",
-  "문제 확인",
-  "Alpha는 작은 이벤트 삽입만 허용",
-  "CG 작업이 있으면 배경 화면 생성 탭으로 이동합니다."
-].forEach((requiredText) => {
-  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  assert.match(projectDetailViewSource, pattern, `ProjectDetailView 이벤트 탭에 '${requiredText}' 흐름이 있어야 합니다.`);
+  "CG 작업이 있으면 에셋/생성 탭으로 이동합니다."
+].forEach((legacyVisibleText) => {
+  const pattern = new RegExp(legacyVisibleText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.doesNotMatch(visibleShellBlock, pattern, `visible ProjectDetailView에 '${legacyVisibleText}'가 남으면 안 됩니다.`);
 });
 assert.doesNotMatch(projectDetailViewSource, /제작\/이벤트 탭입니다\. 자연어 이벤트 패치를 연결합니다\./, "이벤트 탭은 placeholder가 아니라 실제 제안-검토-승인 흐름이어야 합니다.");
 [

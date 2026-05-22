@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Heart, Image as ImageIcon, ListChecks, Play, RefreshCw, Sparkles, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Heart, Image as ImageIcon, Play, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -868,100 +868,16 @@ export function ProjectDetailView({
           </div>
         ) : null}
         {activeTab === "studio" ? (
-          <div className="detail-tab-grid">
-            <section className="detail-card">
-              <h3>이벤트 제안</h3>
-              <span className="state-chip">{eventStateLabel(eventDisplayState)}</span>
-              {eventDisplayState === "blockedNoHeroine" ? (
-                <>
-                  <p>히로인 1명을 먼저 선택해야 합니다.</p>
-                  <Button icon={<Heart size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/heroine`)} variant="primary">
-                    히로인 스냅샷으로 이동
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <label className="field-row">
-                    <span>루트</span>
-                    <select disabled={eventBusy || Boolean(pendingPatch)} onChange={(event) => setSelectedRouteId(event.target.value)} value={currentRoute?.id || ""}>
-                      {projectRoutes.map((route) => <option key={route.id} value={route.id}>{routeLabel(route)}</option>)}
-                    </select>
-                  </label>
-                  <label className="field-row">
-                    <span>삽입 기준 씬</span>
-                    <select disabled={eventBusy || Boolean(pendingPatch)} onChange={(event) => setSelectedSceneId(event.target.value)} value={currentEventScene?.id || ""}>
-                      {projectScenes.map((scene) => <option key={scene.id} value={scene.id}>{sceneLabel(scene)}</option>)}
-                    </select>
-                  </label>
-                  <label className="field-row">
-                    <span>자연어 이벤트</span>
-                    <textarea className="event-prompt-input" disabled={eventBusy || Boolean(pendingPatch)} onChange={(event) => setEventPrompt(event.target.value)} placeholder="예: 방과 후 도서관에서 책을 고르다 손이 겹치고 서로의 속마음을 짧게 확인한다." value={eventPrompt} />
-                  </label>
-                  <p className="page-muted">Alpha는 작은 이벤트 삽입만 허용합니다. 씬 3개, 선택지 2개, CG 1개까지 제안합니다.</p>
-                  <div className="button-row">
-                    <Button disabled={!canExpandEvent} icon={<Sparkles size={16} />} onClick={() => void expandProjectEvent()} variant="primary">
-                      이벤트 제안 받기
-                    </Button>
-                    {pendingPatch ? (
-                      <Button disabled={eventBusy} icon={<XCircle size={16} />} onClick={cancelPendingEventPatch} variant="ghost">
-                        제안 취소
-                      </Button>
-                    ) : null}
-                  </div>
-                </>
-              )}
-            </section>
-            <section className="detail-card">
-              <h3>제안 요약</h3>
-              {pendingPatch ? (
-                <dl className="summary-list">
-                  <div><dt>요약</dt><dd>{pendingPatch.plan.summary || "요약 없음"}</dd></div>
-                  <div><dt>씬/선택지/CG</dt><dd>{pendingPatch.plan.decision?.sceneCount || 0} / {pendingPatch.plan.decision?.choiceCount || 0} / {pendingPatch.plan.decision?.cgCount || 0}</dd></div>
-                  <div><dt>baseProjectHash</dt><dd>{pendingPatch.request.baseProjectHash || pendingPatch.baseProjectHash || "기록 없음"}</dd></div>
-                  <div><dt>patchHistory</dt><dd>{pendingPatch.patchHistoryEntry?.id || "기록 없음"}</dd></div>
-                </dl>
-              ) : (
-                <p className="page-muted">아직 검토할 제안이 없습니다. 자연어 이벤트를 입력해 먼저 제안을 받으세요.</p>
-              )}
-            </section>
-            <section className="detail-card">
-              <h3>바뀔 내용</h3>
-              {pendingDiff ? (
-                <>
-                  <p>{pendingDiff.text || "변경 요약 없음"}</p>
-                  <ul className="compact-list">
-                    {(pendingDiff.operations || []).map((operation) => <li key={operation}>{operation}</li>)}
-                  </ul>
-                  <div className="button-row">
-                    <Button disabled={!canApproveEvent} icon={<CheckCircle2 size={16} />} onClick={() => void approveProjectEvent()} variant="primary">
-                      제안 승인
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <p className="page-muted">제안을 승인하기 전까지 프로젝트 원본은 변경되지 않습니다.</p>
-              )}
-            </section>
-            <section className="detail-card">
-              <h3>문제 확인</h3>
-              <div className={eventDisplayState === "patchInvalid" || eventDisplayState === "patchStale" ? "inline-status warning" : "inline-status success"}>
-                {eventStatus}
-              </div>
-              {visibleEventIssues.length ? (
-                <ul className="compact-list">
-                  {visibleEventIssues.map((issue) => <li key={`${issue.path || "issue"}-${issue.message || ""}`}>{issueText(issue)}</li>)}
-                </ul>
-              ) : (
-                <p className="page-muted">현재 표시할 문제가 없습니다.</p>
-              )}
-              {eventDisplayState === "patchStale" ? (
-                <p className="page-muted">패치 생성 기준 프로젝트와 현재 프로젝트가 다릅니다. 제안을 취소한 뒤 최신 프로젝트 기준으로 다시 제안받으세요.</p>
-              ) : null}
-              <p className="page-muted">제안 단계는 프로젝트 원본을 바꾸지 않고, 승인할 때만 적용합니다.</p>
-              <p className="page-muted">CG 작업이 있으면 배경 화면 생성 탭으로 이동합니다.</p>
-              <Button icon={<ListChecks size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/overview`)} variant="ghost">
-                상태 요약 보기
-              </Button>
+          <div className="detail-tab-grid" data-testid="studio-under-construction">
+            <section className="detail-card detail-card-wide">
+              <h3>제작 탭은 준비 중입니다.</h3>
+              <p>Alpha에서는 시나리오 작성, 분기 편집, 장면 구성 흐름이 이 영역에 들어올 예정입니다.</p>
+              <ul className="compact-list">
+                <li>시나리오 작성: 프로젝트 스냅샷과 배경 에셋을 바탕으로 장면 초안을 다룹니다.</li>
+                <li>분기 편집: 선택지와 엔딩 도달 상태를 시각적으로 조정합니다.</li>
+                <li>장면 구성: 대사, 배경, 캐릭터 표시를 한 장면 단위로 편집합니다.</li>
+              </ul>
+              <div className="inline-status">실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
             </section>
           </div>
         ) : null}
