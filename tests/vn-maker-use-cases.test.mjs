@@ -14,6 +14,7 @@ const manualProjectDirectory = join(tempRoot, "ManualScenes.vnmaker");
 const preserveNextProjectDirectory = join(tempRoot, "PreserveNext.vnmaker");
 const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
 const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
+const heroineContractDirectory = join(tempRoot, "HeroineContract.vnmaker");
 const recentProjectIndexFile = join(tempRoot, "recent-projects.json");
 const useCases = useCasesModule.createVnMakerUseCases({
   recentProjectIndexFile,
@@ -92,28 +93,25 @@ assert.equal(emptyLibrary.ok, true);
 assert.deepEqual(emptyLibrary.heroines, []);
 
 async function assertHeroineFieldRequired(field, value = "") {
-  await assert.rejects(
-    () => useCases.saveHeroine({
-      projectDirectory: emptyLibraryDirectory,
-      heroine: {
-        id: "required-contract",
-        name: "필수 검증",
-        description: "필수 필드 검증용 히로인.",
-        personality: "차분하다.",
-        speechStyle: "정중하게 말한다.",
-        appearance: "단정한 교복.",
-        [field]: value
-      }
-    }),
-    (error) => {
-      assert.equal(error.name, "InputValidationError");
-      assert.equal(
-        error.issues.some((issue) => issue.path === field && issue.message.includes("비어 있을 수 없습니다")),
-        true,
-        `${field} 필수값 누락을 검증해야 합니다.`
-      );
-      return true;
+  const result = await useCases.createHeroine({
+    projectDirectory: emptyLibraryDirectory,
+    heroine: {
+      id: "required-contract",
+      name: "필수 검증",
+      description: "필수 필드 검증용 히로인.",
+      personality: "차분하다.",
+      speechStyle: "정중하게 말한다.",
+      appearance: "단정한 교복.",
+      [field]: value
     }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "HEROINE_INPUT_INVALID");
+  assert.equal(result.retryable, false);
+  assert.equal(
+    result.issues.some((issue) => issue.path === field && issue.message.includes("비어 있을 수 없습니다")),
+    true,
+    `${field} 필수값 누락을 검증해야 합니다.`
   );
 }
 
@@ -123,6 +121,128 @@ await assertHeroineFieldRequired("description", "   ");
 await assertHeroineFieldRequired("personality", "   ");
 await assertHeroineFieldRequired("speechStyle", "   ");
 await assertHeroineFieldRequired("appearance", "   ");
+
+const contractHeroine = core.createHeroineProfile({
+  id: "aoi",
+  name: "아오이",
+  description: "학생회에서 차분하게 일을 정리하는 친구.",
+  personality: "침착하고 책임감이 강하다.",
+  speechStyle: "정중하지만 가끔 농담을 섞는다.",
+  appearance: "남색 카디건과 단정한 단발머리."
+});
+const contractCreated = await useCases.createHeroine({
+  requestId: "heroine-create-aoi",
+  projectDirectory: heroineContractDirectory,
+  heroine: contractHeroine
+});
+assert.equal(contractCreated.ok, true);
+assert.equal(contractCreated.heroine.id, "aoi");
+assert.equal(contractCreated.heroineRevision.kind, "heroineRevision");
+assert.equal(contractCreated.heroineRevision.heroineId, "aoi");
+assert.equal(contractCreated.libraryRevision.kind, "heroineLibraryRevision");
+assert.equal(typeof contractCreated.heroine.updatedAt, "string");
+
+const duplicateCreate = await useCases.createHeroine({
+  requestId: "heroine-create-aoi-duplicate",
+  projectDirectory: heroineContractDirectory,
+  heroine: contractHeroine
+});
+assert.equal(duplicateCreate.ok, false);
+assert.equal(duplicateCreate.code, "HEROINE_ID_CONFLICT");
+assert.equal(duplicateCreate.requestId, "heroine-create-aoi-duplicate");
+assert.equal(duplicateCreate.retryable, false);
+
+const reservedCreate = await useCases.createHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroine: { ...contractHeroine, id: "new", name: "예약어" }
+});
+assert.equal(reservedCreate.ok, false);
+assert.equal(reservedCreate.code, "HEROINE_ID_RESERVED");
+
+const invalidIdCreate = await useCases.createHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroine: { ...contractHeroine, id: "bad id", name: "잘못된 ID" }
+});
+assert.equal(invalidIdCreate.ok, false);
+assert.equal(invalidIdCreate.code, "HEROINE_INPUT_INVALID");
+
+const contractList = await useCases.listHeroines({ projectDirectory: heroineContractDirectory });
+assert.equal(contractList.ok, true);
+assert.equal(contractList.count, 1);
+assert.equal(contractList.empty, false);
+assert.equal(contractList.sort, "updatedAtDesc");
+assert.equal(contractList.heroines[0].portraitStatus, "missing");
+assert.equal(contractList.heroines[0].heroineRevision.value, contractCreated.heroineRevision.value);
+
+const contractFetched = await useCases.getHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi"
+});
+assert.equal(contractFetched.ok, true);
+assert.equal(contractFetched.heroine.name, "아오이");
+assert.equal(contractFetched.heroineRevision.value, contractCreated.heroineRevision.value);
+
+const missingHeroine = await useCases.getHeroine({
+  requestId: "heroine-missing",
+  projectDirectory: heroineContractDirectory,
+  heroineId: "missing-heroine"
+});
+assert.equal(missingHeroine.ok, false);
+assert.equal(missingHeroine.code, "HEROINE_NOT_FOUND");
+assert.equal(missingHeroine.requestId, "heroine-missing");
+
+const contractUpdated = await useCases.updateHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroine: { ...contractHeroine, name: "아오이 수정" },
+  expectedHeroineRevision: contractFetched.heroineRevision
+});
+assert.equal(contractUpdated.ok, true);
+assert.equal(contractUpdated.heroine.name, "아오이 수정");
+assert.notEqual(contractUpdated.heroineRevision.value, contractFetched.heroineRevision.value);
+
+const staleUpdate = await useCases.updateHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroine: { ...contractHeroine, name: "아오이 충돌" },
+  expectedHeroineRevision: contractFetched.heroineRevision
+});
+assert.equal(staleUpdate.ok, false);
+assert.equal(staleUpdate.code, "HEROINE_REVISION_CONFLICT");
+assert.equal(staleUpdate.retryable, true);
+
+const staleDelete = await useCases.deleteHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi",
+  confirmName: "아오이 수정",
+  confirmId: "aoi",
+  expectedHeroineRevision: contractFetched.heroineRevision
+});
+assert.equal(staleDelete.ok, false);
+assert.equal(staleDelete.code, "HEROINE_REVISION_CONFLICT");
+
+const currentAoi = await useCases.getHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi"
+});
+const deletedAoi = await useCases.deleteHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi",
+  confirmName: "아오이 수정",
+  confirmId: "aoi",
+  expectedHeroineRevision: currentAoi.heroineRevision
+});
+assert.equal(deletedAoi.ok, true);
+assert.equal(deletedAoi.deletedHeroineId, "aoi");
+assert.equal(deletedAoi.snapshotPolicy, "projectSnapshotsPreserved");
+assert.equal(deletedAoi.heroines.some((item) => item.id === "aoi"), false);
+
+const deletedAgain = await useCases.deleteHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi",
+  confirmName: "아오이 수정",
+  confirmId: "aoi"
+});
+assert.equal(deletedAgain.ok, false);
+assert.equal(deletedAgain.code, "HEROINE_NOT_FOUND");
 
 const created = await useCases.createProjectFromHeroine({
   projectDirectory,

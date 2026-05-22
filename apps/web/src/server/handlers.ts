@@ -11,7 +11,9 @@ import { sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSessi
 import { resolveProjectWorkspacePaths } from "@vn-maker/project-store";
 import {
   createVnMakerUseCases,
+  heroineFailureStatus,
   InputValidationError,
+  isHeroineActionFailure,
   type EventTextGenerationAdapter,
   type ProjectImageGenerationAdapter,
   type ProjectImageGenerationInput,
@@ -155,16 +157,21 @@ async function readRequestJson(context: { req: { json(): Promise<unknown> } }): 
   }
 }
 
-function jsonResponse(body: Record<string, unknown>, status = 200): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body, null, 2), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8" }
   });
 }
 
-async function jsonRoute(operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<Response> {
+function statusForBody(body: unknown): number {
+  return isHeroineActionFailure(body) ? heroineFailureStatus(body.code) : 200;
+}
+
+async function jsonRoute(operation: () => Promise<unknown> | unknown): Promise<Response> {
   try {
-    return jsonResponse(await operation());
+    const body = await operation();
+    return jsonResponse(body, statusForBody(body));
   } catch (error) {
     return jsonResponse(errorBody(error), statusForError(error));
   }
@@ -172,7 +179,7 @@ async function jsonRoute(operation: () => Promise<Record<string, unknown>> | Rec
 
 async function jsonBodyRoute(
   context: Context,
-  operation: (body: unknown) => Promise<Record<string, unknown>> | Record<string, unknown>
+  operation: (body: unknown) => Promise<unknown> | unknown
 ): Promise<Response> {
   const body = await readRequestJson(context);
   return jsonRoute(() => operation(body));
@@ -228,7 +235,19 @@ class ApiServices {
     return this.useCases.listHeroines(body);
   }
 
-  saveHeroine(body: unknown): Promise<Record<string, unknown>> {
+  getHeroine(body: unknown): Promise<unknown> {
+    return this.useCases.getHeroine(body);
+  }
+
+  createHeroine(body: unknown): Promise<unknown> {
+    return this.useCases.createHeroine(body);
+  }
+
+  updateHeroine(body: unknown): Promise<unknown> {
+    return this.useCases.updateHeroine(body);
+  }
+
+  saveHeroine(body: unknown): Promise<unknown> {
     return this.useCases.saveHeroine(body);
   }
 
@@ -236,12 +255,16 @@ class ApiServices {
     return this.useCases.cloneHeroine(body);
   }
 
-  deleteHeroine(body: unknown): Promise<Record<string, unknown>> {
+  deleteHeroine(body: unknown): Promise<unknown> {
     return this.useCases.deleteHeroine(body);
   }
 
   createProjectFromHeroine(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.createProjectFromHeroine(body);
+  }
+
+  generateHeroinePortrait(body: unknown): Promise<unknown> {
+    return this.useCases.generateHeroinePortrait(body);
   }
 
   openProject(body: unknown): Promise<Record<string, unknown>> {
@@ -352,9 +375,13 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/starter", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
   app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
   app.post("/api/heroines/list", (context) => jsonBodyRoute(context, (body) => services.listHeroines(body)));
+  app.post("/api/heroines/get", (context) => jsonBodyRoute(context, (body) => services.getHeroine(body)));
+  app.post("/api/heroines/create", (context) => jsonBodyRoute(context, (body) => services.createHeroine(body)));
+  app.post("/api/heroines/update", (context) => jsonBodyRoute(context, (body) => services.updateHeroine(body)));
   app.post("/api/heroines/save", (context) => jsonBodyRoute(context, (body) => services.saveHeroine(body)));
   app.post("/api/heroines/clone", (context) => jsonBodyRoute(context, (body) => services.cloneHeroine(body)));
   app.post("/api/heroines/delete", (context) => jsonBodyRoute(context, (body) => services.deleteHeroine(body)));
+  app.post("/api/heroines/portrait/generate", (context) => jsonBodyRoute(context, (body) => services.generateHeroinePortrait(body)));
   app.post("/api/projects/from-heroine", (context) => jsonBodyRoute(context, (body) => services.createProjectFromHeroine(body)));
   app.post("/api/project/characters", (context) => jsonBodyRoute(context, (body) => services.saveCharacter(body)));
   app.post("/api/project/scenes", (context) => jsonBodyRoute(context, (body) => services.saveScene(body)));

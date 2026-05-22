@@ -66,6 +66,11 @@ export interface RecentProjectIndexStoreOptions {
   clock?: () => Date;
 }
 
+export interface StoredHeroineProfile extends HeroineProfile {
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UpsertRecentProjectInput {
   projectId: string;
   projectDirectory: string;
@@ -218,6 +223,8 @@ interface HeroineRow {
   tags_json: string | null;
   reuse_history_json: string | null;
   position: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface RouteRow {
@@ -518,6 +525,14 @@ function heroineFromRow(row: HeroineRow): HeroineProfile {
     expressionAssetIds: parseJson<Record<string, string>>(row.expression_asset_ids_json, {}),
     tags: parseJson<string[]>(row.tags_json, []),
     reuseHistory: parseJson<HeroineReuseRecord[]>(row.reuse_history_json, [])
+  };
+}
+
+function storedHeroineFromRow(row: HeroineRow): StoredHeroineProfile {
+  return {
+    ...heroineFromRow(row),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -965,14 +980,34 @@ ORDER BY position ASC, id ASC
   listHeroines(): HeroineProfile[] {
     const rows = this.db.prepare(`
 SELECT id, name, description, personality, speech_style, appearance, default_portrait_asset_id,
-  portrait_asset_ids_json, expression_asset_ids_json, tags_json, reuse_history_json, position
+  portrait_asset_ids_json, expression_asset_ids_json, tags_json, reuse_history_json, position, created_at, updated_at
 FROM heroine_library
 ORDER BY position ASC, id ASC
 `).all() as HeroineRow[];
     return rows.map(heroineFromRow);
   }
 
-  saveHeroine(heroine: HeroineProfile): HeroineProfile {
+  listHeroineEntries(): StoredHeroineProfile[] {
+    const rows = this.db.prepare(`
+SELECT id, name, description, personality, speech_style, appearance, default_portrait_asset_id,
+  portrait_asset_ids_json, expression_asset_ids_json, tags_json, reuse_history_json, position, created_at, updated_at
+FROM heroine_library
+ORDER BY updated_at DESC, name ASC, id ASC
+`).all() as HeroineRow[];
+    return rows.map(storedHeroineFromRow);
+  }
+
+  getHeroine(heroineId: string): StoredHeroineProfile | null {
+    const row = this.db.prepare(`
+SELECT id, name, description, personality, speech_style, appearance, default_portrait_asset_id,
+  portrait_asset_ids_json, expression_asset_ids_json, tags_json, reuse_history_json, position, created_at, updated_at
+FROM heroine_library
+WHERE id = ?
+`).get(heroineId) as HeroineRow | undefined;
+    return row ? storedHeroineFromRow(row) : null;
+  }
+
+  saveHeroine(heroine: HeroineProfile): StoredHeroineProfile {
     const now = nowIso();
     const position = this.listHeroines().findIndex((item) => item.id === heroine.id);
     const nextPosition = position >= 0 ? position : this.listHeroines().length;
@@ -1015,7 +1050,11 @@ ON CONFLICT(id) DO UPDATE SET
       position: nextPosition,
       now
     });
-    return heroine;
+    return this.getHeroine(heroine.id) || {
+      ...heroine,
+      createdAt: now,
+      updatedAt: now
+    };
   }
 
   recordHeroineReuse(heroineId: string, project: VnMakerProject): HeroineProfile | null {
@@ -1038,8 +1077,9 @@ ON CONFLICT(id) DO UPDATE SET
     return this.saveHeroine({ ...heroine, reuseHistory });
   }
 
-  deleteHeroine(heroineId: string): void {
-    this.db.prepare("DELETE FROM heroine_library WHERE id = ?").run(heroineId);
+  deleteHeroine(heroineId: string): boolean {
+    const result = this.db.prepare("DELETE FROM heroine_library WHERE id = ?").run(heroineId);
+    return result.changes > 0;
   }
 
   saveProject(project: VnMakerProject): VnMakerProject {

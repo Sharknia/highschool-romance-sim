@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   DEFAULT_EMOTION_TAGS,
@@ -44,14 +45,50 @@ import {
   smokeTestWebExport,
   type RecentProjectIndexEntry,
   type RecentProjectValidationState,
-  type ProjectStore
+  type ProjectStore,
+  type StoredHeroineProfile
 } from "@vn-maker/project-store";
 
 type JsonRecord = Record<string, unknown>;
-type HeroineProfileWithAssetUris = HeroineProfile & {
+type HeroineProfileDto = StoredHeroineProfile & {
   defaultPortraitUri?: string;
   portraitAssetUris?: string[];
 };
+
+export type HeroineActionFailureCode =
+  | "HEROINE_INPUT_INVALID"
+  | "HEROINE_ID_RESERVED"
+  | "HEROINE_NOT_FOUND"
+  | "HEROINE_ID_CONFLICT"
+  | "HEROINE_REVISION_CONFLICT"
+  | "OAUTH_REQUIRED"
+  | "IMAGE_GENERATION_UNAVAILABLE"
+  | "SERVER_ERROR";
+
+export interface HeroineActionFailureDto {
+  ok: false;
+  code: HeroineActionFailureCode;
+  message: string;
+  error: string;
+  requestId?: string;
+  issues?: ValidationIssue[];
+  retryable: boolean;
+}
+
+export interface HeroineRevisionRef {
+  kind: "heroineRevision";
+  heroineId: string;
+  value: string;
+  updatedAt: string;
+  capturedAt: string;
+}
+
+export interface HeroineLibraryRevisionRef {
+  kind: "heroineLibraryRevision";
+  value: string;
+  updatedAt: string;
+  capturedAt: string;
+}
 
 export interface EventTextGenerationAttempt {
   attempt: number;
@@ -446,7 +483,7 @@ function filterAndSortHeroines(heroines: HeroineProfile[], input: unknown): Hero
   return filtered;
 }
 
-function addHeroineAssetUris(heroines: HeroineProfile[], project: VnMakerProject): HeroineProfileWithAssetUris[] {
+function addHeroineAssetUris(heroines: StoredHeroineProfile[], project: VnMakerProject): HeroineProfileDto[] {
   const assetUriById = new Map(project.assets
     .filter((asset) => Boolean(asset.uri))
     .map((asset) => [asset.id, asset.uri!] as const));
@@ -463,12 +500,206 @@ function addHeroineAssetUris(heroines: HeroineProfile[], project: VnMakerProject
   });
 }
 
-function listHeroinesForResponse(store: ProjectStore, input: unknown = {}): HeroineProfileWithAssetUris[] {
-  return addHeroineAssetUris(filterAndSortHeroines(store.listHeroines(), input), store.requireProject());
+function listHeroinesForResponse(store: ProjectStore, input: unknown = {}): HeroineProfileDto[] {
+  const filtered = filterAndSortHeroines(store.listHeroineEntries(), input) as StoredHeroineProfile[];
+  return addHeroineAssetUris(filtered, store.requireProject());
 }
 
-function heroineForResponse(store: ProjectStore, heroine: HeroineProfile): HeroineProfileWithAssetUris {
+function heroineForResponse(store: ProjectStore, heroine: StoredHeroineProfile): HeroineProfileDto {
   return addHeroineAssetUris([heroine], store.requireProject())[0];
+}
+
+function requestIdFrom(input: unknown): string | undefined {
+  const requestId = asRecord(input).requestId;
+  return typeof requestId === "string" && requestId.trim() ? requestId.trim() : undefined;
+}
+
+function hashStable(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function heroineRevisionFor(heroine: StoredHeroineProfile, capturedAt = new Date().toISOString()): HeroineRevisionRef {
+  return {
+    kind: "heroineRevision",
+    heroineId: heroine.id,
+    value: hashStable({
+      id: heroine.id,
+      name: heroine.name,
+      description: heroine.description,
+      personality: heroine.personality,
+      speechStyle: heroine.speechStyle,
+      appearance: heroine.appearance,
+      defaultPortraitAssetId: heroine.defaultPortraitAssetId,
+      portraitAssetIds: heroine.portraitAssetIds,
+      expressionAssetIds: heroine.expressionAssetIds,
+      tags: heroine.tags,
+      reuseHistory: heroine.reuseHistory,
+      updatedAt: heroine.updatedAt
+    }),
+    updatedAt: heroine.updatedAt,
+    capturedAt
+  };
+}
+
+function libraryRevisionFor(heroines: StoredHeroineProfile[], capturedAt = new Date().toISOString()): HeroineLibraryRevisionRef {
+  const heroineRevisions = heroines.map((heroine) => heroineRevisionFor(heroine, capturedAt));
+  const updatedAt = heroines
+    .map((heroine) => heroine.updatedAt)
+    .sort()
+    .at(-1) || capturedAt;
+  return {
+    kind: "heroineLibraryRevision",
+    value: hashStable(heroineRevisions.map((revision) => ({
+      heroineId: revision.heroineId,
+      value: revision.value,
+      updatedAt: revision.updatedAt
+    }))),
+    updatedAt,
+    capturedAt
+  };
+}
+
+function heroineFailure(
+  input: unknown,
+  code: HeroineActionFailureCode,
+  message: string,
+  options: { issues?: ValidationIssue[]; retryable?: boolean } = {}
+): HeroineActionFailureDto {
+  const requestId = requestIdFrom(input);
+  return {
+    ok: false,
+    code,
+    message,
+    error: message,
+    ...(requestId ? { requestId } : {}),
+    ...(options.issues ? { issues: options.issues } : {}),
+    retryable: options.retryable ?? false
+  };
+}
+
+export function heroineFailureStatus(code: HeroineActionFailureCode): number {
+  if (code === "OAUTH_REQUIRED") {
+    return 401;
+  }
+  if (code === "HEROINE_NOT_FOUND") {
+    return 404;
+  }
+  if (code === "HEROINE_ID_CONFLICT" || code === "HEROINE_REVISION_CONFLICT") {
+    return 409;
+  }
+  if (code === "SERVER_ERROR") {
+    return 500;
+  }
+  return 400;
+}
+
+export function isHeroineActionFailure(value: unknown): value is HeroineActionFailureDto {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && (value as { ok?: unknown }).ok === false
+      && typeof (value as { code?: unknown }).code === "string"
+      && typeof (value as { message?: unknown }).message === "string"
+  );
+}
+
+function heroineIdIssue(heroineId: string): ValidationIssue | null {
+  if (!/^[a-z0-9_-]+$/.test(heroineId)) {
+    return {
+      severity: "error",
+      path: "id",
+      message: "히로인 ID는 소문자 영문, 숫자, 하이픈, 언더스코어만 사용할 수 있습니다."
+    };
+  }
+  return null;
+}
+
+function isReservedHeroineId(heroineId: string): boolean {
+  return ["new", "edit", "settings", "delete", "create"].includes(heroineId);
+}
+
+function parseHeroineForAction(input: unknown): HeroineProfile | HeroineActionFailureDto {
+  const record = asRecord(input);
+  const heroineRecord = asRecord(record.heroine);
+  const rawId = typeof heroineRecord.id === "string" ? heroineRecord.id.trim() : "";
+  const parsed = parseHeroineProfileInput(record.heroine);
+  if (!parsed.ok) {
+    return heroineFailure(input, "HEROINE_INPUT_INVALID", "히로인 입력값이 올바르지 않습니다.", { issues: parsed.issues });
+  }
+  if (isReservedHeroineId(rawId)) {
+    return heroineFailure(input, "HEROINE_ID_RESERVED", "예약어는 히로인 ID로 사용할 수 없습니다.", {
+      issues: [{ severity: "error", path: "id", message: `${rawId}는 예약어입니다.` }]
+    });
+  }
+  const idIssue = heroineIdIssue(rawId);
+  if (idIssue) {
+    return heroineFailure(input, "HEROINE_INPUT_INVALID", "히로인 ID 형식이 올바르지 않습니다.", { issues: [idIssue] });
+  }
+  return createHeroineProfile(parsed.value);
+}
+
+function heroineIdFromAction(input: unknown): string | HeroineActionFailureDto {
+  const heroineId = String(asRecord(input).heroineId || "").trim();
+  if (!heroineId) {
+    return heroineFailure(input, "HEROINE_INPUT_INVALID", "heroineId 입력이 필요합니다.", {
+      issues: [{ severity: "error", path: "heroineId", message: "비어 있을 수 없습니다." }]
+    });
+  }
+  return heroineId;
+}
+
+function expectedRevisionValue(input: unknown): string | undefined {
+  const expected = asRecord(input).expectedHeroineRevision;
+  return typeof expected === "object" && expected !== null && typeof (expected as { value?: unknown }).value === "string"
+    ? (expected as { value: string }).value
+    : undefined;
+}
+
+function withHeroineContract(
+  store: ProjectStore,
+  heroine: HeroineProfileDto
+): {
+  heroine: HeroineProfileDto;
+  portraitAsset?: VnMakerAsset;
+  heroineRevision: HeroineRevisionRef;
+  libraryRevision: HeroineLibraryRevisionRef;
+} {
+  const project = store.requireProject();
+  const portraitAsset = heroine.defaultPortraitAssetId
+    ? project.assets.find((asset) => asset.id === heroine.defaultPortraitAssetId)
+    : undefined;
+  return {
+    heroine,
+    ...(portraitAsset ? { portraitAsset } : {}),
+    heroineRevision: heroineRevisionFor(heroine),
+    libraryRevision: libraryRevisionFor(store.listHeroineEntries())
+  };
+}
+
+function heroinePortraitStatus(heroine: HeroineProfileDto): "none" | "placeholder" | "generated" | "imported" | "missing" {
+  const previewUri = heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0];
+  if (previewUri) {
+    return "generated";
+  }
+  if (heroine.defaultPortraitAssetId || heroine.portraitAssetIds.length > 0) {
+    return "missing";
+  }
+  return "none";
+}
+
+function heroineListItem(heroine: HeroineProfileDto): HeroineProfileDto & {
+  summary: string;
+  personalitySummary?: string;
+  portraitStatus: "none" | "placeholder" | "generated" | "imported" | "missing";
+  heroineRevision: HeroineRevisionRef;
+} {
+  return {
+    ...heroine,
+    summary: heroine.description,
+    personalitySummary: heroine.personality,
+    portraitStatus: heroinePortraitStatus(heroine),
+    heroineRevision: heroineRevisionFor(heroine)
+  };
 }
 
 async function withStore<T>(projectDirectory: string, operation: (store: ProjectStore) => Promise<T> | T): Promise<T> {
@@ -842,17 +1073,112 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async listHeroines(input: unknown) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        return { ok: true, projectDirectory: store.paths.projectDirectory, heroines: listHeroinesForResponse(store, input) };
+        const capturedAt = new Date().toISOString();
+        const heroines = listHeroinesForResponse(store, input).map(heroineListItem);
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          heroines,
+          count: heroines.length,
+          empty: heroines.length === 0,
+          loadedAt: capturedAt,
+          sort: "updatedAtDesc",
+          libraryRevision: libraryRevisionFor(store.listHeroineEntries(), capturedAt)
+        };
+      } finally {
+        store.close();
+      }
+    },
+
+    async getHeroine(input: unknown) {
+      const heroineId = heroineIdFromAction(input);
+      if (typeof heroineId !== "string") {
+        return heroineId;
+      }
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const heroine = store.getHeroine(heroineId);
+        if (!heroine) {
+          return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
+        }
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          ...withHeroineContract(store, heroineForResponse(store, heroine))
+        };
+      } finally {
+        store.close();
+      }
+    },
+
+    async createHeroine(input: unknown) {
+      const parsed = parseHeroineForAction(input);
+      if (isHeroineActionFailure(parsed)) {
+        return parsed;
+      }
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        if (store.getHeroine(parsed.id)) {
+          return heroineFailure(input, "HEROINE_ID_CONFLICT", "이미 같은 히로인 ID가 있습니다.");
+        }
+        const heroine = store.saveHeroine(parsed);
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          ...withHeroineContract(store, heroineForResponse(store, heroine))
+        };
+      } finally {
+        store.close();
+      }
+    },
+
+    async updateHeroine(input: unknown) {
+      const parsed = parseHeroineForAction(input);
+      if (isHeroineActionFailure(parsed)) {
+        return parsed;
+      }
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const current = store.getHeroine(parsed.id);
+        if (!current) {
+          return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
+        }
+        const expected = expectedRevisionValue(input);
+        if (expected && expected !== heroineRevisionFor(current).value) {
+          return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
+        }
+        const heroine = store.saveHeroine({ ...parsed, id: current.id });
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          ...withHeroineContract(store, heroineForResponse(store, heroine))
+        };
       } finally {
         store.close();
       }
     },
 
     async saveHeroine(input: unknown) {
+      const mode = asRecord(input).mode;
+      if (mode === "create") {
+        return this.createHeroine(input);
+      }
+      if (mode === "update") {
+        return this.updateHeroine(input);
+      }
+      const parsed = parseHeroineForAction(input);
+      if (isHeroineActionFailure(parsed)) {
+        return parsed;
+      }
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const heroine = store.saveHeroine(requiredHeroine(input));
-        return { ok: true, projectDirectory: store.paths.projectDirectory, heroine: heroineForResponse(store, heroine), heroines: listHeroinesForResponse(store) };
+        const heroine = store.saveHeroine(parsed);
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          ...withHeroineContract(store, heroineForResponse(store, heroine)),
+          heroines: listHeroinesForResponse(store).map(heroineListItem)
+        };
       } finally {
         store.close();
       }
@@ -878,19 +1204,40 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     },
 
     async deleteHeroine(input: unknown) {
-      const record = asRecord(input);
-      const heroineId = String(record.heroineId || "");
-      if (!heroineId) {
-        throw new InputValidationError("heroineId 입력이 필요합니다.", [{ severity: "error", path: "heroineId", message: "비어 있을 수 없습니다." }]);
+      const heroineId = heroineIdFromAction(input);
+      if (typeof heroineId !== "string") {
+        return heroineId;
       }
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
+        const current = store.getHeroine(heroineId);
+        if (!current) {
+          return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
+        }
+        const record = asRecord(input);
+        const confirmName = typeof record.confirmName === "string" ? record.confirmName.trim() : current.name;
+        const confirmId = typeof record.confirmId === "string" ? record.confirmId.trim() : current.id;
+        if (confirmName !== current.name || confirmId !== current.id) {
+          return heroineFailure(input, "HEROINE_INPUT_INVALID", "삭제 확인값이 히로인과 일치하지 않습니다.", {
+            issues: [
+              { severity: "error", path: "confirmName", message: "히로인 이름 확인값이 일치해야 합니다." },
+              { severity: "error", path: "confirmId", message: "히로인 ID 확인값이 일치해야 합니다." }
+            ]
+          });
+        }
+        const expected = expectedRevisionValue(input);
+        if (expected && expected !== heroineRevisionFor(current).value) {
+          return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
+        }
         store.deleteHeroine(heroineId);
+        const heroines = listHeroinesForResponse(store).map(heroineListItem);
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
-          heroines: listHeroinesForResponse(store),
-          project: store.requireProject()
+          deletedHeroineId: heroineId,
+          heroines,
+          libraryRevision: libraryRevisionFor(store.listHeroineEntries()),
+          snapshotPolicy: "projectSnapshotsPreserved" as const
         };
       } finally {
         store.close();
@@ -1367,6 +1714,78 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           assets,
           errors,
           project: store.requireProject()
+        };
+      } finally {
+        store.close();
+      }
+    },
+
+    async generateHeroinePortrait(input: unknown) {
+      if (!options.image) {
+        return heroineFailure(input, "IMAGE_GENERATION_UNAVAILABLE", "이미지 생성 adapter가 설정되지 않았습니다.", { retryable: true });
+      }
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const requestedHeroineId = typeof record.heroineId === "string" && record.heroineId.trim()
+          ? record.heroineId.trim()
+          : "";
+        const existingHeroine = requestedHeroineId ? store.getHeroine(requestedHeroineId) : null;
+        if (requestedHeroineId && !existingHeroine) {
+          return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
+        }
+        const draftInput = record.draft || record.heroine;
+        const parsedDraft = existingHeroine
+          ? existingHeroine
+          : draftInput
+            ? parseHeroineForAction({ ...asRecord(input), heroine: draftInput })
+            : heroineFailure(input, "HEROINE_INPUT_INVALID", "포트레이트를 생성할 히로인 정보가 필요합니다.", {
+                issues: [{ severity: "error", path: "draft", message: "heroineId 또는 draft 입력이 필요합니다." }]
+              });
+        if ("ok" in parsedDraft && parsedDraft.ok === false) {
+          return parsedDraft;
+        }
+
+        const expected = expectedRevisionValue(input);
+        if (existingHeroine && expected && expected !== heroineRevisionFor(existingHeroine).value) {
+          return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
+        }
+
+        const generationInput = selectGenerationInput(project, store, {
+          ...record,
+          kind: "portrait",
+          heroine: parsedDraft
+        });
+        const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
+        await store.storeGenerationResult(result);
+
+        if (existingHeroine) {
+          const portraitAssetIds = [...new Set([result.asset.id, ...existingHeroine.portraitAssetIds])];
+          const heroine = store.saveHeroine({
+            ...existingHeroine,
+            defaultPortraitAssetId: result.asset.id,
+            portraitAssetIds
+          });
+          return {
+            ok: true,
+            projectDirectory: store.paths.projectDirectory,
+            ...withHeroineContract(store, heroineForResponse(store, heroine)),
+            asset: result.asset,
+            generationState: "completed" as const
+          };
+        }
+
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          asset: result.asset,
+          stagedPortraitRef: {
+            id: `staged-${result.asset.id}`,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            previewUri: result.image?.dataUrl || result.image?.uri || result.asset.uri
+          },
+          generationState: "completed" as const
         };
       } finally {
         store.close();
