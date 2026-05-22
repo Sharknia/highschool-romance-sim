@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Heart, ListChecks, RefreshCw, Sparkles, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Heart, Image as ImageIcon, ListChecks, Play, RefreshCw, Sparkles, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -9,6 +9,7 @@ import {
   type ProjectApiResult,
   type ProjectData,
   type ProjectEventPlan,
+  type ProjectGenerationJob,
   type ProjectIssue,
   type ProjectTabId,
   type ProjectWorkflowSummary
@@ -26,6 +27,7 @@ interface ProjectDetailViewProps {
 
 type EventTabState = "blockedNoHeroine" | "ready" | "expanding" | "patchPending" | "patchInvalid" | "patchStale" | "approving";
 type PendingEventPatch = ProjectApiResult & Required<Pick<ProjectApiResult, "request" | "plan">>;
+type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "partialFailed";
 
 function fallbackWorkflowSummary(project: ProjectData | null): ProjectWorkflowSummary {
   const hasProject = Boolean(project);
@@ -95,6 +97,34 @@ function eventResultHasCg(result: ProjectApiResult, plan?: ProjectEventPlan): bo
   );
 }
 
+function assetState(jobs: ProjectGenerationJob[]): AssetState {
+  if (jobs.length === 0) return "empty";
+  if (jobs.some((job) => job.status === "running")) return "running";
+  const failedCount = jobs.filter((job) => job.status === "failed").length;
+  const completedCount = jobs.filter((job) => job.status === "completed").length;
+  if (failedCount > 0 && completedCount > 0) return "partialFailed";
+  if (failedCount > 0) return "failed";
+  if (completedCount === jobs.length) return "completed";
+  return "planned";
+}
+
+function assetStateLabel(value: AssetState): string {
+  if (value === "empty") return "작업 없음";
+  if (value === "planned") return "작업 예정";
+  if (value === "running") return "생성 중";
+  if (value === "failed") return "실패";
+  if (value === "partialFailed") return "일부 실패";
+  return "완료";
+}
+
+function jobStatusLabel(value?: string): string {
+  if (value === "planned") return "작업 예정";
+  if (value === "running") return "생성 중";
+  if (value === "failed") return "실패";
+  if (value === "completed") return "완료";
+  return value || "확인 필요";
+}
+
 export function ProjectDetailView({
   activeTab,
   currentProject,
@@ -118,6 +148,10 @@ export function ProjectDetailView({
   const [eventIssues, setEventIssues] = useState<ProjectIssue[]>([]);
   const [eventBusy, setEventBusy] = useState(false);
   const [pendingPatch, setPendingPatch] = useState<PendingEventPatch | null>(null);
+  const [assetJobs, setAssetJobs] = useState<ProjectGenerationJob[]>([]);
+  const [assetStatus, setAssetStatus] = useState("이벤트 승인 후 CG 작업을 확인합니다.");
+  const [assetErrors, setAssetErrors] = useState<string[]>([]);
+  const [assetBusy, setAssetBusy] = useState(false);
   const summary = workflowSummary || fallbackWorkflowSummary(currentProject);
   const assignedHeroine = currentProject?.characters?.[0] || null;
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || heroines[0] || null;
@@ -132,6 +166,13 @@ export function ProjectDetailView({
   }, [currentRoute?.entrySceneId, projectScenes, selectedSceneId]);
   const pendingDiff = pendingPatch?.validation?.diff || pendingPatch?.diff;
   const visibleEventIssues = eventIssues.length > 0 ? eventIssues : pendingPatch?.validation?.issues || [];
+  const cgJobs = useMemo(() => {
+    const sourceJobs = assetJobs.length > 0 ? assetJobs : currentProject?.generationJobs || [];
+    return sourceJobs.filter((job) => job.kind === "cg");
+  }, [assetJobs, currentProject?.generationJobs]);
+  const currentAssetState = assetState(cgJobs);
+  const plannedCgJobIds = cgJobs.filter((job) => job.status === "planned" && job.id).map((job) => String(job.id));
+  const failedCgJobIds = cgJobs.filter((job) => job.status === "failed" && job.id).map((job) => String(job.id));
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -196,6 +237,19 @@ export function ProjectDetailView({
       setEventStatus("루트와 기준 씬을 고르고 이벤트를 제안하세요.");
     }
   }, [activeTab, assignedHeroine, eventState]);
+
+  useEffect(() => {
+    setAssetJobs([]);
+    setAssetErrors([]);
+    setAssetStatus("이벤트 승인 후 CG 작업을 확인합니다.");
+  }, [currentProject?.id]);
+
+  useEffect(() => {
+    if (activeTab !== "assets" || !currentProject) {
+      return;
+    }
+    void loadGenerationJobs();
+  }, [activeTab, currentProject?.id, projectDirectory]);
 
   async function assignHeroineSnapshot(): Promise<void> {
     if (!currentProject?.id || !selectedHeroine) {
@@ -318,6 +372,74 @@ export function ProjectDetailView({
     setEventIssues([]);
     setEventState("ready");
     setEventStatus("제안을 취소했습니다. 새 이벤트를 다시 입력할 수 있습니다.");
+  }
+
+  function applyAssetFailure(result: ProjectApiResult, fallbackMessage: string): void {
+    if (result.code === "OAUTH_REQUIRED" || result.httpStatus === 401) {
+      setAssetStatus("Codex ChatGPT OAuth 연결이 필요합니다. 설정에서 연결 상태를 확인하세요.");
+    } else {
+      setAssetStatus(result.message || result.error || fallbackMessage);
+    }
+    setAssetErrors(result.errors || result.issues?.map(issueText) || []);
+  }
+
+  async function loadGenerationJobs(): Promise<void> {
+    setAssetBusy(true);
+    setAssetStatus("이벤트 CG 작업을 불러오는 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/generation/jobs/list", {
+        projectDirectory
+      });
+      if (result.ok === false) {
+        applyAssetFailure(result, "이벤트 CG 작업을 불러오지 못했습니다.");
+        return;
+      }
+      const nextJobs = (result.jobs || []).filter((job) => job.kind === "cg");
+      setAssetJobs(nextJobs);
+      setAssetErrors([]);
+      setAssetStatus(nextJobs.length > 0 ? "이벤트 CG 작업을 확인했습니다." : "이벤트 승인 후 CG 작업이 생성됩니다.");
+    } catch (error) {
+      setAssetStatus(`이벤트 CG 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAssetBusy(false);
+    }
+  }
+
+  async function runCgJobs(jobIds: string[], retryFailed = false): Promise<void> {
+    if (jobIds.length === 0) {
+      setAssetStatus(retryFailed ? "재시도할 실패 작업이 없습니다." : "실행할 예정 CG 작업이 없습니다.");
+      return;
+    }
+    setAssetBusy(true);
+    setAssetErrors([]);
+    setAssetStatus(retryFailed ? "실패 작업 재시도 실행 중입니다." : "이미지 만들기 실행 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/generation/jobs/run", {
+        projectDirectory,
+        jobIds,
+        retryFailed,
+        replaceCompleted: false
+      });
+      const nextJobs = (result.project?.generationJobs || result.jobs || []).filter((job) => job.kind === "cg");
+      if (nextJobs.length > 0) {
+        setAssetJobs(nextJobs);
+      }
+      setAssetErrors(result.errors || result.issues?.map(issueText) || []);
+      if (result.project) {
+        onProjectResult(result);
+      }
+      if (result.ok === false) {
+        applyAssetFailure(result, "일부 CG 작업이 실패했습니다.");
+        return;
+      }
+      setAssetStatus(result.assets?.length
+        ? "이미지 생성 완료. 결과 에셋이 프로젝트에 연결되었습니다."
+        : "완료된 작업은 다시 호출하지 않습니다. 결과 에셋을 유지했습니다.");
+    } catch (error) {
+      setAssetStatus(`이미지 만들기 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAssetBusy(false);
+    }
   }
 
   return (
@@ -534,7 +656,65 @@ export function ProjectDetailView({
             </section>
           </div>
         ) : null}
-        {activeTab === "assets" ? "에셋/생성 탭입니다. CG 작업을 연결합니다." : null}
+        {activeTab === "assets" ? (
+          <div className="detail-tab-grid">
+            <section className="detail-card">
+              <h3>이벤트 CG 작업</h3>
+              <span className="state-chip">{assetStateLabel(currentAssetState)}</span>
+              <p className="page-muted">이 탭은 이벤트 승인으로 생긴 CG 작업만 표시합니다. 완료된 작업은 다시 호출하지 않습니다.</p>
+              <div className="button-row">
+                <Button disabled={assetBusy || plannedCgJobIds.length === 0} icon={<ImageIcon size={16} />} onClick={() => void runCgJobs(plannedCgJobIds)} variant="primary">
+                  이미지 만들기
+                </Button>
+                <Button disabled={assetBusy || failedCgJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runCgJobs(failedCgJobIds, true)}>
+                  실패 작업 재시도
+                </Button>
+                <Button disabled={assetBusy} icon={<RefreshCw size={16} />} onClick={() => void loadGenerationJobs()} variant="ghost">
+                  새로고침
+                </Button>
+              </div>
+              <p className="page-muted">실패 작업 재시도는 retryFailed=true로만 실행하고, replaceCompleted=false로 완료된 결과를 유지합니다.</p>
+            </section>
+            <section className="detail-card">
+              <h3>결과 에셋</h3>
+              <div className={currentAssetState === "failed" || currentAssetState === "partialFailed" ? "inline-status warning" : "inline-status success"}>
+                {assetStatus}
+              </div>
+              {assetErrors.length ? (
+                <ul className="compact-list">
+                  {assetErrors.map((error) => <li key={error}>{error}</li>)}
+                </ul>
+              ) : (
+                <p className="page-muted">현재 표시할 생성 오류가 없습니다.</p>
+              )}
+              <p className="page-muted">Codex ChatGPT OAuth 또는 imageGeneration 권한이 없으면 OAUTH_REQUIRED 상태로 차단됩니다.</p>
+              <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
+                프리뷰로 이동
+              </Button>
+            </section>
+            <section className="detail-card detail-card-wide">
+              <h3>작업 목록</h3>
+              {cgJobs.length ? (
+                <ul className="asset-job-list">
+                  {cgJobs.map((job) => (
+                    <li key={job.id || job.outputAssetId}>
+                      {job.asset?.uri ? <img alt={job.asset.label || job.outputAssetId || "결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
+                      <div>
+                        <strong>{job.id || "CG 작업"}</strong>
+                        <span>{jobStatusLabel(job.status)} · {job.provider || "provider 확인 필요"}</span>
+                        <p>{job.prompt || "프롬프트 없음"}</p>
+                        <small>결과 에셋: {job.outputAssetId || job.asset?.id || "대기 중"}</small>
+                        {job.failureMessage ? <small>{job.failureMessage}</small> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="page-muted">이벤트를 승인하면 CG 작업이 이곳에 나타납니다.</p>
+              )}
+            </section>
+          </div>
+        ) : null}
         {activeTab === "preview" ? "프리뷰 탭입니다. 플레이 검증을 연결합니다." : null}
         {activeTab === "export" ? "내보내기 탭입니다. export와 실행 확인 결과를 연결합니다." : null}
       </div>

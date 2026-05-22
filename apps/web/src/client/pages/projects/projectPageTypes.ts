@@ -11,6 +11,28 @@ export const detailTabs = [
 
 export type ProjectTabId = typeof detailTabs[number]["id"];
 
+export interface ProjectAsset {
+  id?: string;
+  kind?: string;
+  label?: string;
+  uri?: string;
+  source?: string;
+  generationJobId?: string;
+}
+
+export interface ProjectGenerationJob {
+  id?: string;
+  kind?: string;
+  targetId?: string;
+  prompt?: string;
+  style?: string;
+  provider?: string;
+  status?: "planned" | "running" | "failed" | "completed" | string;
+  outputAssetId?: string;
+  failureMessage?: string;
+  asset?: ProjectAsset;
+}
+
 export interface ProjectData {
   id?: string;
   title?: string;
@@ -24,7 +46,8 @@ export interface ProjectData {
   }>;
   routes?: Array<{ id?: string; title?: string; entrySceneId?: string; heroineId?: string }>;
   scenes?: Array<{ id?: string; label?: string; speaker?: string; text?: string; ending?: { title?: string; kind?: string } }>;
-  generationJobs?: Array<{ id?: string; status?: string; kind?: string }>;
+  assets?: ProjectAsset[];
+  generationJobs?: ProjectGenerationJob[];
 }
 
 export interface ProjectIssue {
@@ -114,8 +137,11 @@ export interface ProjectApiResult extends ApiResult {
     issues?: ProjectIssue[];
     diff?: ProjectPatchDescription;
   };
+  assets?: ProjectAsset[];
   diff?: ProjectPatchDescription;
+  errors?: string[];
   issues?: ProjectIssue[];
+  jobs?: ProjectGenerationJob[];
   patchHistoryEntry?: ProjectPatchHistoryEntry;
   plan?: ProjectEventPlan;
   recentProject?: RecentProject;

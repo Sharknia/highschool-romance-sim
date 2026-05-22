@@ -1177,6 +1177,10 @@ a {
   font-size: 0.98rem;
 }
 
+.detail-card-wide {
+  grid-column: 1 / -1;
+}
+
 .event-prompt-input {
   min-height: 128px;
 }
@@ -1184,6 +1188,55 @@ a {
 .compact-list {
   margin: 0;
   padding-left: 18px;
+}
+
+.asset-job-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset-job-list li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  padding: 10px;
+  background: #0f0f0d;
+}
+
+.asset-job-list img,
+.asset-job-thumb {
+  width: 72px;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #102621;
+}
+
+.asset-job-thumb {
+  display: grid;
+  place-items: center;
+  color: #5eead4;
+}
+
+.asset-job-list div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.asset-job-list strong,
+.asset-job-list span,
+.asset-job-list p,
+.asset-job-list small {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .project-new-grid {
