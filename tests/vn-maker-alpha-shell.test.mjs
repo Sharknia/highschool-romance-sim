@@ -268,11 +268,25 @@ assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:project
   assert.match(projectDetailViewSource, pattern, `히로인 탭에 '${requiredText}' 문구가 있어야 합니다.`);
 });
 [
-  "배경 화면 및 CG 작업",
-  "배경 작업 준비",
+  'activeTab === "background"',
+  "/projects/${currentProject?.id || projectId}/background",
+  "대상 프로젝트",
+  "Alpha에서는 프로젝트당 배경 1개만 생성할 수 있습니다.",
+  "생성할 배경 설명",
+  "저장될 결과 위치",
+  "기존 배경 교체",
   "kind: \"background\"",
+  "/api/generation/jobs",
+  "/api/generation/jobs/run",
+  "OAuth",
+  "app-server",
+  "adapter",
+  "응답 파싱",
+  "다시 시도",
+  "backgroundAssetId",
+  "저장 위치/에셋 연결 상태",
   "isVisualImageJob",
-  "imageJobKindLabel"
+  "generationErrorCategory"
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `배경 화면 생성 탭에 '${requiredText}' 처리가 있어야 합니다.`);

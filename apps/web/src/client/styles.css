@@ -1376,6 +1376,15 @@ a {
   color: #5eead4;
 }
 
+.asset-preview-image {
+  width: min(100%, 640px);
+  aspect-ratio: 16 / 9;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #0f0f0d;
+}
+
 .asset-job-list div {
   min-width: 0;
   display: grid;

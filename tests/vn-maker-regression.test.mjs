@@ -517,6 +517,9 @@ await assert.rejects(
 branchCycleFailureStore.close();
 
 const sampleImageBase64 = Buffer.from("fake image").toString("base64");
+const codexGenerationSource = readFileSync("packages/generation-codex/src/index.ts", "utf8");
+assert.match(codexGenerationSource, /type:\s*"imageGeneration"/);
+assert.match(codexGenerationSource, /background/);
 const codexImageResult = await codexGeneration.createCodexImageAssetResult(
   {
     kind: "cg",

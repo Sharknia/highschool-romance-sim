@@ -607,6 +607,48 @@ function summarizeProject(project: VnMakerProject): string {
   return `씬 ${project.scenes.length}개, 선택지 ${project.scenes.reduce((total, scene) => total + scene.choices.length, 0)}개, 에셋 ${project.assets.length}개, 생성 작업 ${project.generationJobs.length}개`;
 }
 
+function applyGenerationPolicy(project: VnMakerProject, input: StoreGenerationResultInput): VnMakerProject {
+  const nextProject = applyGenerationResultToProject(project, input);
+  if (input.asset.kind !== "background") {
+    return nextProject;
+  }
+
+  const outputAssetId = input.asset.id;
+  const outputJobId = input.job.id;
+  const replacedGeneratedAssetIds = new Set(nextProject.assets
+    .filter((asset) => asset.kind === "background" && asset.source === "generated" && asset.id !== outputAssetId)
+    .map((asset) => asset.id));
+
+  nextProject.assets = nextProject.assets.filter((asset) => {
+    return !(asset.kind === "background" && asset.source === "generated" && asset.id !== outputAssetId);
+  });
+  nextProject.generationJobs = nextProject.generationJobs.filter((job) => {
+    return job.kind !== "background"
+      || job.id === outputJobId
+      || !job.outputAssetId
+      || !replacedGeneratedAssetIds.has(job.outputAssetId);
+  });
+
+  nextProject.scenes = nextProject.scenes.map((scene) => {
+    if (scene.backgroundAssetId && replacedGeneratedAssetIds.has(scene.backgroundAssetId)) {
+      return { ...scene, backgroundAssetId: outputAssetId };
+    }
+    return scene;
+  });
+
+  const defaultRoute = nextProject.routes.find((route) => route.id === nextProject.settings.defaultRouteId) || nextProject.routes[0];
+  const targetSceneId = defaultRoute?.entrySceneId || nextProject.scenes[0]?.id;
+  const targetSceneIndex = nextProject.scenes.findIndex((scene) => scene.id === targetSceneId);
+  if (targetSceneIndex >= 0) {
+    nextProject.scenes[targetSceneIndex] = {
+      ...nextProject.scenes[targetSceneIndex],
+      backgroundAssetId: outputAssetId
+    };
+  }
+
+  return nextProject;
+}
+
 function patchHistoryEntryFromRow(row: PatchHistoryRow): PatchHistoryEntry {
   const beforeProject = parseJson<VnMakerProject | null>(row.before_project_json, null);
   const afterProject = parseJson<VnMakerProject | null>(row.after_project_json, null);
@@ -1453,7 +1495,7 @@ VALUES (
   async storeGenerationResult(input: StoreGenerationResultInput): Promise<VnMakerProject> {
     const project = this.requireProject();
     const metadata = await fileMetadata(this.paths.projectDirectory, input);
-    const saved = this.saveProject(applyGenerationResultToProject(project, input));
+    const saved = this.saveProject(applyGenerationPolicy(project, input));
     this.writeAssetMetadata(project.id, input.asset.id, metadata);
     this.writeGenerationJobMetadata(project.id, input.job.id, metadata);
     return saved;

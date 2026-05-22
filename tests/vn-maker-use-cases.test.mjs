@@ -467,6 +467,40 @@ assert.equal(generatedBackground.ok, true);
 assert.equal(generatedBackground.asset.kind, "background");
 assert.equal(generatedBackground.job.kind, "background");
 assert.equal(generatedBackground.project.assets.some((asset) => asset.kind === "background"), true);
+assert.equal(
+  generatedBackground.project.scenes.some((scene) => scene.backgroundAssetId === "asset-direct-background"),
+  true,
+  "직접 생성된 배경은 프로젝트 장면 backgroundAssetId에 연결되어야 합니다."
+);
+
+const backgroundRun = await useCases.runGenerationJobs({
+  projectDirectory,
+  jobIds: ["job-usecase-background"],
+  replaceCompleted: true
+});
+assert.equal(backgroundRun.ok, true);
+assert.equal(backgroundRun.assets[0].kind, "background");
+assert.equal(backgroundRun.backgroundPolicy.limit, 1);
+const projectAfterBackground = backgroundRun.project;
+assert.equal(projectAfterBackground.assets.filter((asset) => asset.kind === "background").length, 1);
+assert.equal(
+  projectAfterBackground.scenes.some((scene) => scene.backgroundAssetId === "asset-usecase-background"),
+  true,
+  "생성된 배경은 프로젝트 장면 backgroundAssetId에 연결되어야 합니다."
+);
+
+const secondBackground = await useCases.createGenerationJob({
+  projectDirectory,
+  id: "job-usecase-background-second",
+  kind: "background",
+  targetId: created.project.id,
+  prompt: "second classroom background",
+  outputAssetId: "asset-usecase-background-second"
+});
+assert.equal(secondBackground.ok, true);
+assert.equal(secondBackground.backgroundPolicy.limit, 1);
+assert.equal(secondBackground.backgroundPolicy.existingAssetId, "asset-usecase-background");
+assert.equal(secondBackground.backgroundPolicy.replacesExisting, true);
 
 const heroineBeforeGeneratedPortrait = await useCases.getHeroine({
   projectDirectory,

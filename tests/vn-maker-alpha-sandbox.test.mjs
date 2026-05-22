@@ -197,6 +197,77 @@ try {
   assert.equal(missingTextAdapterExpansion.status, 401);
   assert.match(String(missingTextAdapterExpansion.body.error), /OAuth 로그인이 필요/);
 
+  const imageFailureProjectDirectory = join(tempRoot, "ImageFailureProject.vnmaker");
+  const imageFailureApi = webHandlers.createApiRequestHandler({
+    codex: {
+      async readSession() {
+        return {
+          connected: false,
+          mode: null,
+          account: null,
+          requiresOpenaiAuth: true,
+          capabilities: null
+        };
+      },
+      async startLogin() {
+        return {
+          type: "chatgpt",
+          loginId: "image-failure-login",
+          authUrl: "https://chatgpt.com/auth"
+        };
+      },
+      async logout() {
+        return undefined;
+      },
+      async generateImageAsset() {
+        throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+      },
+      async generateEventExpansionPlan() {
+        throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+      }
+    }
+  });
+  const imageFailureProject = await imageFailureApi({
+    method: "POST",
+    path: "/api/projects",
+    body: {
+      projectDirectory: imageFailureProjectDirectory,
+      starter: {
+        id: "image-failure-project",
+        title: "Image Failure Project",
+        premise: "이미지 생성 실패 분류를 검증한다."
+      }
+    }
+  });
+  assert.equal(imageFailureProject.status, 200);
+  const imageFailureJob = await imageFailureApi({
+    method: "POST",
+    path: "/api/generation/jobs",
+    body: {
+      projectDirectory: imageFailureProjectDirectory,
+      id: "job-image-failure-background",
+      kind: "background",
+      targetId: "image-failure-project",
+      prompt: "failure background",
+      outputAssetId: "asset-image-failure-background"
+    }
+  });
+  assert.equal(imageFailureJob.status, 200);
+  const imageFailureRun = await imageFailureApi({
+    method: "POST",
+    path: "/api/generation/jobs/run",
+    body: {
+      projectDirectory: imageFailureProjectDirectory,
+      jobIds: ["job-image-failure-background"],
+      replaceCompleted: true
+    }
+  });
+  assert.equal(imageFailureRun.status, 401);
+  assert.equal(imageFailureRun.body.ok, false);
+  assert.equal(imageFailureRun.body.code, "OAUTH_REQUIRED");
+  assert.match(String(imageFailureRun.body.message), /OAuth 로그인이 필요/);
+  assert.equal(imageFailureRun.body.retryable, true);
+
   process.env.VN_MAKER_ALPHA_SANDBOX = "1";
   const sandboxApi = webHandlers.createApiRequestHandler();
   const sandboxSession = await sandboxApi({ method: "GET", path: "/api/codex/session" });
@@ -367,6 +438,40 @@ try {
   assert.equal(apiBackgroundImage.status, 200);
   assert.equal(apiBackgroundImage.body.asset.kind, "background");
   assert.equal(apiBackgroundImage.body.job.kind, "background");
+  assert.equal(
+    apiBackgroundImage.body.project.scenes.some((scene) => scene.backgroundAssetId === "asset-api-direct-background"),
+    true
+  );
+
+  const apiBackgroundJob = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/jobs",
+    body: {
+      projectDirectory: apiProjectDirectory,
+      id: "job-api-background",
+      kind: "background",
+      targetId: apiProject.body.project.id,
+      prompt: "alpha sandbox classroom background",
+      outputAssetId: "asset-api-background"
+    }
+  });
+  assert.equal(apiBackgroundJob.status, 200);
+  assert.equal(apiBackgroundJob.body.job.kind, "background");
+  assert.equal(apiBackgroundJob.body.backgroundPolicy.limit, 1);
+  assert.equal(apiBackgroundJob.body.backgroundPolicy.replacesExisting, true);
+  const apiBackgroundRun = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/jobs/run",
+    body: { projectDirectory: apiProjectDirectory, jobIds: ["job-api-background"], replaceCompleted: true }
+  });
+  assert.equal(apiBackgroundRun.status, 200);
+  assert.equal(apiBackgroundRun.body.assets[0].kind, "background");
+  assert.equal(apiBackgroundRun.body.backgroundPolicy.limit, 1);
+  assert.equal(apiBackgroundRun.body.project.assets.filter((asset) => asset.kind === "background").length, 1);
+  assert.equal(
+    apiBackgroundRun.body.project.scenes.some((scene) => scene.backgroundAssetId === "asset-api-background"),
+    true
+  );
 
   const apiPreview = await sandboxApi({
     method: "POST",
@@ -466,6 +571,35 @@ try {
   assert.equal(cliGenerateBackground.ok, true);
   assert.equal(cliGenerateBackground.asset.kind, "background");
   assert.equal(cliGenerateBackground.job.kind, "background");
+  assert.equal(
+    cliGenerateBackground.project.scenes.some((scene) => scene.backgroundAssetId === "asset-cli-direct-background"),
+    true
+  );
+
+  const cliBackgroundJob = runCli("create-image-job", {
+    projectDirectory: cliProjectDirectory,
+    id: "job-cli-background",
+    kind: "background",
+    targetId: cliProject.project.id,
+    prompt: "alpha sandbox cli background",
+    outputAssetId: "asset-cli-background"
+  }, cliEnv);
+  assert.equal(cliBackgroundJob.job.kind, "background");
+  assert.equal(cliBackgroundJob.backgroundPolicy.limit, 1);
+  assert.equal(cliBackgroundJob.backgroundPolicy.replacesExisting, true);
+  const cliBackgroundRun = runCli("run-generation-jobs", {
+    projectDirectory: cliProjectDirectory,
+    jobIds: ["job-cli-background"],
+    replaceCompleted: true
+  }, cliEnv);
+  assert.equal(cliBackgroundRun.ok, true);
+  assert.equal(cliBackgroundRun.assets[0].kind, "background");
+  assert.equal(cliBackgroundRun.backgroundPolicy.limit, 1);
+  assert.equal(cliBackgroundRun.project.assets.filter((asset) => asset.kind === "background").length, 1);
+  assert.equal(
+    cliBackgroundRun.project.scenes.some((scene) => scene.backgroundAssetId === "asset-cli-background"),
+    true
+  );
 
   const cliPreview = runCli("preview", {
     projectDirectory: cliProjectDirectory,

@@ -189,6 +189,12 @@ export interface ProjectDeletionPolicyDto {
   impact: string[];
 }
 
+export interface BackgroundPolicyDto {
+  limit: 1;
+  existingAssetId?: string;
+  replacesExisting: boolean;
+}
+
 export type ProjectActionFailureCode =
   | "PROJECT_INPUT_INVALID"
   | "PROJECT_ID_RESERVED"
@@ -535,6 +541,20 @@ function withActionState<T extends JsonRecord>(
   };
 }
 
+function backgroundPolicy(project: VnMakerProject): BackgroundPolicyDto {
+  const linkedBackgroundIds = new Set(project.scenes.map((scene) => scene.backgroundAssetId).filter(Boolean));
+  const backgroundAssets = project.assets.filter((asset) => asset.kind === "background");
+  const existingBackground = backgroundAssets.find((asset) => asset.source === "generated" && linkedBackgroundIds.has(asset.id))
+    || backgroundAssets.find((asset) => asset.source === "generated")
+    || backgroundAssets.find((asset) => linkedBackgroundIds.has(asset.id))
+    || backgroundAssets[0];
+  return {
+    limit: 1,
+    existingAssetId: existingBackground?.id,
+    replacesExisting: Boolean(existingBackground)
+  };
+}
+
 function retryableFailureCode(code: ProjectActionFailureCode): boolean {
   return code === "SERVER_ERROR" || code === "PROJECT_DIRECTORY_MISSING" || code === "OAUTH_REQUIRED";
 }
@@ -573,6 +593,17 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
     return "PATCH_STALE";
   }
   return "SERVER_ERROR";
+}
+
+function imageGenerationFailureFromMessages(messages: string[]): Pick<ProjectActionFailureDto, "code" | "message" | "error" | "retryable"> {
+  const message = messages.find((item) => item.trim()) || "이미지 생성 작업이 실패했습니다.";
+  const code = message.includes("OAuth 로그인이 필요") ? "OAUTH_REQUIRED" : "SERVER_ERROR";
+  return {
+    code,
+    message,
+    error: message,
+    retryable: retryableFailureCode(code)
+  };
 }
 
 export function projectActionFailureFromError(error: unknown, action?: MakerActionId): ProjectActionFailureDto {
@@ -2407,6 +2438,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       try {
         const job = createImageGenerationJob(generationJobInput(input));
         const project = store.requireProject();
+        const policy = job.kind === "background" ? backgroundPolicy(project) : undefined;
         const index = project.generationJobs.findIndex((item) => item.id === job.id);
         if (index >= 0) {
           project.generationJobs[index] = job;
@@ -2414,7 +2446,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           project.generationJobs.push(job);
         }
         const savedProject = store.saveProject(project);
-        return { ok: true, projectDirectory: store.paths.projectDirectory, job, project: savedProject };
+        return { ok: true, projectDirectory: store.paths.projectDirectory, job, project: savedProject, ...(policy ? { backgroundPolicy: policy } : {}) };
       } finally {
         store.close();
       }
@@ -2464,7 +2496,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             ...job,
             asset: job.outputAssetId ? assetMap.get(job.outputAssetId) : undefined
           }));
-        return withActionState("listGenerationJobs", { projectDirectory: store.paths.projectDirectory, jobs }, { project });
+        return withActionState("listGenerationJobs", { projectDirectory: store.paths.projectDirectory, jobs, backgroundPolicy: backgroundPolicy(project) }, { project });
       } finally {
         store.close();
       }
@@ -2521,13 +2553,16 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             errors.push(message);
           }
         }
+        const failure = errors.length > 0 ? imageGenerationFailureFromMessages(errors) : null;
         return withActionState("runGenerationJobs", {
           ok: errors.length === 0,
+          ...(failure || {}),
           projectDirectory: store.paths.projectDirectory,
           jobs,
           assets,
           errors,
-          project: store.requireProject()
+          project: store.requireProject(),
+          backgroundPolicy: backgroundPolicy(store.requireProject())
         }, { project: store.requireProject() });
       } finally {
         store.close();
@@ -2635,7 +2670,13 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           }
           const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
           const savedProject = await store.storeGenerationResult(result);
-          return { ok: true, projectDirectory: store.paths.projectDirectory, project: savedProject, ...result };
+          return {
+            ok: true,
+            projectDirectory: store.paths.projectDirectory,
+            project: savedProject,
+            ...result,
+            ...(result.asset.kind === "background" ? { backgroundPolicy: backgroundPolicy(savedProject) } : {})
+          };
         } catch (error) {
           if (generationInput.jobId) {
             store.markGenerationJobStatus(generationInput.jobId, "failed", error instanceof Error ? error.message : String(error));

@@ -175,6 +175,13 @@ const backgroundJob = core.createImageGenerationJob({
 });
 assert.equal(backgroundJob.kind, "background");
 assert.equal(backgroundJob.outputAssetId, "asset-domain-background");
+assert.equal(core.createImageGenerationJob({
+  id: "job-background-contract",
+  kind: "background",
+  targetId: "project-background-contract",
+  prompt: "contract background",
+  outputAssetId: "asset-background-contract"
+}).kind, "background");
 
 const parsedBackgroundJob = core.parseVnMakerProject({
   ...starter,

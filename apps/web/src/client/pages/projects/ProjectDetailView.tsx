@@ -7,6 +7,7 @@ import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePage
 import {
   detailTabs,
   type ProjectApiResult,
+  type ProjectAsset,
   type ProjectData,
   type ProjectEventPlan,
   type ProjectExportResult,
@@ -153,6 +154,25 @@ function jobStatusLabel(value?: string): string {
   return value || "확인 필요";
 }
 
+function generationErrorCategory(result: ProjectApiResult): "OAuth" | "app-server" | "adapter" | "응답 파싱" {
+  if (result.code === "OAUTH_REQUIRED" || result.httpStatus === 401) return "OAuth";
+  if (result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE") return "응답 파싱";
+  const message = `${result.message || ""} ${result.error || ""} ${(result.errors || []).join(" ")}`;
+  if (message.includes("OAuth 로그인이 필요")) return "OAuth";
+  if (message.includes("app-server")) return "app-server";
+  return "adapter";
+}
+
+function backgroundAsset(project: ProjectData | null): ProjectAsset | null {
+  const backgroundAssets = project?.assets?.filter((asset) => asset.kind === "background") || [];
+  const linkedBackgroundIds = new Set((project?.scenes || []).map((scene) => scene.backgroundAssetId).filter(Boolean));
+  return backgroundAssets.find((asset) => asset.source === "generated" && asset.id && linkedBackgroundIds.has(asset.id))
+    || backgroundAssets.find((asset) => asset.source === "generated")
+    || backgroundAssets.find((asset) => asset.id && linkedBackgroundIds.has(asset.id))
+    || backgroundAssets[0]
+    || null;
+}
+
 function previewStateLabel(value: PreviewState): string {
   if (value === "empty") return "프리뷰 없음";
   if (value === "blocked") return "차단";
@@ -205,6 +225,11 @@ export function ProjectDetailView({
   const [assetStatus, setAssetStatus] = useState("배경 화면 작업과 이벤트 CG 작업을 확인합니다.");
   const [assetErrors, setAssetErrors] = useState<string[]>([]);
   const [assetBusy, setAssetBusy] = useState(false);
+  const [backgroundPrompt, setBackgroundPrompt] = useState("");
+  const [backgroundStatus, setBackgroundStatus] = useState("배경 생성 전 확인 정보를 검토하세요.");
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const [backgroundJobId, setBackgroundJobId] = useState("");
+  const [backgroundErrors, setBackgroundErrors] = useState<string[]>([]);
   const [previewState, setPreviewState] = useState<PreviewState>("empty");
   const [previewStatus, setPreviewStatus] = useState("프리뷰 생성 전입니다.");
   const [previewRuntime, setPreviewRuntime] = useState<ProjectRuntime | null>(null);
@@ -249,8 +274,11 @@ export function ProjectDetailView({
   const plannedImageJobIds = imageJobs.filter((job) => job.status === "planned" && job.id).map((job) => String(job.id));
   const failedImageJobIds = imageJobs.filter((job) => job.status === "failed" && job.id).map((job) => String(job.id));
   const incompleteImageJobs = (currentProject?.generationJobs || []).filter((job) => isVisualImageJob(job) && job.status !== "completed");
-  const hasBackgroundAsset = Boolean(currentProject?.assets?.some((asset) => asset.kind === "background"));
-  const hasBackgroundJob = imageJobs.some((job) => job.kind === "background");
+  const currentBackgroundAsset = backgroundAsset(currentProject);
+  const backgroundJobs = imageJobs.filter((job) => job.kind === "background");
+  const activeBackgroundJob = backgroundJobs.find((job) => job.status !== "completed") || backgroundJobs[0] || null;
+  const hasBackgroundAsset = Boolean(currentBackgroundAsset);
+  const hasBackgroundJob = backgroundJobs.length > 0;
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
@@ -271,13 +299,24 @@ export function ProjectDetailView({
           : "preview";
   const primaryActionLabel = summary.primaryLabel || (primaryActionTab === "background" ? "배경 화면 생성으로 이동" : "프리뷰 확인");
   const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
-  const suggestedBackgroundJobId = currentProject?.id ? `job-${currentProject.id}-background` : "job-background";
-  const suggestedBackgroundAssetId = currentProject?.id ? `asset-${currentProject.id}-background` : "asset-background";
+  const suggestedBackgroundJobId = currentProject?.id ? `job-background-${currentProject.id}` : "job-background";
+  const suggestedBackgroundAssetId = currentProject?.id ? `asset-background-${currentProject.id}` : "asset-background";
   const suggestedBackgroundPrompt = [
     currentProject?.title || "비주얼 노벨",
     currentProject?.premise || "",
     "주요 장면에 사용할 학교 배경 화면, polished anime visual novel background"
   ].filter(Boolean).join(", ");
+  const backgroundOutputLocation = projectDirectory
+    ? `${projectDirectory}/assets/generated/${suggestedBackgroundAssetId}.png`
+    : `/generated-assets/${suggestedBackgroundAssetId}.png`;
+  const backgroundLinkedScene = currentProject?.scenes?.find((scene) => scene.backgroundAssetId === currentBackgroundAsset?.id)
+    || currentProject?.scenes?.find((scene) => scene.backgroundAssetId)
+    || currentProject?.scenes?.[0]
+    || null;
+  const backgroundPreviewUri = currentBackgroundAsset?.uri || activeBackgroundJob?.asset?.uri;
+  const backgroundReplaceText = currentBackgroundAsset
+    ? `기존 배경 교체: ${currentBackgroundAsset.id}`
+    : "기존 배경 교체: 생성된 배경이 아직 없습니다.";
 
   const heroineState = useMemo(() => {
     if (!currentProject) return "loading";
@@ -335,6 +374,18 @@ export function ProjectDetailView({
       setEventStatus("루트와 기준 씬을 고르고 이벤트를 제안하세요.");
     }
   }, [activeTab, assignedHeroine, eventState]);
+
+  useEffect(() => {
+    if (activeTab !== "background" || !currentProject) {
+      return;
+    }
+    if (!backgroundJobId || backgroundJobId === "job-background") {
+      setBackgroundJobId(suggestedBackgroundJobId);
+    }
+    if (!backgroundPrompt.trim()) {
+      setBackgroundPrompt(suggestedBackgroundPrompt);
+    }
+  }, [activeTab, backgroundJobId, backgroundPrompt, currentProject, suggestedBackgroundJobId, suggestedBackgroundPrompt]);
 
   function resetPreviewAndExportState(input: { previewStatus?: string; project?: ProjectData | null; workflowSummary?: ProjectWorkflowSummary | null } = {}): void {
     const nextState = createPreviewExportResetState({
@@ -509,6 +560,13 @@ export function ProjectDetailView({
     setAssetErrors(result.errors || result.issues?.map(issueText) || []);
   }
 
+  function applyBackgroundFailure(result: ProjectApiResult, fallbackMessage: string): void {
+    const category = generationErrorCategory(result);
+    const detail = result.message || result.error || fallbackMessage;
+    setBackgroundStatus(`${category}: ${detail}`);
+    setBackgroundErrors(result.errors || result.issues?.map(issueText) || [detail]);
+  }
+
   async function loadGenerationJobs(): Promise<void> {
     setAssetBusy(true);
     setAssetStatus("배경 화면과 이벤트 CG 작업을 불러오는 중입니다.");
@@ -524,10 +582,74 @@ export function ProjectDetailView({
       setAssetJobs(nextJobs);
       setAssetErrors([]);
       setAssetStatus(nextJobs.length > 0 ? "배경 화면과 이벤트 CG 작업을 확인했습니다." : "배경 작업을 준비하거나 이벤트를 승인하면 이미지 작업이 생성됩니다.");
+      setBackgroundStatus(nextJobs.some((job) => job.kind === "background") ? "배경 작업 상태를 불러왔습니다." : "배경 생성 전 확인 정보를 검토하세요.");
     } catch (error) {
       setAssetStatus(`이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setBackgroundStatus(`app-server: 이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setAssetBusy(false);
+    }
+  }
+
+  async function runBackgroundGeneration(): Promise<void> {
+    if (!currentProject) {
+      setBackgroundStatus("adapter: 배경을 생성할 프로젝트가 없습니다.");
+      return;
+    }
+    const prompt = backgroundPrompt.trim();
+    if (!prompt) {
+      setBackgroundStatus("adapter: 생성할 배경 설명을 입력하세요.");
+      return;
+    }
+    const jobId = backgroundJobId.trim() || suggestedBackgroundJobId;
+    setBackgroundBusy(true);
+    setBackgroundErrors([]);
+    setBackgroundStatus("Codex app-server의 ChatGPT managed OAuth와 imageGeneration 경로로 배경 작업을 준비합니다.");
+    try {
+      const created = await postAuthedJson<ProjectApiResult>("/api/generation/jobs", {
+        projectDirectory,
+        id: jobId,
+        kind: "background",
+        targetId: currentProject.id || suggestedBackgroundJobId,
+        prompt,
+        outputAssetId: suggestedBackgroundAssetId
+      });
+      if (created.ok === false) {
+        applyBackgroundFailure(created, "배경 화면 작업을 준비하지 못했습니다.");
+        return;
+      }
+      const run = await postAuthedJson<ProjectApiResult>("/api/generation/jobs/run", {
+        projectDirectory,
+        jobIds: [created.job?.id || jobId],
+        replaceCompleted: true,
+        retryFailed: true
+      });
+      const nextJobs = (run.project?.generationJobs || run.jobs || created.project?.generationJobs || []).filter(isVisualImageJob);
+      if (nextJobs.length > 0) {
+        setAssetJobs(nextJobs);
+      }
+      if (run.project) {
+        onProjectResult(run);
+        resetPreviewAndExportState({
+          previewStatus: "배경 화면이 생성되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
+          project: run.project,
+          workflowSummary: run.workflowSummary
+        });
+      }
+      setBackgroundErrors(run.errors || run.issues?.map(issueText) || []);
+      if (run.ok === false) {
+        applyBackgroundFailure(run, "배경 화면 생성에 실패했습니다.");
+        return;
+      }
+      const resultAsset = run.assets?.find((asset) => asset.kind === "background");
+      setBackgroundStatus(resultAsset
+        ? `저장 위치/에셋 연결 상태: ${resultAsset.id} 생성 완료. backgroundAssetId가 장면에 연결되었습니다.`
+        : "저장 위치/에셋 연결 상태: 완료된 배경 결과를 유지했습니다.");
+    } catch (error) {
+      setBackgroundStatus(`app-server: 배경 화면 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setBackgroundErrors([error instanceof Error ? error.message : String(error)]);
+    } finally {
+      setBackgroundBusy(false);
     }
   }
 
@@ -828,8 +950,8 @@ export function ProjectDetailView({
                     <div><dt>저장 상태</dt><dd>{currentProject ? "프로젝트에 저장됨" : "저장 상태 확인 필요"}</dd></div>
                     <div><dt>마지막 수정 시각</dt><dd>{sourceHeroine?.updatedAt || snapshotSavedAt}</dd></div>
                   </dl>
-                  <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/studio`)} variant="primary">
-                    제작으로 이동
+                  <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/background`)} variant="primary">
+                    배경 화면 생성으로 이동
                   </Button>
                 </>
               ) : null}
@@ -884,47 +1006,62 @@ export function ProjectDetailView({
         {activeTab === "background" ? (
           <div className="detail-tab-grid">
             <section className="detail-card">
-              <h3>배경 화면 및 CG 작업</h3>
-              <span className="state-chip">{assetStateLabel(currentAssetState)}</span>
-              <p className="page-muted">이 탭은 프로젝트 배경 화면 작업과 이벤트 승인으로 생긴 CG 작업을 함께 표시합니다. 완료된 작업은 다시 호출하지 않습니다.</p>
+              <h3>대상 프로젝트</h3>
+              <span className="state-chip">배경 {hasBackgroundAsset ? "1/1" : "0/1"}</span>
+              <p className="page-muted">Alpha에서는 프로젝트당 배경 1개만 생성할 수 있습니다.</p>
+              <dl className="summary-list">
+                <div><dt>제목</dt><dd>{currentProject?.title || shellProjectTitle}</dd></div>
+                <div><dt>프로젝트 ID</dt><dd>{currentProject?.id || projectId || "확인 필요"}</dd></div>
+                <div><dt>저장될 결과 위치</dt><dd>{backgroundOutputLocation}</dd></div>
+                <div><dt>기존 배경 교체</dt><dd>{backgroundReplaceText}</dd></div>
+                <div><dt>생성 경로</dt><dd>Codex app-server · ChatGPT managed OAuth · imageGeneration</dd></div>
+              </dl>
+              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. OAuth, app-server, adapter, 응답 파싱 오류를 구분해 표시합니다.</p>
+            </section>
+            <section className="detail-card">
+              <h3>생성할 배경 설명</h3>
+              <label className="field-row">
+                <span>프롬프트</span>
+                <textarea className="event-prompt-input" disabled={backgroundBusy} onChange={(event) => setBackgroundPrompt(event.target.value)} placeholder={suggestedBackgroundPrompt} value={backgroundPrompt} />
+              </label>
+              <dl className="summary-list">
+                <div><dt>작업 ID</dt><dd>{backgroundJobId || suggestedBackgroundJobId}</dd></div>
+                <div><dt>결과 에셋 ID</dt><dd>{suggestedBackgroundAssetId}</dd></div>
+                <div><dt>backgroundAssetId</dt><dd>{backgroundLinkedScene?.backgroundAssetId || "생성 후 기본 장면에 연결"}</dd></div>
+              </dl>
               <div className="button-row">
-                <Button disabled={assetBusy || hasBackgroundAsset || hasBackgroundJob || !currentProject} icon={<ImageIcon size={16} />} onClick={() => void createBackgroundJob()}>
-                  배경 작업 준비
+                <Button disabled={backgroundBusy || !currentProject} icon={<ImageIcon size={16} />} onClick={() => void runBackgroundGeneration()} variant="primary">
+                  배경 생성
                 </Button>
-                <Button disabled={assetBusy || plannedImageJobIds.length === 0} icon={<ImageIcon size={16} />} onClick={() => void runImageJobs(plannedImageJobIds)} variant="primary">
-                  이미지 만들기
+                <Button disabled={backgroundBusy || !currentProject} icon={<RefreshCw size={16} />} onClick={() => void runBackgroundGeneration()}>
+                  다시 시도
                 </Button>
-                <Button disabled={assetBusy || failedImageJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(failedImageJobIds, true)}>
-                  실패 작업 재시도
-                </Button>
-                <Button disabled={assetBusy} icon={<RefreshCw size={16} />} onClick={() => void loadGenerationJobs()} variant="ghost">
+                <Button disabled={assetBusy || backgroundBusy} icon={<RefreshCw size={16} />} onClick={() => void loadGenerationJobs()} variant="ghost">
                   새로고침
                 </Button>
               </div>
-              <p className="page-muted">실패 작업 재시도는 retryFailed=true로만 실행하고, replaceCompleted=false로 완료된 결과를 유지합니다.</p>
-            </section>
-            <section className="detail-card">
-              <h3>결과 에셋</h3>
-              <div className={currentAssetState === "failed" || currentAssetState === "partialFailed" ? "inline-status warning" : "inline-status success"}>
-                {assetStatus}
-              </div>
-              {assetErrors.length ? (
-                <ul className="compact-list">
-                  {assetErrors.map((error) => <li key={error}>{error}</li>)}
-                </ul>
-              ) : (
-                <p className="page-muted">현재 표시할 생성 오류가 없습니다.</p>
-              )}
-              <p className="page-muted">Codex ChatGPT OAuth 또는 imageGeneration 권한이 없으면 OAUTH_REQUIRED 상태로 차단됩니다.</p>
-              <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
-                프리뷰로 이동
-              </Button>
             </section>
             <section className="detail-card detail-card-wide">
-              <h3>작업 목록</h3>
-              {imageJobs.length ? (
+              <h3>저장 위치/에셋 연결 상태</h3>
+              <div className={backgroundErrors.length ? "inline-status warning" : "inline-status success"}>
+                {backgroundStatus}
+              </div>
+              {backgroundErrors.length ? (
+                <ul className="compact-list">
+                  {backgroundErrors.map((error) => <li key={error}>{error}</li>)}
+                </ul>
+              ) : (
+                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 OAuth, app-server, adapter, 응답 파싱 중 하나로 분류됩니다.</p>
+              )}
+              <dl className="summary-list">
+                <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri || backgroundOutputLocation}</dd></div>
+                <div><dt>에셋 연결</dt><dd>{currentBackgroundAsset?.id || activeBackgroundJob?.outputAssetId || suggestedBackgroundAssetId}</dd></div>
+                <div><dt>장면 연결</dt><dd>{backgroundLinkedScene ? `${backgroundLinkedScene.label || backgroundLinkedScene.id} · backgroundAssetId ${backgroundLinkedScene.backgroundAssetId || "대기 중"}` : "연결할 장면 없음"}</dd></div>
+              </dl>
+              {backgroundPreviewUri ? <img className="asset-preview-image" alt={currentBackgroundAsset?.label || "생성된 배경 미리보기"} src={backgroundPreviewUri} /> : <p className="page-muted">성공 시 생성된 배경 미리보기가 여기에 표시됩니다.</p>}
+              {backgroundJobs.length ? (
                 <ul className="asset-job-list">
-                  {imageJobs.map((job) => (
+                  {backgroundJobs.map((job) => (
                     <li key={job.id || job.outputAssetId}>
                       {job.asset?.uri ? <img alt={job.asset.label || job.outputAssetId || "결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
                       <div>
@@ -938,8 +1075,11 @@ export function ProjectDetailView({
                   ))}
                 </ul>
               ) : (
-                <p className="page-muted">배경 작업을 준비하거나 이벤트를 승인하면 이미지 작업이 이곳에 나타납니다.</p>
+                <p className="page-muted">배경 생성 전에는 작업 목록이 비어 있습니다.</p>
               )}
+              <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
+                프리뷰로 이동
+              </Button>
             </section>
           </div>
         ) : null}

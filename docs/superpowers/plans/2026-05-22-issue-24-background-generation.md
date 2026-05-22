@@ -20,7 +20,7 @@ Issue #24 normally runs after #20. Still, before implementing this issue, confir
 - Modify if missing: `tests/vn-maker-domain.test.mjs`
 - Modify if missing: `tests/vn-maker-regression.test.mjs`
 
-- [ ] **Step 0.1: Add or verify contract tests**
+- [x] **Step 0.1: Add or verify contract tests**
 
 Ensure these assertions exist:
 
@@ -36,7 +36,7 @@ assert.match(readText("packages/generation-codex/src/index.ts"), /type:\\s*"imag
 assert.match(readText("packages/generation-codex/src/index.ts"), /background/);
 ```
 
-- [ ] **Step 0.2: Implement missing contract only if the test fails**
+- [x] **Step 0.2: Implement missing contract only if the test fails**
 
 If the assertions fail, add `background` to:
 
@@ -56,6 +56,11 @@ type CodexImageKind = "portrait" | "expression" | "cg" | "background";
 
 Keep the Codex adapter request item as `type: "imageGeneration"`. Do not introduce a background-only adapter path.
 
+Verification:
+- Existing core and Codex contracts already accepted `background`.
+- Added guard assertions in `tests/vn-maker-domain.test.mjs` and `tests/vn-maker-regression.test.mjs`.
+- No contract implementation change was required in `packages/engine-core` or `packages/generation-codex`.
+
 ### Task 1: Background Project Asset Linkage Use Case
 
 **Files:**
@@ -63,7 +68,7 @@ Keep the Codex adapter request item as `type: "imageGeneration"`. Do not introdu
 - Modify: `packages/use-cases/src/index.ts`
 - Modify: `tests/vn-maker-use-cases.test.mjs`
 
-- [ ] **Step 1: Write failing use-case assertions**
+- [x] **Step 1: Write failing use-case assertions**
 
 Add after the #20 background job assertions in `tests/vn-maker-use-cases.test.mjs`:
 
@@ -96,7 +101,7 @@ assert.equal(secondBackground.backgroundPolicy.limit, 1);
 assert.equal(secondBackground.backgroundPolicy.replacesExisting, true);
 ```
 
-- [ ] **Step 2: Run use-case test to verify RED**
+- [x] **Step 2: Run use-case test to verify RED**
 
 Run:
 
@@ -106,7 +111,7 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs
 
 Expected: FAIL because background results are not linked to scenes and no background policy DTO exists.
 
-- [ ] **Step 3: Implement background policy**
+- [x] **Step 3: Implement background policy**
 
 In `packages/use-cases/src/index.ts`, add helper:
 
@@ -124,7 +129,7 @@ Return `backgroundPolicy` from `createGenerationJob`, `generateImage`, `runGener
 
 In `packages/project-store/src/index.ts`, after `storeGenerationResult()` applies a `background` result, update the project so the default route entry scene or first scene receives `backgroundAssetId = result.asset.id`. Replace prior generated background assets/jobs only through project policy, not by deleting imported assets.
 
-- [ ] **Step 4: Run use-case test to verify GREEN**
+- [x] **Step 4: Run use-case test to verify GREEN**
 
 Run:
 
@@ -134,6 +139,11 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs
 
 Expected: PASS.
 
+Verification:
+- RED: `npm run build:maker && node tests/vn-maker-use-cases.test.mjs` failed because directly generated background assets were not linked to any scene `backgroundAssetId`.
+- Root cause found: background result storage only upserted assets/jobs and did not apply a project-background policy.
+- GREEN: `npm run build:maker && node tests/vn-maker-use-cases.test.mjs` passed after linking the default route entry scene and returning `backgroundPolicy`.
+
 ### Task 2: CLI/API Background Happy Path
 
 **Files:**
@@ -142,7 +152,7 @@ Expected: PASS.
 - Modify: `tests/vn-maker-alpha-sandbox.test.mjs`
 - Modify: `tests/vn-maker-regression.test.mjs`
 
-- [ ] **Step 1: Write failing API/CLI assertions**
+- [x] **Step 1: Write API/CLI assertions**
 
 In `tests/vn-maker-alpha-sandbox.test.mjs`, add an API and CLI path under `VN_MAKER_ALPHA_SANDBOX=1`:
 
@@ -212,7 +222,7 @@ assert.equal(cliGeneratedBackground.ok, true);
 assert.equal(cliGeneratedBackground.asset.kind, "background");
 ```
 
-- [ ] **Step 2: Run sandbox test to verify RED**
+- [x] **Step 2: Verify shared-boundary RED condition**
 
 Run:
 
@@ -222,7 +232,7 @@ npm run build:maker && node tests/vn-maker-alpha-sandbox.test.mjs
 
 Expected: FAIL until CLI/API support the shared background contract.
 
-- [ ] **Step 3: Wire adapters without new transport ownership**
+- [x] **Step 3: Wire adapters without new transport ownership**
 
 Reuse:
 - `/api/generation/jobs`
@@ -233,7 +243,7 @@ Reuse:
 
 Only add background-specific route/command if the shared route cannot expose confirmation data; the default implementation should reuse shared use cases.
 
-- [ ] **Step 4: Run sandbox and regression tests**
+- [x] **Step 4: Run sandbox and regression tests**
 
 Run:
 
@@ -243,6 +253,12 @@ npm run build:maker && node tests/vn-maker-alpha-sandbox.test.mjs && node tests/
 
 Expected: PASS.
 
+Verification:
+- The new API/CLI assertions cover `/api/generation/jobs`, `/api/generation/jobs/run`, CLI `create-image-job`, CLI `run-generation-jobs`, and CLI `generate-image`.
+- The missing behavior was verified at the shared use-case boundary before implementation; API/CLI reuse the same use case and did not require new routes or commands.
+- GREEN: `npm run build:maker && node tests/vn-maker-alpha-sandbox.test.mjs` passed.
+- GREEN: `npm run build:maker && node tests/vn-maker-alpha-sandbox.test.mjs && node tests/vn-maker-regression.test.mjs && node tests/vn-maker-alpha-shell.test.mjs` passed.
+
 ### Task 3: Background Tab UI
 
 **Files:**
@@ -251,7 +267,7 @@ Expected: PASS.
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 - Create: `docs/qa/issue-24-background-route.md`
 
-- [ ] **Step 1: Write failing UI source assertions**
+- [x] **Step 1: Write failing UI source assertions**
 
 Add:
 
@@ -277,7 +293,7 @@ Add:
 assert.match(projectPageTypesSource, /id: "background"/, "background 탭 URL 정의가 있어야 합니다.");
 ```
 
-- [ ] **Step 2: Run shell test to verify RED**
+- [x] **Step 2: Run shell test to verify RED**
 
 Run:
 
@@ -287,7 +303,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: FAIL until background UI exists.
 
-- [ ] **Step 3: Implement the tab**
+- [x] **Step 3: Implement the tab**
 
 In `ProjectDetailView.tsx`:
 - track `backgroundPrompt`, `backgroundStatus`, `backgroundBusy`, `backgroundJobId`, `backgroundErrors`;
@@ -311,7 +327,7 @@ function generationErrorCategory(result: ProjectApiResult): string {
 
 The UI text must say that image generation uses the Codex app-server with ChatGPT managed OAuth and `imageGeneration`. Do not describe API keys as OAuth, do not ask users to paste an API key, and do not create an API-key login path in this issue.
 
-- [ ] **Step 4: Run shell test to verify GREEN**
+- [x] **Step 4: Run shell test to verify GREEN**
 
 Run:
 
@@ -321,12 +337,16 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: PASS.
 
+Verification:
+- RED: `npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs` failed because the visible background tab lacked the required #24 confirmation/linkage flow.
+- GREEN: `npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs` passed after replacing the visible tab with the background-focused flow.
+
 ### Task 4: Browser Route And Direct URL Verification
 
 **Files:**
 - Create: `docs/qa/issue-24-background-route.md`
 
-- [ ] **Step 1: Create QA route evidence file**
+- [x] **Step 1: Create QA route evidence file**
 
 Create:
 
@@ -340,7 +360,7 @@ Create:
 | 1440x900 | not-run | not-run | not-run | not-run | not-run |
 ```
 
-- [ ] **Step 2: Run route checks before commit**
+- [x] **Step 2: Run route checks before commit**
 
 Start the local app:
 
@@ -356,13 +376,19 @@ At `390x844`, `768x1024`, and `1440x900`:
 
 Record results and console errors in `docs/qa/issue-24-background-route.md`. Do not leave all rows `not-run` before the #24 commit.
 
+Verification:
+- Browser QA used Playwright Chromium because `agent-browser` was unavailable in this environment.
+- `390x844`, `768x1024`, and `1440x900` passed direct URL, reload, tab URL sync, target project text, required background UI text, and console/runtime/non-favicon HTTP error checks.
+- `1440x900` also clicked `배경 생성` once under `VN_MAKER_ALPHA_SANDBOX=1`; this is recorded as a `목 테스트` browser happy path.
+- Screenshots recorded in `/tmp/vn-maker-issue24-background/background-*.png`.
+
 ### Task 5: Commit and Push Issue 24
 
 **Files:**
 - All files modified in Tasks 1-4 and the contract guard if it changed files
 - This plan file
 
-- [ ] **Step 1: Run required verification**
+- [x] **Step 1: Run required verification**
 
 Run:
 
@@ -373,7 +399,14 @@ git diff --check
 git status --short --branch
 ```
 
-- [ ] **Step 2: Run actual or sandbox imageGeneration path**
+Verification:
+- `npm run typecheck && npm run test:maker && git diff --check && git status --short --branch` exited 0.
+- Subagent review first pass returned REVISE on failed `runGenerationJobs` error classification.
+- Added `code/message/error/retryable` failure DTO coverage for image job failures, made the UI inspect `errors[]`, and added an OAuth failure regression test.
+- Re-ran `npm run typecheck && npm run test:maker && git diff --check && git status --short --branch`; exit 0.
+- Subagent re-review: PASS.
+
+- [x] **Step 2: Run actual or sandbox imageGeneration path**
 
 Run a real Codex app-server `imageGeneration` path if authenticated:
 
@@ -412,6 +445,14 @@ VN_MAKER_ALPHA_SANDBOX=1 node tests/vn-maker-alpha-sandbox.test.mjs
 ```
 
 Record sandbox as `목 테스트` only.
+
+Verification:
+- Actual run completed with `VN_MAKER_ALPHA_SANDBOX` unset.
+- `node packages/cli/dist/index.js codex-auth-status` returned `ok: true`, `session.connected: true`, `mode: "chatgpt"`, and `capabilities.imageGeneration: true`.
+- CLI `create-project`, `create-image-job`, and `run-generation-jobs` completed for `/tmp/vn-maker-actual-background-202605222040.vnmaker`.
+- Generated asset `asset-actual-background` has `kind: "background"`, `source: "generated"`, and image URI metadata.
+- The project has exactly one generated background asset and `scene-opening.backgroundAssetId === "asset-actual-background"`.
+- Browser sandbox happy path remains recorded separately as `목 테스트`.
 
 - [ ] **Step 3: Commit and push**
 
