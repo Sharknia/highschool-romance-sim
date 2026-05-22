@@ -1,5 +1,7 @@
 {
+  "name": "highschool-romance-sim",
   "private": true,
+  "packageManager": "npm@11.12.1",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -7,7 +9,7 @@
   "scripts": {
     "legacy:typecheck": "npx tsc --noEmit",
     "typecheck:legacy": "npm run legacy:typecheck",
-    "typecheck:maker": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/project-store && npm run build -w @vn-maker/use-cases && npm run build -w @vn-maker/alpha-sandbox && npm run build -w @vn-maker/generation-codex && npm run typecheck -w @vn-maker/cli && npm run typecheck -w @vn-maker/web",
+    "typecheck:maker": "npm run build:web-deps && npm run typecheck -w @vn-maker/cli && npm run typecheck -w @vn-maker/web",
     "typecheck": "npm run legacy:typecheck && npm run typecheck:maker",
     "legacy:test": "npm run legacy:build:engine && node tests/engine-regression.test.mjs",
     "test:engine": "npm run legacy:test",
@@ -16,7 +18,8 @@
     "build:engine": "npm run legacy:build:engine",
     "build:html": "node scripts/embed-engine.mjs",
     "build:legacy": "npm run legacy:typecheck && npm run legacy:build:engine && npm run build:html",
-    "build:maker": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/project-store && npm run build -w @vn-maker/use-cases && npm run build -w @vn-maker/alpha-sandbox && npm run build -w @vn-maker/generation-codex && npm run build -w @vn-maker/cli && npm run build -w @vn-maker/web",
+    "build:web-deps": "npm run build -w @vn-maker/engine-core && npm run build -w @vn-maker/project-store && npm run build -w @vn-maker/use-cases && npm run build -w @vn-maker/alpha-sandbox && npm run build -w @vn-maker/generation-codex",
+    "build:maker": "npm run build:web-deps && npm run build -w @vn-maker/cli && npm run build -w @vn-maker/web",
     "build": "npm run build:legacy && npm run build:maker"
   },
   "devDependencies": {
