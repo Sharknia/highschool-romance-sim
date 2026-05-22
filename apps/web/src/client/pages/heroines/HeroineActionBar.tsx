@@ -10,6 +10,8 @@ interface HeroineActionBarProps {
   onCancel: () => void;
   onReload?: () => void;
   onSave: () => void;
+  onSaveAndExit?: () => void;
+  saveAndExitLabel?: string;
 }
 
 export function HeroineActionBar({
@@ -19,7 +21,9 @@ export function HeroineActionBar({
   onCancel,
   onReload,
   onSave,
+  onSaveAndExit,
   saving,
+  saveAndExitLabel = "저장 후 상세보기",
   summary
 }: HeroineActionBarProps) {
   return (
@@ -40,6 +44,11 @@ export function HeroineActionBar({
         <Button disabled={!canSave || saving} icon={<Save size={16} />} onClick={onSave} variant="primary">
           저장
         </Button>
+        {onSaveAndExit ? (
+          <Button disabled={!canSave || saving} icon={<Save size={16} />} onClick={onSaveAndExit} variant="primary">
+            {saveAndExitLabel}
+          </Button>
+        ) : null}
       </div>
     </div>
   );

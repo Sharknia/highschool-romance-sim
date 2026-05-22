@@ -7,7 +7,6 @@ import {
   History,
   ImagePlus,
   ListChecks,
-  LogOut,
   Play,
   RefreshCw,
   RotateCcw,
@@ -20,7 +19,7 @@ import {
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ApiResult, ImagePreviewResult } from "../api/types";
-import { describeSession, useAuth } from "../auth/AuthProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { SceneWorkbench } from "../components/SceneWorkbench";
 import { AppShell, Button, StatusBanner } from "../components/ui";
 import { alphaSandboxStatusText, isAlphaSandboxEnabled } from "../runtimeConfig";
@@ -246,7 +245,7 @@ function jobTone(status: GenerationJob["status"]): string {
 }
 
 export function WorkspacePage() {
-  const { logout, postAuthedJson, refreshSession, session } = useAuth();
+  const { postAuthedJson, refreshSession } = useAuth();
   const navigate = useNavigate();
   const alphaSandboxEnabled = isAlphaSandboxEnabled();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
@@ -673,15 +672,7 @@ export function WorkspacePage() {
   }
 
   return (
-    <AppShell
-      actions={(
-        <>
-          <span className="topbar-status">{describeSession(session)}</span>
-          <Button icon={<RefreshCw size={16} />} onClick={() => void refreshSession()} variant="ghost">상태 갱신</Button>
-          <Button icon={<LogOut size={16} />} onClick={() => void logout()} variant="secondary">로그아웃</Button>
-        </>
-      )}
-    >
+    <AppShell>
       <main className="maker-workspace">
         {alphaSandboxEnabled ? <StatusBanner tone="success">{alphaSandboxStatusText}</StatusBanner> : null}
 

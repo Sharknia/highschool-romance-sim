@@ -1,11 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
-import { StatusBanner } from "../../components/ui";
 import { createHeroine, failureText, generateHeroinePortrait, listHeroines } from "./heroineApi";
-import { HeroineActionBar } from "./HeroineActionBar";
-import { createEmptyHeroineDraft, HeroineFormPanel, validateHeroineDraft } from "./HeroineFormPanel";
-import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
+import { HeroineEditorScreen } from "./HeroineEditorScreen";
+import { createEmptyHeroineDraft, validateHeroineDraft } from "./HeroineFormPanel";
 import { useUnsavedHeroineNavigationGuard } from "./useUnsavedHeroineNavigationGuard";
 import type { HeroineDraft, HeroineLibraryResult, HeroineLoadState } from "./heroinePageTypes";
 
@@ -15,8 +13,20 @@ function statusTone(state: HeroineLoadState): "neutral" | "waiting" | "success" 
   return "neutral";
 }
 
+function editableCreateSnapshot(draft: HeroineDraft): string {
+  return JSON.stringify({
+    name: draft.name,
+    description: draft.description,
+    personality: draft.personality,
+    speechStyle: draft.speechStyle,
+    appearance: draft.appearance,
+    defaultPortraitAssetId: draft.defaultPortraitAssetId,
+    defaultPortraitUri: draft.defaultPortraitUri
+  });
+}
+
 export function HeroineCreatePage() {
-  const { postAuthedJson, refreshSession, session } = useAuth();
+  const { postAuthedJson, session } = useAuth();
   const navigate = useNavigate();
   const allowNavigationRef = useRef(false);
   const [state, setState] = useState<HeroineLoadState>("ready");
@@ -26,14 +36,14 @@ export function HeroineCreatePage() {
   const [existingIds, setExistingIds] = useState<string[]>([]);
   const [stagedPortraitRef, setStagedPortraitRef] = useState<HeroineLibraryResult["stagedPortraitRef"]>();
   const emptyDraft = useMemo(() => createEmptyHeroineDraft(), []);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(emptyDraft);
+  const dirty = editableCreateSnapshot(draft) !== editableCreateSnapshot(emptyDraft);
   const validationIssues = validateHeroineDraft(draft, "create");
   const idConflict = Boolean(draft.id.trim() && existingIds.includes(draft.id.trim()));
-  const allIssues = idConflict ? [...validationIssues, "이미 같은 히로인 ID가 있습니다."] : validationIssues;
+  const allIssues = idConflict ? [...validationIssues, "이미 같은 자동 식별자가 있습니다."] : validationIssues;
   const canSave = allIssues.length === 0 && !state.includes("saving");
   const actionSummary = allIssues.length > 0
     ? `필수값을 모두 입력해야 저장할 수 있습니다. ${allIssues.join(" ")}`
-    : "저장하려면 이름, 설명, 성격, 말투, 외형 설명을 입력해야 합니다. ID는 이름으로 자동 제안됩니다.";
+    : "저장하면 편집 화면으로 이동합니다. 저장 후 상세보기는 상세 화면으로 이동합니다.";
 
   useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 히로인 draft가 있습니다. 페이지를 떠나시겠습니까?");
 
@@ -60,7 +70,7 @@ export function HeroineCreatePage() {
         portraitAssetUris: []
       };
       setStagedPortraitRef(undefined);
-      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      setStatus("저장용 식별자가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
       draftRef.current = clearedDraft;
       setDraft(clearedDraft);
       return;
@@ -69,7 +79,7 @@ export function HeroineCreatePage() {
     setDraft(nextDraft);
   }, [stagedPortraitRef]);
 
-  async function save(): Promise<void> {
+  async function save(navigateAfterSave = false): Promise<void> {
     if (!canSave) {
       setStatus(actionSummary);
       return;
@@ -83,7 +93,10 @@ export function HeroineCreatePage() {
       return;
     }
     allowNavigationRef.current = true;
-    navigate(`/heroines/${encodeURIComponent(result.heroine?.id || draft.id)}`);
+    const heroineId = result.heroine?.id || draft.id;
+    navigate(navigateAfterSave
+      ? `/heroines/${encodeURIComponent(heroineId)}`
+      : `/heroines/${encodeURIComponent(heroineId)}/edit`);
   }
 
   async function generatePortrait(): Promise<void> {
@@ -100,7 +113,7 @@ export function HeroineCreatePage() {
     if (currentDraft.id !== requestDraft.id) {
       setStagedPortraitRef(undefined);
       setState("ready");
-      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      setStatus("저장용 식별자가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
       return;
     }
     const nextDraft = {
@@ -124,43 +137,27 @@ export function HeroineCreatePage() {
   }
 
   return (
-    <section className="app-page heroine-page" aria-labelledby="heroineCreateTitle">
-      <header className="page-hero">
-        <div>
-          <p className="eyebrow">New Heroine</p>
-          <h1 id="heroineCreateTitle">새 히로인 만들기</h1>
-          <p>라이브러리 원본 히로인을 생성합니다. 포트레이트 없이도 기본 정보는 저장할 수 있습니다.</p>
-        </div>
-        <div className="page-primary-action">
-          <span>저장 성공 시 상세보기로 이동합니다.</span>
-        </div>
-      </header>
-
-      <StatusBanner tone={statusTone(state)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
-
-      <section className="heroine-editor-layout">
-        <article className="page-panel heroine-editor-main">
-          <HeroineFormPanel draft={draft} mode="create" onChange={updateDraft} />
-        </article>
-        <HeroinePortraitPanel
-          busy={state === "saving"}
-          heroine={draft}
-          onGenerate={() => void generatePortrait()}
-          onRefreshSession={() => void refreshSession()}
-          session={session}
-        />
-      </section>
-
-      <HeroineActionBar
-        canSave={canSave}
-        dirty={dirty}
-        onCancel={cancel}
-        onSave={() => void save()}
-        saving={state === "saving"}
-        summary={actionSummary}
-      />
-    </section>
+    <HeroineEditorScreen
+      canSave={canSave}
+      description="라이브러리 원본 히로인을 생성합니다. 포트레이트 없이도 기본 정보는 저장할 수 있습니다."
+      dirty={dirty}
+      draft={draft}
+      existingIds={existingIds}
+      eyebrow="New Heroine"
+      mode="create"
+      onBackToList={() => navigate("/heroines")}
+      onCancel={cancel}
+      onChange={updateDraft}
+      onGeneratePortrait={() => void generatePortrait()}
+      onSave={() => void save()}
+      onSaveAndExit={() => void save(true)}
+      saving={state === "saving"}
+      session={session}
+      status={status}
+      statusTone={statusTone(state)}
+      summary={actionSummary}
+      title="새 히로인 만들기"
+      titleId="heroineCreateTitle"
+    />
   );
 }

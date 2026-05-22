@@ -4,7 +4,6 @@ import type { HeroineDraft } from "./heroinePageTypes";
 export const reservedHeroineIds = ["new", "edit", "settings", "delete", "create"] as const;
 
 const requiredFields: Array<{ field: keyof HeroineDraft; label: string }> = [
-  { field: "id", label: "히로인 ID" },
   { field: "name", label: "이름" },
   { field: "description", label: "설명" },
   { field: "personality", label: "성격" },
@@ -32,7 +31,25 @@ export function suggestHeroineId(name: string): string {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-");
-  return normalized || "";
+  return normalized || "heroine";
+}
+
+export function suggestUniqueHeroineId(name: string, existingIds: string[] = []): string {
+  const baseId = suggestHeroineId(name);
+  const blockedIds = new Set([
+    ...existingIds.map((id) => id.trim()).filter(Boolean),
+    ...reservedHeroineIds
+  ]);
+  if (!blockedIds.has(baseId)) {
+    return baseId;
+  }
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseId}-${index}`;
+    if (!blockedIds.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `${baseId}-${Date.now()}`;
 }
 
 export function validateHeroineDraft(draft: HeroineDraft, mode: "create" | "edit"): string[] {
@@ -41,7 +58,7 @@ export function validateHeroineDraft(draft: HeroineDraft, mode: "create" | "edit
     .map(({ label }) => `${label}을 입력해야 합니다.`);
   const heroineId = draft.id.trim();
   if (heroineId && !/^[a-z0-9_-]+$/.test(heroineId)) {
-    issues.push("히로인 ID는 소문자 영문, 숫자, 하이픈, 언더스코어만 사용할 수 있습니다.");
+    issues.push("자동 식별자는 소문자 영문, 숫자, 하이픈, 언더스코어만 사용할 수 있습니다.");
   }
   if (mode === "create" && reservedHeroineIds.includes(heroineId as typeof reservedHeroineIds[number])) {
     issues.push("예약어 ID는 사용할 수 없습니다.");
@@ -51,15 +68,24 @@ export function validateHeroineDraft(draft: HeroineDraft, mode: "create" | "edit
 
 interface HeroineFormPanelProps {
   draft: HeroineDraft;
+  existingIds?: string[];
   mode: "create" | "edit";
   onChange: (draft: HeroineDraft) => void;
 }
 
-export function HeroineFormPanel({ draft, mode, onChange }: HeroineFormPanelProps) {
-  const suggestedId = suggestHeroineId(draft.name);
+function isRequiredEmpty(draft: HeroineDraft, field: keyof HeroineDraft): boolean {
+  return requiredFields.some((item) => item.field === field) && !String(draft[field] || "").trim();
+}
+
+function requiredClassName(draft: HeroineDraft, field: keyof HeroineDraft, mode: "create" | "edit"): string {
+  return (mode === "create" || mode === "edit") && isRequiredEmpty(draft, field) ? "field-row field-row-invalid" : "field-row";
+}
+
+export function HeroineFormPanel({ draft, existingIds = [], mode, onChange }: HeroineFormPanelProps) {
+  const suggestedId = suggestUniqueHeroineId(draft.name, existingIds);
 
   useEffect(() => {
-    if (mode === "create" && !draft.id.trim() && suggestedId) {
+    if (mode === "create" && draft.id !== suggestedId) {
       onChange({ ...draft, id: suggestedId });
     }
   }, [draft, mode, onChange, suggestedId]);
@@ -70,41 +96,27 @@ export function HeroineFormPanel({ draft, mode, onChange }: HeroineFormPanelProp
 
   return (
     <section className="heroine-form-panel">
-      <div className="field-row">
+      <div className={requiredClassName(draft, "name", mode)}>
         <label htmlFor="heroineName">이름</label>
-        <input id="heroineName" onChange={(event) => update("name", event.target.value)} value={draft.name} />
+        <input aria-invalid={isRequiredEmpty(draft, "name")} id="heroineName" onChange={(event) => update("name", event.target.value)} value={draft.name} />
       </div>
-      <div className="field-row">
-        <label htmlFor="heroineId">히로인 ID</label>
-        <input
-          id="heroineId"
-          onChange={(event) => update("id", event.target.value)}
-          readOnly={mode === "edit"}
-          value={draft.id}
-        />
-        <span className="field-hint">
-          {mode === "create"
-            ? `ID는 이름으로 자동 제안됩니다. 저장 전에는 수정할 수 있고, 저장 후에는 바꿀 수 없습니다.${suggestedId ? ` 제안값: ${suggestedId}` : ""}`
-            : "저장된 히로인 ID는 수정할 수 없습니다."}
-        </span>
-      </div>
-      <div className="field-row">
+      <div className={requiredClassName(draft, "description", mode)}>
         <label htmlFor="heroineDescription">설명</label>
-        <textarea id="heroineDescription" onChange={(event) => update("description", event.target.value)} value={draft.description} />
+        <textarea aria-invalid={isRequiredEmpty(draft, "description")} id="heroineDescription" onChange={(event) => update("description", event.target.value)} value={draft.description} />
       </div>
       <div className="heroine-form-grid">
-        <label className="field-row" htmlFor="heroinePersonality">
+        <label className={requiredClassName(draft, "personality", mode)} htmlFor="heroinePersonality">
           <span>성격</span>
-          <textarea id="heroinePersonality" onChange={(event) => update("personality", event.target.value)} value={draft.personality} />
+          <textarea aria-invalid={isRequiredEmpty(draft, "personality")} id="heroinePersonality" onChange={(event) => update("personality", event.target.value)} value={draft.personality} />
         </label>
-        <label className="field-row" htmlFor="heroineSpeechStyle">
+        <label className={requiredClassName(draft, "speechStyle", mode)} htmlFor="heroineSpeechStyle">
           <span>말투</span>
-          <textarea id="heroineSpeechStyle" onChange={(event) => update("speechStyle", event.target.value)} value={draft.speechStyle} />
+          <textarea aria-invalid={isRequiredEmpty(draft, "speechStyle")} id="heroineSpeechStyle" onChange={(event) => update("speechStyle", event.target.value)} value={draft.speechStyle} />
         </label>
       </div>
-      <div className="field-row">
+      <div className={requiredClassName(draft, "appearance", mode)}>
         <label htmlFor="heroineAppearance">외형 설명</label>
-        <textarea id="heroineAppearance" onChange={(event) => update("appearance", event.target.value)} value={draft.appearance} />
+        <textarea aria-invalid={isRequiredEmpty(draft, "appearance")} id="heroineAppearance" onChange={(event) => update("appearance", event.target.value)} value={draft.appearance} />
       </div>
     </section>
   );

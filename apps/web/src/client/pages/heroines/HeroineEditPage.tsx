@@ -1,12 +1,9 @@
-import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, StatusBanner } from "../../components/ui";
 import { failureText, generateHeroinePortrait, getHeroine, updateHeroine } from "./heroineApi";
-import { HeroineActionBar } from "./HeroineActionBar";
-import { createEmptyHeroineDraft, HeroineFormPanel, validateHeroineDraft } from "./HeroineFormPanel";
-import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
+import { HeroineEditorScreen } from "./HeroineEditorScreen";
+import { createEmptyHeroineDraft, validateHeroineDraft } from "./HeroineFormPanel";
 import { useUnsavedHeroineNavigationGuard } from "./useUnsavedHeroineNavigationGuard";
 import type { HeroineDraft, HeroineLoadState, HeroineRevisionRef } from "./heroinePageTypes";
 
@@ -27,8 +24,10 @@ function editableSnapshot(draft: HeroineDraft): string {
   });
 }
 
+const readyStatus = "변경할 내용을 입력하세요.";
+
 export function HeroineEditPage() {
-  const { postAuthedJson, refreshSession, session } = useAuth();
+  const { postAuthedJson, session } = useAuth();
   const navigate = useNavigate();
   const { heroineId = "" } = useParams<{ heroineId: string }>();
   const allowNavigationRef = useRef(false);
@@ -43,8 +42,11 @@ export function HeroineEditPage() {
   const actionSummary = validationIssues.length > 0
     ? `필수값을 모두 입력해야 저장할 수 있습니다. ${validationIssues.join(" ")}`
     : dirty
-      ? "변경할 내용을 입력하세요."
+      ? readyStatus
       : "변경된 내용이 없습니다.";
+  const displayStatus = state === "loading" || (state === "ready" && status === readyStatus)
+    ? ""
+    : status;
 
   const load = useCallback(async () => {
     setState("loading");
@@ -64,7 +66,7 @@ export function HeroineEditPage() {
     setOriginal(nextDraft);
     setRevision(result.heroineRevision);
     setState("ready");
-    setStatus("변경할 내용을 입력하세요.");
+    setStatus(readyStatus);
   }, [heroineId, postAuthedJson]);
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export function HeroineEditPage() {
 
   useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 변경 사항이 있습니다. 페이지를 떠나시겠습니까?");
 
-  async function save(): Promise<void> {
+  async function save(navigateAfterSave = false): Promise<void> {
     if (!canSave) {
       setStatus(actionSummary);
       return;
@@ -86,8 +88,19 @@ export function HeroineEditPage() {
       setStatus(`히로인 저장 실패: ${failureText(result, "입력값을 확인해 주세요.")}`);
       return;
     }
-    allowNavigationRef.current = true;
-    navigate(`/heroines/${encodeURIComponent(result.heroine?.id || draft.id)}`);
+    const nextDraft = {
+      ...result.heroine!,
+      heroineRevision: result.heroineRevision
+    };
+    setDraft(nextDraft);
+    setOriginal(nextDraft);
+    setRevision(result.heroineRevision);
+    setState("ready");
+    setStatus(navigateAfterSave ? "히로인을 저장했습니다. 상세보기로 이동합니다." : "히로인을 저장했습니다.");
+    if (navigateAfterSave) {
+      allowNavigationRef.current = true;
+      navigate(`/heroines/${encodeURIComponent(result.heroine?.id || draft.id)}`);
+    }
   }
 
   async function generatePortrait(): Promise<void> {
@@ -126,65 +139,32 @@ export function HeroineEditPage() {
   }
 
   return (
-    <section className="app-page heroine-page" aria-labelledby="heroineEditTitle">
-      <header className="page-hero">
-        <div>
-          <p className="eyebrow">Edit Heroine</p>
-          <h1 id="heroineEditTitle">히로인 수정</h1>
-          <p>원본 히로인을 수정해도 기존 프로젝트 스냅샷은 자동 갱신하지 않습니다.</p>
-        </div>
-        <div className="page-primary-action">
-          <span>수정 취소 또는 저장 성공 후에는 상세보기로 이동합니다.</span>
-          <Button icon={<ArrowLeft size={16} />} onClick={cancel}>상세보기로 돌아가기</Button>
-        </div>
-      </header>
-
-      <StatusBanner tone={statusTone(state)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
-
-      {state === "notFound" ? (
-        <section className="page-panel">
-          <h2>히로인을 찾을 수 없습니다.</h2>
-          <Button icon={<ArrowLeft size={16} />} onClick={() => navigate("/heroines")}>
-            목록으로 돌아가기
-          </Button>
-        </section>
-      ) : null}
-
-      {state === "error" ? (
-        <div className="panel-actions">
-          <Button icon={<RefreshCw size={16} />} onClick={() => void load()}>다시 시도</Button>
-        </div>
-      ) : null}
-
-      {state !== "loading" && state !== "notFound" && state !== "error" ? (
-        <>
-          <section className="heroine-editor-layout">
-            <article className="page-panel heroine-editor-main">
-              <HeroineFormPanel draft={draft} mode="edit" onChange={setDraft} />
-            </article>
-            <HeroinePortraitPanel
-              busy={state === "saving"}
-              heroine={draft}
-              onGenerate={() => void generatePortrait()}
-              onRefreshSession={() => void refreshSession()}
-              session={session}
-            />
-          </section>
-
-          <HeroineActionBar
-            canSave={canSave}
-            conflict={state === "conflict"}
-            dirty={dirty}
-            onCancel={cancel}
-            onReload={() => void load()}
-            onSave={() => void save()}
-            saving={state === "saving"}
-            summary={actionSummary}
-          />
-        </>
-      ) : null}
-    </section>
+    <HeroineEditorScreen
+      canSave={canSave}
+      conflict={state === "conflict"}
+      description="원본 히로인을 수정해도 기존 프로젝트 스냅샷은 자동 갱신하지 않습니다."
+      dirty={dirty}
+      draft={draft}
+      error={state === "error"}
+      eyebrow="Edit Heroine"
+      loading={state === "loading"}
+      mode="edit"
+      notFound={state === "notFound"}
+      onBackToList={() => navigate("/heroines")}
+      onCancel={cancel}
+      onChange={setDraft}
+      onGeneratePortrait={() => void generatePortrait()}
+      onReload={() => void load()}
+      onRetry={() => void load()}
+      onSave={() => void save()}
+      onSaveAndExit={() => void save(true)}
+      saving={state === "saving"}
+      session={session}
+      status={displayStatus}
+      statusTone={statusTone(state)}
+      summary={actionSummary}
+      title="히로인 수정"
+      titleId="heroineEditTitle"
+    />
   );
 }

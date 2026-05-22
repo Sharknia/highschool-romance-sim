@@ -1,6 +1,6 @@
 import { AlertTriangle, Clock3, FolderOpen, MoreVertical, RotateCw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Button } from "../../components/ui";
+import { Button, ContentList } from "../../components/ui";
 import type { RecentProject } from "./projectPageTypes";
 
 interface RecentProjectListProps {
@@ -104,46 +104,33 @@ export function RecentProjectList({
       ) : filteredProjects.length === 0 ? (
         <p className="page-muted">필터 결과가 없습니다. 다른 제목이나 경로로 검색해 주세요.</p>
       ) : (
-        <div className="recent-project-list">
-          {filteredProjects.map((entry) => (
-            <article
-              className={`recent-project-row${entry.missing ? " missing" : ""}`}
-              key={entry.projectId}
-              onClick={() => openFromCard(entry)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  openFromCard(entry);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className="recent-project-main">
-                <strong>{entry.title}</strong>
-                <span>{entry.projectDirectory}</span>
-                <small><Clock3 size={14} /> 마지막 열림 {formatDate(entry.lastOpenedAt)} · 마지막 검증 {formatDate(entry.lastValidatedAt)} · {validationLabel(entry.validationState)} · {entry.projectId}</small>
-              </div>
-              <div className="recent-project-state">
-                {entry.missing ? (
-                  <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
-                ) : (
-                  <span className="state-chip">ready</span>
-                )}
-              </div>
-              <div className="recent-project-actions">
-                <Button disabled={busy || entry.missing} icon={<FolderOpen size={16} />} onClick={(event) => {
-                  event.stopPropagation();
-                  onOpen(entry);
-                }}>
+        <ContentList
+          ariaLabel="최근 프로젝트 목록"
+          items={filteredProjects.map((entry) => ({
+            id: entry.projectId,
+            className: entry.missing ? "missing" : "",
+            title: entry.title,
+            description: entry.projectDirectory,
+            meta: (
+              <>
+                <Clock3 size={14} /> 마지막 열림 {formatDate(entry.lastOpenedAt)} · 마지막 검증 {formatDate(entry.lastValidatedAt)} · {validationLabel(entry.validationState)} · {entry.projectId}
+              </>
+            ),
+            state: entry.missing ? (
+              <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
+            ) : (
+              <span className="state-chip">ready</span>
+            ),
+            onSelect: () => openFromCard(entry),
+            actions: (
+              <>
+                <Button disabled={busy || entry.missing} icon={<FolderOpen size={16} />} onClick={() => onOpen(entry)}>
                   열기
                 </Button>
-                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={(event) => {
-                  event.stopPropagation();
-                  onPrepareReconnect(entry);
-                }} variant={entry.missing ? "primary" : "secondary"}>
+                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)} variant={entry.missing ? "primary" : "secondary"}>
                   재연결
                 </Button>
-                <details className="recent-project-menu" onClick={(event) => event.stopPropagation()}>
+                <details className="recent-project-menu">
                   <summary aria-label={`${entry.title} 추가 작업`}>
                     <MoreVertical size={17} />
                   </summary>
@@ -151,10 +138,10 @@ export function RecentProjectList({
                     목록에서만 제거
                   </Button>
                 </details>
-              </div>
-            </article>
-          ))}
-        </div>
+              </>
+            )
+          }))}
+        />
       )}
     </section>
   );
