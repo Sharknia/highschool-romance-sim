@@ -134,6 +134,27 @@ assert.equal(created.ok, true);
 assert.equal(created.projectDirectory, projectDirectory);
 assert.equal(created.project.characters.length, 1);
 
+const generatedPortrait = await useCases.generateImage({
+  projectDirectory,
+  kind: "portrait",
+  heroine
+});
+assert.equal(generatedPortrait.ok, true);
+assert.equal(generatedPortrait.asset.id, heroine.defaultPortraitAssetId);
+const heroineWithGeneratedPortrait = await useCases.saveHeroine({
+  projectDirectory,
+  heroine: {
+    ...heroine,
+    defaultPortraitAssetId: generatedPortrait.asset.id,
+    portraitAssetIds: [generatedPortrait.asset.id]
+  }
+});
+assert.equal(heroineWithGeneratedPortrait.ok, true);
+const heroineLibraryAfterPortrait = await useCases.listHeroines({ projectDirectory });
+assert.equal(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.defaultPortraitAssetId, generatedPortrait.asset.id);
+assert.equal(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.defaultPortraitUri, generatedPortrait.asset.uri);
+assert.deepEqual(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.portraitAssetIds, [generatedPortrait.asset.id]);
+
 const deletedLibraryHeroine = await useCases.deleteHeroine({
   projectDirectory,
   heroineId: heroine.id

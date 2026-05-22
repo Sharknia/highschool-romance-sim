@@ -48,6 +48,10 @@ import {
 } from "@vn-maker/project-store";
 
 type JsonRecord = Record<string, unknown>;
+type HeroineProfileWithAssetUris = HeroineProfile & {
+  defaultPortraitUri?: string;
+  portraitAssetUris?: string[];
+};
 
 export interface EventTextGenerationAttempt {
   attempt: number;
@@ -442,6 +446,31 @@ function filterAndSortHeroines(heroines: HeroineProfile[], input: unknown): Hero
   return filtered;
 }
 
+function addHeroineAssetUris(heroines: HeroineProfile[], project: VnMakerProject): HeroineProfileWithAssetUris[] {
+  const assetUriById = new Map(project.assets
+    .filter((asset) => Boolean(asset.uri))
+    .map((asset) => [asset.id, asset.uri!] as const));
+  return heroines.map((heroine) => {
+    const defaultPortraitUri = heroine.defaultPortraitAssetId ? assetUriById.get(heroine.defaultPortraitAssetId) : undefined;
+    const portraitAssetUris = heroine.portraitAssetIds
+      .map((assetId) => assetUriById.get(assetId))
+      .filter((uri): uri is string => Boolean(uri));
+    return {
+      ...heroine,
+      ...(defaultPortraitUri ? { defaultPortraitUri } : {}),
+      ...(portraitAssetUris.length > 0 ? { portraitAssetUris } : {})
+    };
+  });
+}
+
+function listHeroinesForResponse(store: ProjectStore, input: unknown = {}): HeroineProfileWithAssetUris[] {
+  return addHeroineAssetUris(filterAndSortHeroines(store.listHeroines(), input), store.requireProject());
+}
+
+function heroineForResponse(store: ProjectStore, heroine: HeroineProfile): HeroineProfileWithAssetUris {
+  return addHeroineAssetUris([heroine], store.requireProject())[0];
+}
+
 async function withStore<T>(projectDirectory: string, operation: (store: ProjectStore) => Promise<T> | T): Promise<T> {
   const store = await openProjectStore(projectDirectory);
   try {
@@ -813,7 +842,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async listHeroines(input: unknown) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        return { ok: true, projectDirectory: store.paths.projectDirectory, heroines: filterAndSortHeroines(store.listHeroines(), input) };
+        return { ok: true, projectDirectory: store.paths.projectDirectory, heroines: listHeroinesForResponse(store, input) };
       } finally {
         store.close();
       }
@@ -823,7 +852,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const heroine = store.saveHeroine(requiredHeroine(input));
-        return { ok: true, projectDirectory: store.paths.projectDirectory, heroine, heroines: store.listHeroines() };
+        return { ok: true, projectDirectory: store.paths.projectDirectory, heroine: heroineForResponse(store, heroine), heroines: listHeroinesForResponse(store) };
       } finally {
         store.close();
       }
@@ -842,7 +871,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           throw new InputValidationError("복제할 히로인을 찾을 수 없습니다.", [{ severity: "error", path: "sourceHeroineId", message: "라이브러리에 존재하지 않습니다." }]);
         }
         const heroine = store.saveHeroine(cloneHeroineProfile(source, input));
-        return { ok: true, projectDirectory: store.paths.projectDirectory, heroine, heroines: store.listHeroines() };
+        return { ok: true, projectDirectory: store.paths.projectDirectory, heroine: heroineForResponse(store, heroine), heroines: listHeroinesForResponse(store) };
       } finally {
         store.close();
       }
@@ -860,7 +889,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
-          heroines: store.listHeroines(),
+          heroines: listHeroinesForResponse(store),
           project: store.requireProject()
         };
       } finally {

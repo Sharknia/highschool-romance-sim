@@ -8,7 +8,9 @@ export interface HeroineDraft {
   speechStyle: string;
   appearance: string;
   defaultPortraitAssetId?: string;
+  defaultPortraitUri?: string;
   portraitAssetIds?: string[];
+  portraitAssetUris?: string[];
   expressionAssetIds?: Record<string, string>;
   reuseHistory?: Array<{
     projectId: string;

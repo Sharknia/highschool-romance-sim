@@ -30,7 +30,9 @@ function cloneDraft(heroine: HeroineDraft): HeroineDraft {
     ...emptyDraft,
     ...heroine,
     defaultPortraitAssetId: heroine.defaultPortraitAssetId || "",
+    defaultPortraitUri: heroine.defaultPortraitUri,
     portraitAssetIds: [...(heroine.portraitAssetIds || [])],
+    portraitAssetUris: [...(heroine.portraitAssetUris || [])],
     expressionAssetIds: { ...(heroine.expressionAssetIds || {}) },
     reuseHistory: [...(heroine.reuseHistory || [])]
   };
@@ -95,12 +97,16 @@ export function HeroineStartPage() {
     .filter(({ field }) => !String(draft[field] || "").trim())
     .map(({ label }) => label), [draft]);
   const profileComplete = missingRequiredLabels.length === 0;
-  const canSave = profileComplete && !busy;
-  const saveBlockedReason = missingRequiredLabels.length > 0
-    ? `필수값을 모두 입력해야 저장할 수 있습니다. 빠진 항목: ${missingRequiredLabels.join(", ")}`
-    : "필수값이 모두 입력되었습니다.";
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || null;
   const hasSavedSelection = Boolean(selectedHeroine);
+  const draftId = draft.id.trim();
+  const idAlreadyExists = !hasSavedSelection && heroines.some((heroine) => heroine.id === draftId);
+  const canSave = profileComplete && !idAlreadyExists && !busy;
+  const saveBlockedReason = missingRequiredLabels.length > 0
+    ? `필수값을 모두 입력해야 저장할 수 있습니다. 빠진 항목: ${missingRequiredLabels.join(", ")}`
+    : idAlreadyExists
+      ? "이미 같은 히로인 ID가 있습니다. 새 히로인 ID를 입력하세요."
+      : "필수값이 모두 입력되었습니다.";
   const imageGenerationAvailable = Boolean(session?.connected && (session.capabilities?.imageGeneration ?? true));
   const codexConnectionText = !session
     ? "Codex 연결 확인 중"
@@ -110,13 +116,14 @@ export function HeroineStartPage() {
   const imageGenerationText = imageGenerationAvailable
     ? "imageGeneration 가능"
     : "생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.";
-  const canGeneratePortrait = profileComplete && imageGenerationAvailable && !busy;
+  const canGeneratePortrait = profileComplete && !idAlreadyExists && imageGenerationAvailable && !busy;
+  const currentPortraitPreviewUri = portraitPreviewUri || draft.defaultPortraitUri || draft.portraitAssetUris?.[0] || "";
 
   const applyHeroineList = useCallback((result: HeroineLibraryResult, preferredHeroineId?: string): void => {
     const nextHeroines = Array.isArray(result.heroines) ? result.heroines : [];
     const nextSelected = preferredHeroineId
       ? nextHeroines.find((heroine) => heroine.id === preferredHeroineId) || null
-      : nextHeroines[0] || null;
+      : null;
     setProjectDirectory(typeof result.projectDirectory === "string" ? result.projectDirectory : "");
     setHeroines(nextHeroines);
     setListState(nextHeroines.length > 0 ? "ready" : "empty");
@@ -148,10 +155,17 @@ export function HeroineStartPage() {
   }, [heroineId, loadHeroineLibrary]);
 
   function updateDraftField(field: keyof HeroineDraft, value: string): void {
-    setDraft((current) => ({
-      ...current,
-      [field]: value
-    }));
+    setDraft((current) => {
+      const nextDraft = {
+        ...current,
+        [field]: value
+      };
+      if (field === "defaultPortraitAssetId") {
+        delete nextDraft.defaultPortraitUri;
+        delete nextDraft.portraitAssetUris;
+      }
+      return nextDraft;
+    });
   }
 
   function startNewHeroine(): void {
@@ -178,16 +192,17 @@ export function HeroineStartPage() {
     }
     setBusy(true);
     setStatus("히로인 저장 중");
+    const heroineToSave: HeroineDraft = hasSavedSelection ? { ...draft, id: selectedHeroineId } : draft;
     try {
       const result = await postAuthedJson<HeroineLibraryResult>("/api/heroines/save", {
         projectDirectory: projectDirectory || undefined,
-        heroine: draft
+        heroine: heroineToSave
       });
       if (result.ok === false) {
         setStatus(`히로인 저장 실패: ${result.error || "입력값을 확인해 주세요."}`);
         return;
       }
-      const savedHeroine = result.heroine || draft;
+      const savedHeroine = result.heroine || heroineToSave;
       applyHeroineList(result, savedHeroine.id);
       setStatus(`${savedHeroine.name} 기본 정보를 저장했습니다.`);
       navigate(`/heroines/${encodeURIComponent(savedHeroine.id)}`);
@@ -209,17 +224,22 @@ export function HeroineStartPage() {
       setStatus(saveBlockedReason);
       return;
     }
+    if (idAlreadyExists) {
+      setStatus(saveBlockedReason);
+      return;
+    }
     if (!imageGenerationAvailable) {
       setStatus("생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.");
       return;
     }
     setBusy(true);
     setStatus("기본 포트레이트 생성 중");
+    const heroineForGeneration: HeroineDraft = hasSavedSelection ? { ...draft, id: selectedHeroineId } : draft;
     try {
       const result = await postAuthedJson<ImageGenerationResult>("/api/generation/images", {
         projectDirectory: projectDirectory || undefined,
         kind: "portrait",
-        heroine: draft
+        heroine: heroineForGeneration
       });
       if (result.ok === false) {
         setStatus(`기본 포트레이트 생성 실패: ${result.error || "다시 시도해 주세요."}`);
@@ -227,12 +247,12 @@ export function HeroineStartPage() {
       }
       const generatedAssetId = result.asset?.id
         || result.job?.outputAssetId
-        || draft.defaultPortraitAssetId
-        || `asset-${draft.id}-portrait`;
+        || heroineForGeneration.defaultPortraitAssetId
+        || `asset-${heroineForGeneration.id}-portrait`;
       const nextDraft: HeroineDraft = {
-        ...draft,
+        ...heroineForGeneration,
         defaultPortraitAssetId: generatedAssetId,
-        portraitAssetIds: uniqueStrings([generatedAssetId, ...(draft.portraitAssetIds || [])])
+        portraitAssetIds: uniqueStrings([generatedAssetId, ...(heroineForGeneration.portraitAssetIds || [])])
       };
       const saveResult = await postAuthedJson<HeroineLibraryResult>("/api/heroines/save", {
         projectDirectory: result.projectDirectory || projectDirectory || undefined,
@@ -332,7 +352,12 @@ export function HeroineStartPage() {
           <h2>기본 설정</h2>
           <label className="field-row">
             <span>히로인 ID</span>
-            <input aria-label="히로인 ID" onChange={(event) => updateDraftField("id", event.target.value)} value={draft.id} />
+            <input
+              aria-label="히로인 ID"
+              onChange={(event) => updateDraftField("id", event.target.value)}
+              readOnly={hasSavedSelection}
+              value={draft.id}
+            />
           </label>
           <label className="field-row">
             <span>이름</span>
@@ -381,9 +406,9 @@ export function HeroineStartPage() {
           <p className="page-muted">
             기본 포트레이트 에셋 ID를 저장하면 프로젝트 생성 시 기본 포트레이트로 연결됩니다.
           </p>
-          {portraitPreviewUri ? (
+          {currentPortraitPreviewUri ? (
             <div className="preview-area">
-              <img alt={`${draft.name || "히로인"} 기본 포트레이트`} src={portraitPreviewUri} />
+              <img alt={`${draft.name || "히로인"} 기본 포트레이트`} src={currentPortraitPreviewUri} />
             </div>
           ) : null}
           <div className="panel-actions">
