@@ -42,6 +42,7 @@ export interface CodexGenerationAdapter extends ProjectImageGenerationAdapter {
 
 export interface ApiHandlerOptions {
   projectDirectory?: string;
+  recentProjectIndexFile?: string;
   codex?: CodexGenerationAdapter;
   eventText?: EventTextGenerationAdapter;
 }
@@ -105,6 +106,13 @@ function statusForError(error: unknown): number {
   if (error instanceof InputValidationError) {
     return 400;
   }
+  const errorRecord = asRecord(error);
+  if (errorRecord.code === "RECENT_PROJECT_INDEX_MISS" || errorRecord.code === "PROJECT_DIRECTORY_MISSING") {
+    return 404;
+  }
+  if (errorRecord.code === "PROJECT_ID_MISMATCH") {
+    return 409;
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("OAuth 로그인이 필요")) {
     return 401;
@@ -122,6 +130,21 @@ function statusForError(error: unknown): number {
     return 400;
   }
   return 500;
+}
+
+function errorBody(error: unknown): Record<string, unknown> {
+  const errorRecord = asRecord(error);
+  return {
+    ok: false,
+    code: typeof errorRecord.code === "string" ? errorRecord.code : undefined,
+    error: error instanceof Error ? error.message : String(error),
+    issues: error instanceof InputValidationError ? error.issues : undefined,
+    projectId: typeof errorRecord.projectId === "string" ? errorRecord.projectId : undefined,
+    projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
+    expectedProjectId: typeof errorRecord.expectedProjectId === "string" ? errorRecord.expectedProjectId : undefined,
+    actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
+    recentProject: errorRecord.recentProject && typeof errorRecord.recentProject === "object" ? errorRecord.recentProject : undefined
+  };
 }
 
 async function readRequestJson(context: { req: { json(): Promise<unknown> } }): Promise<unknown> {
@@ -143,11 +166,7 @@ async function jsonRoute(operation: () => Promise<Record<string, unknown>> | Rec
   try {
     return jsonResponse(await operation());
   } catch (error) {
-    return jsonResponse({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-      issues: error instanceof InputValidationError ? error.issues : undefined
-    }, statusForError(error));
+    return jsonResponse(errorBody(error), statusForError(error));
   }
 }
 
@@ -167,6 +186,7 @@ class ApiServices {
     this.codex = options.codex || (isAlphaSandboxEnabled() ? createAlphaSandboxCodexAdapter() : createDefaultCodexAdapter());
     this.useCases = createVnMakerUseCases({
       defaultProjectDirectory: options.projectDirectory || getDefaultProjectDirectory(),
+      recentProjectIndexFile: options.recentProjectIndexFile,
       eventText: options.eventText
         || (this.codex.generateEventExpansionPlan
           ? { generateEventExpansionPlan: (input) => this.codex.generateEventExpansionPlan!(input) }
@@ -226,6 +246,14 @@ class ApiServices {
 
   openProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.openProject(body);
+  }
+
+  listRecentProjects(): Promise<Record<string, unknown>> {
+    return this.useCases.listRecentProjects();
+  }
+
+  removeRecentProject(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.removeRecentProject(body);
   }
 
   saveCharacter(body: unknown): Promise<Record<string, unknown>> {
@@ -319,6 +347,8 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
 
   app.post("/api/projects", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
   app.post("/api/projects/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
+  app.post("/api/projects/recent/list", () => jsonRoute(() => services.listRecentProjects()));
+  app.post("/api/projects/recent/remove", (context) => jsonBodyRoute(context, (body) => services.removeRecentProject(body)));
   app.post("/api/project/starter", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
   app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
   app.post("/api/heroines/list", (context) => jsonBodyRoute(context, (body) => services.listHeroines(body)));

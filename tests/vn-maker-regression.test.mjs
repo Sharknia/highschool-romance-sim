@@ -22,6 +22,8 @@ const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
 const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
+const apiRecentDirectory = join(tempRoot, "ApiRecent.vnmaker");
+const apiRecentProjectIndexFile = join(tempRoot, "api-recent-projects.json");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
 const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
@@ -567,7 +569,7 @@ const mockCodex = {
   }
 };
 
-const mockApi = webHandlers.createApiRequestHandler({ codex: mockCodex });
+const mockApi = webHandlers.createApiRequestHandler({ codex: mockCodex, recentProjectIndexFile: apiRecentProjectIndexFile });
 const apiServerFailure = await mockApi({
   method: "POST",
   path: "/api/project/open",
@@ -587,6 +589,47 @@ const apiLogin = await mockApi({
 });
 assert.equal(apiLogin.status, 200);
 assert.equal(apiLogin.body.login.userCode, "ABCD-1234");
+
+const apiRecentCreated = await mockApi({
+  method: "POST",
+  path: "/api/projects",
+  body: {
+    projectDirectory: apiRecentDirectory,
+    starter: {
+      id: "api-recent",
+      title: "API Recent",
+      premise: "최근 프로젝트 API 테스트"
+    }
+  }
+});
+assert.equal(apiRecentCreated.status, 200);
+assert.equal(apiRecentCreated.body.project.id, "api-recent");
+
+const apiRecentList = await mockApi({
+  method: "POST",
+  path: "/api/projects/recent/list",
+  body: {}
+});
+assert.equal(apiRecentList.status, 200);
+assert.equal(apiRecentList.body.projects[0].projectId, "api-recent");
+assert.equal(apiRecentList.body.projects[0].projectDirectory, apiRecentDirectory);
+
+const apiRecentOpened = await mockApi({
+  method: "POST",
+  path: "/api/projects/open",
+  body: { projectId: "api-recent" }
+});
+assert.equal(apiRecentOpened.status, 200);
+assert.equal(apiRecentOpened.body.projectDirectory, apiRecentDirectory);
+
+const apiRecentRemoved = await mockApi({
+  method: "POST",
+  path: "/api/projects/recent/remove",
+  body: { projectId: "api-recent" }
+});
+assert.equal(apiRecentRemoved.status, 200);
+assert.equal(apiRecentRemoved.body.projects.some((entry) => entry.projectId === "api-recent"), false);
+assert.equal(existsSync(join(apiRecentDirectory, "project.sqlite")), true);
 
 const apiImage = await mockApi({
   method: "POST",

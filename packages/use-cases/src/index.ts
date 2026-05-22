@@ -39,7 +39,11 @@ import {
 import {
   createProjectWorkspace,
   openProjectStore,
+  projectWorkspaceExists,
+  RecentProjectIndexStore,
   smokeTestWebExport,
+  type RecentProjectIndexEntry,
+  type RecentProjectValidationState,
   type ProjectStore
 } from "@vn-maker/project-store";
 
@@ -96,6 +100,7 @@ export interface ProjectImageGenerationAdapter {
 
 export interface VnMakerUseCaseOptions {
   defaultProjectDirectory?: string;
+  recentProjectIndexFile?: string;
   eventText?: EventTextGenerationAdapter;
   image?: ProjectImageGenerationAdapter;
 }
@@ -121,6 +126,47 @@ export class InputValidationError extends Error {
   }
 }
 
+export class RecentProjectIndexMissError extends Error {
+  readonly code = "RECENT_PROJECT_INDEX_MISS";
+  readonly projectId: string;
+
+  constructor(projectId: string) {
+    super("최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+    this.name = "RecentProjectIndexMissError";
+    this.projectId = projectId;
+  }
+}
+
+export class ProjectDirectoryMissingError extends Error {
+  readonly code = "PROJECT_DIRECTORY_MISSING";
+  readonly projectId: string;
+  readonly projectDirectory: string;
+  readonly recentProject: RecentProjectIndexEntry;
+
+  constructor(entry: RecentProjectIndexEntry) {
+    super("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
+    this.name = "ProjectDirectoryMissingError";
+    this.projectId = entry.projectId;
+    this.projectDirectory = entry.projectDirectory;
+    this.recentProject = entry;
+  }
+}
+
+export class ProjectIdMismatchError extends Error {
+  readonly code = "PROJECT_ID_MISMATCH";
+  readonly expectedProjectId: string;
+  readonly actualProjectId: string;
+  readonly projectDirectory: string;
+
+  constructor(input: { expectedProjectId: string; actualProjectId: string; projectDirectory: string }) {
+    super("프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.");
+    this.name = "ProjectIdMismatchError";
+    this.expectedProjectId = input.expectedProjectId;
+    this.actualProjectId = input.actualProjectId;
+    this.projectDirectory = input.projectDirectory;
+  }
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
@@ -134,6 +180,11 @@ function projectDirectoryFrom(input: unknown, fallback: string): string {
   return typeof record.projectDirectory === "string" && record.projectDirectory.trim()
     ? record.projectDirectory
     : fallback;
+}
+
+function optionalProjectId(input: unknown): string | undefined {
+  const projectId = asRecord(input).projectId;
+  return typeof projectId === "string" && projectId.trim() ? projectId.trim() : undefined;
 }
 
 function requireParsed<T>(result: DtoParseResult<T>, label: string): T {
@@ -400,6 +451,61 @@ async function withStore<T>(projectDirectory: string, operation: (store: Project
   }
 }
 
+function validationStateFrom(validation: { ok: boolean }): RecentProjectValidationState {
+  return validation.ok ? "valid" : "invalid";
+}
+
+async function recordRecentProject(
+  recentProjects: RecentProjectIndexStore,
+  input: {
+    project: VnMakerProject;
+    projectDirectory: string;
+    validation: { ok: boolean };
+  }
+): Promise<void> {
+  await recentProjects.upsertProject({
+    projectId: input.project.id,
+    projectDirectory: input.projectDirectory,
+    title: input.project.title,
+    validationState: validationStateFrom(input.validation)
+  });
+}
+
+async function resolveProjectDirectoryForOpen(
+  recentProjects: RecentProjectIndexStore,
+  input: unknown,
+  fallbackDirectory: string
+): Promise<string> {
+  const record = asRecord(input);
+  const projectId = optionalProjectId(input);
+  if (typeof record.projectDirectory === "string" && record.projectDirectory.trim()) {
+    return projectDirectoryFrom(input, fallbackDirectory);
+  }
+  if (!projectId) {
+    return projectDirectoryFrom(input, fallbackDirectory);
+  }
+  const entry = await recentProjects.findProject(projectId);
+  if (!entry) {
+    throw new RecentProjectIndexMissError(projectId);
+  }
+  if (entry.missing || !(await projectWorkspaceExists(entry.projectDirectory))) {
+    await recentProjects.markProjectMissing(projectId, true);
+    throw new ProjectDirectoryMissingError({ ...entry, missing: true });
+  }
+  return entry.projectDirectory;
+}
+
+function assertProjectIdMatches(input: unknown, project: VnMakerProject, projectDirectory: string): void {
+  const expectedProjectId = optionalProjectId(input);
+  if (expectedProjectId && project.id !== expectedProjectId) {
+    throw new ProjectIdMismatchError({
+      expectedProjectId,
+      actualProjectId: project.id,
+      projectDirectory
+    });
+  }
+}
+
 async function ensureProjectStore(input: unknown, fallbackDirectory: string): Promise<ProjectStore> {
   const projectDirectory = projectDirectoryFrom(input, fallbackDirectory);
   const store = await openProjectStore(projectDirectory);
@@ -572,6 +678,7 @@ function withWorkspacePreviewUri(result: ProjectImageGenerationResult): ProjectI
 
 export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
   const defaultProjectDirectory = options.defaultProjectDirectory || getDefaultProjectDirectory();
+  const recentProjects = new RecentProjectIndexStore({ indexFilePath: options.recentProjectIndexFile });
 
   return {
     async createProject(input: unknown) {
@@ -583,11 +690,17 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       });
       try {
         const validation = store.validateAndStore();
+        const project = store.requireProject();
+        await recordRecentProject(recentProjects, {
+          project,
+          projectDirectory: store.paths.projectDirectory,
+          validation
+        });
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
-          project: store.requireProject(),
+          project,
           validation
         };
       } finally {
@@ -620,6 +733,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.requireProject();
         store.recordHeroineReuse(heroine.id, project);
         const validation = store.validateAndStore();
+        await recordRecentProject(recentProjects, {
+          project,
+          projectDirectory: store.paths.projectDirectory,
+          validation
+        });
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
@@ -634,17 +752,36 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     },
 
     async openProject(input: unknown) {
-      const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
-      return withStore(projectDirectory, (store) => {
+      const projectDirectory = await resolveProjectDirectoryForOpen(recentProjects, input, defaultProjectDirectory);
+      return withStore(projectDirectory, async (store) => {
         const project = store.requireProject();
+        assertProjectIdMatches(input, project, store.paths.projectDirectory);
+        const validation = store.validateAndStore();
+        await recordRecentProject(recentProjects, {
+          project,
+          projectDirectory: store.paths.projectDirectory,
+          validation
+        });
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           project,
-          validation: store.validateAndStore()
+          validation
         };
       });
+    },
+
+    async listRecentProjects() {
+      return { ok: true, projects: await recentProjects.listProjects() };
+    },
+
+    async removeRecentProject(input: unknown) {
+      const projectId = optionalProjectId(input);
+      if (!projectId) {
+        throw new InputValidationError("projectId 입력이 필요합니다.", [{ severity: "error", path: "projectId", message: "비어 있을 수 없습니다." }]);
+      }
+      return { ok: true, projects: await recentProjects.removeProject(projectId) };
     },
 
     async listHeroines(input: unknown) {
