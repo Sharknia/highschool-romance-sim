@@ -22,6 +22,9 @@ const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
 const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
+const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
+const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
+const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
 const apiRecentDirectory = join(tempRoot, "ApiRecent.vnmaker");
 const apiRecentProjectIndexFile = join(tempRoot, "api-recent-projects.json");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
@@ -717,6 +720,33 @@ try {
   }
 }
 
+const unavailableHeroinePortraitApi = await webHandlers.createApiRequestHandler({
+  codex: {
+    ...mockCodex,
+    async generateImageAsset() {
+      throw new Error("현재 Codex app-server가 imageGeneration 기능을 제공하지 않습니다.");
+    }
+  },
+  recentProjectIndexFile: apiRecentProjectIndexFile
+})({
+  method: "POST",
+  path: "/api/heroines/portrait/generate",
+  body: {
+    projectDirectory: join(tempRoot, "UnavailableHeroinePortraitApi.vnmaker"),
+    draft: {
+      id: "api-unavailable-haru",
+      name: "API 생성 불가 하루",
+      description: "imageGeneration unavailable status 검증.",
+      personality: "차분하다.",
+      speechStyle: "짧게 말한다.",
+      appearance: "교복 차림."
+    }
+  }
+});
+assert.equal(unavailableHeroinePortraitApi.status, 503);
+assert.equal(unavailableHeroinePortraitApi.body.ok, false);
+assert.equal(unavailableHeroinePortraitApi.body.code, "IMAGE_GENERATION_UNAVAILABLE");
+
 const haruHeroine = core.createHeroineProfile({
   id: "haru",
   name: "하루",
@@ -726,6 +756,292 @@ const haruHeroine = core.createHeroineProfile({
   appearance: "단정한 교복, 어깨까지 오는 검은 머리, 연한 분홍색 머리핀.",
   defaultPortraitAssetId: "asset-haru-portrait"
 });
+
+const apiCreateHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/create",
+  body: {
+    requestId: "api-create-haru",
+    projectDirectory: heroineApiContractDirectory,
+    heroine: haruHeroine
+  }
+});
+assert.equal(apiCreateHeroine.status, 200);
+assert.equal(apiCreateHeroine.body.ok, true);
+assert.equal(apiCreateHeroine.body.heroine.id, "haru");
+assert.equal(apiCreateHeroine.body.heroineRevision.kind, "heroineRevision");
+
+const apiDuplicateHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/create",
+  body: {
+    requestId: "api-create-haru-duplicate",
+    projectDirectory: heroineApiContractDirectory,
+    heroine: haruHeroine
+  }
+});
+assert.equal(apiDuplicateHeroine.status, 409);
+assert.equal(apiDuplicateHeroine.body.ok, false);
+assert.equal(apiDuplicateHeroine.body.code, "HEROINE_ID_CONFLICT");
+assert.equal(apiDuplicateHeroine.body.message.includes("이미"), true);
+assert.equal(apiDuplicateHeroine.body.requestId, "api-create-haru-duplicate");
+assert.equal(apiDuplicateHeroine.body.retryable, false);
+
+const apiGetHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/get",
+  body: {
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru"
+  }
+});
+assert.equal(apiGetHeroine.status, 200);
+assert.equal(apiGetHeroine.body.ok, true);
+assert.equal(apiGetHeroine.body.heroine.name, "하루");
+
+const apiMissingRevisionUpdate = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/update",
+  body: {
+    requestId: "api-update-missing-revision",
+    projectDirectory: heroineApiContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 API revision 누락" }
+  }
+});
+assert.equal(apiMissingRevisionUpdate.status, 400);
+assert.equal(apiMissingRevisionUpdate.body.ok, false);
+assert.equal(apiMissingRevisionUpdate.body.code, "HEROINE_INPUT_INVALID");
+assert.equal(apiMissingRevisionUpdate.body.issues.some((issue) => issue.path === "expectedHeroineRevision"), true);
+
+const apiUpdateHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/update",
+  body: {
+    projectDirectory: heroineApiContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 API 수정" },
+    expectedHeroineRevision: apiGetHeroine.body.heroineRevision
+  }
+});
+assert.equal(apiUpdateHeroine.status, 200);
+assert.equal(apiUpdateHeroine.body.ok, true);
+assert.equal(apiUpdateHeroine.body.heroine.name, "하루 API 수정");
+
+const apiLegacySaveWithoutRevision = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/save",
+  body: {
+    requestId: "api-save-without-revision",
+    projectDirectory: heroineApiContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 API save 우회" }
+  }
+});
+assert.equal(apiLegacySaveWithoutRevision.status, 400);
+assert.equal(apiLegacySaveWithoutRevision.body.ok, false);
+assert.equal(apiLegacySaveWithoutRevision.body.code, "HEROINE_INPUT_INVALID");
+
+const apiRevisionConflict = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/update",
+  body: {
+    requestId: "api-update-conflict",
+    projectDirectory: heroineApiContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 API 충돌" },
+    expectedHeroineRevision: apiGetHeroine.body.heroineRevision
+  }
+});
+assert.equal(apiRevisionConflict.status, 409);
+assert.equal(apiRevisionConflict.body.ok, false);
+assert.equal(apiRevisionConflict.body.code, "HEROINE_REVISION_CONFLICT");
+assert.equal(apiRevisionConflict.body.requestId, "api-update-conflict");
+assert.equal(apiRevisionConflict.body.retryable, true);
+
+const apiMissingConfirmDelete = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/delete",
+  body: {
+    requestId: "api-delete-missing-confirm",
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    expectedHeroineRevision: apiUpdateHeroine.body.heroineRevision
+  }
+});
+assert.equal(apiMissingConfirmDelete.status, 400);
+assert.equal(apiMissingConfirmDelete.body.ok, false);
+assert.equal(apiMissingConfirmDelete.body.code, "HEROINE_INPUT_INVALID");
+assert.equal(apiMissingConfirmDelete.body.issues.some((issue) => issue.path === "confirmName"), true);
+assert.equal(apiMissingConfirmDelete.body.issues.some((issue) => issue.path === "confirmId"), true);
+
+const apiMissingRevisionDelete = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/delete",
+  body: {
+    requestId: "api-delete-missing-revision",
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    confirmName: "하루 API 수정",
+    confirmId: "haru"
+  }
+});
+assert.equal(apiMissingRevisionDelete.status, 400);
+assert.equal(apiMissingRevisionDelete.body.ok, false);
+assert.equal(apiMissingRevisionDelete.body.code, "HEROINE_INPUT_INVALID");
+assert.equal(apiMissingRevisionDelete.body.issues.some((issue) => issue.path === "expectedHeroineRevision"), true);
+
+const apiStaleDeleteAfterRename = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/delete",
+  body: {
+    requestId: "api-delete-stale-after-rename",
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    confirmName: "하루",
+    confirmId: "haru",
+    expectedHeroineRevision: apiGetHeroine.body.heroineRevision
+  }
+});
+assert.equal(apiStaleDeleteAfterRename.status, 409);
+assert.equal(apiStaleDeleteAfterRename.body.ok, false);
+assert.equal(apiStaleDeleteAfterRename.body.code, "HEROINE_REVISION_CONFLICT");
+
+const apiProjectFromHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/projects/from-heroine",
+  body: {
+    projectDirectory: heroineApiProjectDirectory,
+    sourceProjectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    title: "하루 API 프로젝트",
+    premise: "상세 화면 이동 계약 검증"
+  }
+});
+assert.equal(apiProjectFromHeroine.status, 200);
+assert.equal(apiProjectFromHeroine.body.ok, true);
+assert.equal(apiProjectFromHeroine.body.projectId, apiProjectFromHeroine.body.project.id);
+assert.equal(apiProjectFromHeroine.body.targetRoute, `/projects/${apiProjectFromHeroine.body.project.id}/overview`);
+
+const apiGetAfterProjectCreate = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/get",
+  body: {
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru"
+  }
+});
+assert.equal(apiGetAfterProjectCreate.status, 200);
+
+const apiDeleteHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/delete",
+  body: {
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    confirmName: "하루 API 수정",
+    confirmId: "haru",
+    expectedHeroineRevision: apiGetAfterProjectCreate.body.heroineRevision
+  }
+});
+assert.equal(apiDeleteHeroine.status, 200);
+assert.equal(apiDeleteHeroine.body.ok, true);
+assert.equal(apiDeleteHeroine.body.deletedHeroineId, "haru");
+assert.equal(apiDeleteHeroine.body.snapshotPolicy, "projectSnapshotsPreserved");
+
+const apiMissingHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/get",
+  body: {
+    requestId: "api-get-missing",
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru"
+  }
+});
+assert.equal(apiMissingHeroine.status, 404);
+assert.equal(apiMissingHeroine.body.ok, false);
+assert.equal(apiMissingHeroine.body.code, "HEROINE_NOT_FOUND");
+assert.equal(apiMissingHeroine.body.message.includes("찾을 수 없습니다"), true);
+
+const cliCreateHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-heroine"], {
+  input: JSON.stringify({ projectDirectory: heroineCliContractDirectory, heroine: haruHeroine }),
+  encoding: "utf8"
+});
+const cliCreateHeroine = JSON.parse(cliCreateHeroineOutput);
+assert.equal(cliCreateHeroine.ok, true);
+assert.equal(cliCreateHeroine.heroine.id, "haru");
+
+const cliGetHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "get-heroine"], {
+  input: JSON.stringify({ projectDirectory: heroineCliContractDirectory, heroineId: "haru" }),
+  encoding: "utf8"
+});
+const cliGetHeroine = JSON.parse(cliGetHeroineOutput);
+assert.equal(cliGetHeroine.ok, true);
+
+const cliMissingRevisionUpdateOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "update-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 CLI revision 누락" }
+  }),
+  encoding: "utf8"
+});
+const cliMissingRevisionUpdate = JSON.parse(cliMissingRevisionUpdateOutput);
+assert.equal(cliMissingRevisionUpdate.ok, false);
+assert.equal(cliMissingRevisionUpdate.code, "HEROINE_INPUT_INVALID");
+
+const cliUpdateHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "update-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 CLI 수정" },
+    expectedHeroineRevision: cliGetHeroine.heroineRevision
+  }),
+  encoding: "utf8"
+});
+const cliUpdateHeroine = JSON.parse(cliUpdateHeroineOutput);
+assert.equal(cliUpdateHeroine.ok, true);
+assert.equal(cliUpdateHeroine.heroine.name, "하루 CLI 수정");
+
+const cliLegacySaveWithoutRevisionOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 CLI save 우회" }
+  }),
+  encoding: "utf8"
+});
+const cliLegacySaveWithoutRevision = JSON.parse(cliLegacySaveWithoutRevisionOutput);
+assert.equal(cliLegacySaveWithoutRevision.ok, false);
+assert.equal(cliLegacySaveWithoutRevision.code, "HEROINE_INPUT_INVALID");
+
+const cliDuplicateHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-heroine"], {
+  input: JSON.stringify({ projectDirectory: heroineCliContractDirectory, heroine: haruHeroine }),
+  encoding: "utf8"
+});
+const cliDuplicateHeroine = JSON.parse(cliDuplicateHeroineOutput);
+assert.equal(cliDuplicateHeroine.ok, false);
+assert.equal(cliDuplicateHeroine.code, "HEROINE_ID_CONFLICT");
+
+const cliMissingConfirmDeleteOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "delete-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroineId: "haru",
+    expectedHeroineRevision: cliUpdateHeroine.heroineRevision
+  }),
+  encoding: "utf8"
+});
+const cliMissingConfirmDelete = JSON.parse(cliMissingConfirmDeleteOutput);
+assert.equal(cliMissingConfirmDelete.ok, false);
+assert.equal(cliMissingConfirmDelete.code, "HEROINE_INPUT_INVALID");
+
+const cliDeleteHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "delete-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroineId: "haru",
+    confirmName: "하루 CLI 수정",
+    confirmId: "haru",
+    expectedHeroineRevision: cliUpdateHeroine.heroineRevision
+  }),
+  encoding: "utf8"
+});
+const cliDeleteHeroine = JSON.parse(cliDeleteHeroineOutput);
+assert.equal(cliDeleteHeroine.ok, true);
+assert.equal(cliDeleteHeroine.snapshotPolicy, "projectSnapshotsPreserved");
+
 const alphaProject = core.createProjectFromHeroine({
   id: "alpha-haru",
   title: "하루 Alpha",
@@ -1001,6 +1317,22 @@ const emptyLoginResponse = await clientApi.postJson("/api/codex/login", { flow: 
 assert.equal(emptyLoginResponse.ok, false);
 assert.equal(emptyLoginResponse.httpStatus, 500);
 assert.match(emptyLoginResponse.error, /응답이 비어 있습니다|JSON/);
+globalThis.fetch = async () => new Response("<!doctype html>proxy error", {
+  status: 502,
+  headers: { "Content-Type": "text/html" }
+});
+const nonJsonLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
+assert.equal(nonJsonLoginResponse.ok, false);
+assert.equal(nonJsonLoginResponse.httpStatus, 502);
+assert.match(nonJsonLoginResponse.error, /JSON으로 읽을 수 없습니다/);
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, connected: true }), {
+  status: 503,
+  headers: { "Content-Type": "application/json" }
+});
+const json5xxLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
+assert.equal(json5xxLoginResponse.ok, false);
+assert.equal(json5xxLoginResponse.httpStatus, 503);
+assert.match(json5xxLoginResponse.error, /요청이 실패했습니다/);
 globalThis.fetch = originalFetch;
 
 await esbuild({

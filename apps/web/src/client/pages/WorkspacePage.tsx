@@ -18,6 +18,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { ApiResult, ImagePreviewResult } from "../api/types";
 import { describeSession, useAuth } from "../auth/AuthProvider";
 import { SceneWorkbench } from "../components/SceneWorkbench";
@@ -246,6 +247,7 @@ function jobTone(status: GenerationJob["status"]): string {
 
 export function WorkspacePage() {
   const { logout, postAuthedJson, refreshSession, session } = useAuth();
+  const navigate = useNavigate();
   const alphaSandboxEnabled = isAlphaSandboxEnabled();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
   const [projectDirectory, setProjectDirectory] = useState("");
@@ -300,7 +302,7 @@ export function WorkspacePage() {
       return { label: "샘플 프로젝트 생성", reason: "프로젝트가 아직 열리지 않았습니다.", run: () => void createStarterProject() };
     }
     if (!currentHeroine) {
-      return { label: "선택 히로인으로 프로젝트 생성", reason: "프로젝트 스냅샷 히로인이 필요합니다.", run: () => void createProjectFromSelectedHeroine() };
+      return { label: "히로인 관리 열기", reason: "프로젝트 스냅샷 히로인은 히로인 상세 화면에서 생성합니다.", run: () => navigate("/heroines") };
     }
     if (pendingPatch) {
       return { label: "검증된 패치 승인", reason: patchCanApply ? "검증 통과 패치가 대기 중입니다." : "검증 실패 항목을 먼저 확인해야 합니다.", run: () => void approveEvent(), disabled: !patchCanApply };
@@ -315,7 +317,7 @@ export function WorkspacePage() {
       return { label: "선택 이미지 작업 실행", reason: selectedJobIds.length > 0 ? "선택된 작업을 일괄 실행합니다." : "실행할 이미지 작업을 선택하세요.", run: () => void runSelectedGenerationJobs(), disabled: selectedJobIds.length === 0 };
     }
     return { label: "웹 플레이어 export", reason: "검증과 smoke check를 포함해 산출물을 만듭니다.", run: () => void exportProject() };
-  }, [project, currentHeroine, pendingPatch, patchCanApply, runtime, lastExport, plannedJobCount, selectedJobIds.length]);
+  }, [project, currentHeroine, pendingPatch, patchCanApply, runtime, lastExport, plannedJobCount, selectedJobIds.length, navigate]);
 
   function updateHeroineField(field: keyof HeroineDraft, value: string): void {
     setHeroineDraft((current) => {
@@ -424,7 +426,7 @@ export function WorkspacePage() {
   }
 
   async function loadHeroineLibrary(): Promise<void> {
-    await runAction("히로인 검색", async () => postAuthedJson<ApiResult>("/api/heroines/list", {
+    await runAction("원본 캐릭터 조회", async () => postAuthedJson<ApiResult>("/api/heroines/list", {
       projectDirectory: projectDirectory || undefined,
       query: heroineQuery || undefined,
       tag: heroineTagFilter || undefined,
@@ -440,7 +442,7 @@ export function WorkspacePage() {
   }
 
   async function cloneSelectedHeroine(): Promise<void> {
-    await runAction("히로인 복제", async () => postAuthedJson<ApiResult>("/api/heroines/clone", {
+    await runAction("라이브러리 사본 생성", async () => postAuthedJson<ApiResult>("/api/heroines/clone", {
       projectDirectory: projectDirectory || undefined,
       sourceHeroineId: selectedHeroineId,
       newId: `${selectedHeroineId || heroineDraft.id}-copy`,
@@ -454,22 +456,6 @@ export function WorkspacePage() {
       projectDirectory: projectDirectory || undefined,
       heroineId: selectedHeroineId
     }));
-  }
-
-  async function createProjectFromSelectedHeroine(): Promise<void> {
-    const selectedLibraryHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId);
-    await runAction("히로인 프로젝트 생성", async () => postAuthedJson<ApiResult>("/api/projects/from-heroine", {
-      projectDirectory: projectDirectory || undefined,
-      heroineId: selectedLibraryHeroine?.id || undefined,
-      heroine: selectedLibraryHeroine ? undefined : heroineDraft,
-      title: `${heroineDraft.name} Beta`,
-      premise: `${heroineDraft.name}와 반복 제작을 검증하는 Beta 루트`
-    }));
-    setRuntime(null);
-    setPreviewStale(false);
-    setPendingPatch(null);
-    await loadPatchHistory();
-    await loadGenerationJobs();
   }
 
   async function createStarterProject(): Promise<void> {
@@ -740,36 +726,9 @@ export function WorkspacePage() {
             </div>
 
             <div className="rail-block">
-              <p className="panel-eyebrow">Heroine Library</p>
-              <div className="search-row">
-                <Search size={16} />
-                <input aria-label="히로인 검색" onChange={(event) => setHeroineQuery(event.target.value)} placeholder="검색" value={heroineQuery} />
-              </div>
-              <div className="field-grid compact-fields">
-                <input aria-label="태그 필터" onChange={(event) => setHeroineTagFilter(event.target.value)} placeholder="tag" value={heroineTagFilter} />
-                <select aria-label="히로인 정렬" onChange={(event) => setHeroineSort(event.target.value)} value={heroineSort}>
-                  <option value="name-asc">이름순</option>
-                  <option value="name-desc">이름 역순</option>
-                  <option value="reuse-desc">재사용순</option>
-                </select>
-              </div>
-              <Button icon={<RefreshCw size={16} />} onClick={() => void loadHeroineLibrary()}>검색 적용</Button>
-              <div className="heroine-list">
-                {heroines.map((heroine) => (
-                  <button
-                    className={selectedHeroineId === heroine.id ? "list-item selected" : "list-item"}
-                    key={heroine.id || heroine.name}
-                    onClick={() => {
-                      setHeroineDraft(heroine);
-                      setSelectedHeroineId(heroine.id || heroine.name);
-                    }}
-                    type="button"
-                  >
-                    <strong>{heroine.name}</strong>
-                    <span>{(heroine.tags || []).join(", ") || "태그 없음"} · 재사용 {heroine.reuseHistory?.length || 0}</span>
-                  </button>
-                ))}
-              </div>
+              <p className="panel-eyebrow">Library Source</p>
+              <p className="page-muted">원본 캐릭터 관리는 전용 화면에서 진행합니다.</p>
+              <a className="button button-secondary" href="/heroines">히로인 관리 열기</a>
             </div>
           </aside>
 
@@ -779,29 +738,13 @@ export function WorkspacePage() {
             <section className="workbench-section">
               <header className="section-header">
                 <div>
-                  <p className="panel-eyebrow">Heroine</p>
-                  <h2>히로인 편집과 프로젝트 스냅샷</h2>
+                  <p className="panel-eyebrow">Snapshot Source</p>
+                  <h2>프로젝트 스냅샷 출처</h2>
                 </div>
                 <div className="button-row">
-                  <Button icon={<Save size={16} />} onClick={() => void saveHeroine()} variant="primary">저장</Button>
-                  <Button icon={<Copy size={16} />} onClick={() => void cloneSelectedHeroine()}>복제</Button>
-                  <Button icon={<ImagePlus size={16} />} onClick={() => void generatePortrait()}>포트레이트</Button>
-                  <Button icon={<Trash2 size={16} />} onClick={() => void deleteSelectedHeroine()}>삭제</Button>
-                  <Button icon={<Database size={16} />} onClick={() => void createProjectFromSelectedHeroine()}>프로젝트 생성</Button>
+                  <a className="button button-primary" href="/heroines">히로인 관리 열기</a>
                 </div>
               </header>
-              <div className="form-grid">
-                <input aria-label="히로인 ID" value={heroineDraft.id || ""} onChange={(event) => updateHeroineField("id", event.target.value)} />
-                <input aria-label="히로인 이름" value={heroineDraft.name} onChange={(event) => updateHeroineField("name", event.target.value)} />
-                <input aria-label="기본 포트레이트 에셋" value={heroineDraft.defaultPortraitAssetId || ""} onChange={(event) => updateHeroineField("defaultPortraitAssetId", event.target.value)} />
-                <input aria-label="히로인 태그" value={(heroineDraft.tags || []).join(", ")} onChange={(event) => updateHeroineField("tags", event.target.value)} />
-              </div>
-              <div className="textarea-grid">
-                <label>설명<textarea value={heroineDraft.description} onChange={(event) => updateHeroineField("description", event.target.value)} /></label>
-                <label>성격<textarea value={heroineDraft.personality} onChange={(event) => updateHeroineField("personality", event.target.value)} /></label>
-                <label>말투<textarea value={heroineDraft.speechStyle} onChange={(event) => updateHeroineField("speechStyle", event.target.value)} /></label>
-                <label>외형<textarea value={heroineDraft.appearance} onChange={(event) => updateHeroineField("appearance", event.target.value)} /></label>
-              </div>
               {currentHeroine ? (
                 <div className="inline-status success">
                   프로젝트 스냅샷 출처: {currentHeroine.sourceHeroineName || currentHeroine.displayName} ({currentHeroine.sourceHeroineId || currentHeroine.id}) · {currentHeroine.sourceSnapshotCreatedAt || "기록 없음"}
@@ -809,6 +752,7 @@ export function WorkspacePage() {
               ) : (
                 <div className="inline-status">프로젝트에 선택된 히로인 스냅샷이 아직 없습니다.</div>
               )}
+              <p className="page-muted">원본 히로인 목록, 상세, 생성, 수정, 삭제는 히로인 관리 라우트에서 처리합니다.</p>
             </section>
 
             <section className="workbench-section">

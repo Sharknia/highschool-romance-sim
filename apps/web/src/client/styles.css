@@ -1514,6 +1514,218 @@ pre {
   line-height: 1.45;
 }
 
+.heroine-page {
+  padding-bottom: 88px;
+}
+
+.heroine-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.heroine-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  align-items: stretch;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  background: #191814;
+  overflow: hidden;
+}
+
+.heroine-card:hover {
+  border-color: #5eead4;
+}
+
+.heroine-card-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  padding: 12px;
+  color: #f4efe6;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.heroine-card-main img,
+.heroine-thumbnail-placeholder {
+  width: 72px;
+  aspect-ratio: 1;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #0f0f0d;
+}
+
+.heroine-thumbnail-placeholder {
+  display: grid;
+  place-items: center;
+  color: #5eead4;
+  font-weight: 800;
+}
+
+.heroine-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.heroine-card-copy strong,
+.heroine-card-copy span,
+.heroine-card-copy small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.heroine-card-copy span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #d8d0c2;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.heroine-card-copy small {
+  color: #bfb6a8;
+  line-height: 1.4;
+}
+
+.heroine-card-danger {
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  border: 0;
+  border-left: 1px solid #3a3730;
+  color: #ffd7d2;
+  background: #251513;
+  cursor: pointer;
+}
+
+.heroine-detail-layout,
+.heroine-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 12px;
+  align-items: start;
+}
+
+.heroine-editor-main {
+  gap: 16px;
+}
+
+.heroine-form-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.heroine-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.field-hint {
+  color: #bfb6a8;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.heroine-action-bar {
+  position: sticky;
+  z-index: 10;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  padding: 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: #191814;
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.28);
+}
+
+.heroine-action-status {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.heroine-action-status span {
+  color: #bfb6a8;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.delete-dialog {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+  border: 1px solid #d66b5f;
+  border-radius: 8px;
+  padding: 16px;
+  background: #191814;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+}
+
+.dialog-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dialog-title-row h2,
+.delete-dialog p {
+  margin: 0;
+}
+
+.delete-dialog p {
+  color: #ffd7d2;
+  line-height: 1.6;
+}
+
+.vertical-actions {
+  display: grid;
+  align-items: stretch;
+}
+
+.portrait-placeholder {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #565147;
+  border-radius: 8px;
+  color: #bfb6a8;
+  background: #0f0f0d;
+  text-align: center;
+}
+
+.portrait-preview img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+
 .patch-summary {
   border: 1px solid #3a3730;
   border-radius: 8px;
@@ -1653,6 +1865,8 @@ pre {
 
   .form-grid,
   .textarea-grid,
+  .heroine-detail-layout,
+  .heroine-editor-layout,
   .route-selector,
   .scene-layout,
   .manual-action-grid,
@@ -1743,6 +1957,29 @@ pre {
 
   .project-tab-list {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .heroine-card-grid,
+  .heroine-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroine-card {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+
+  .heroine-card-main {
+    grid-template-columns: 58px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .heroine-card-main img,
+  .heroine-thumbnail-placeholder {
+    width: 58px;
+  }
+
+  .heroine-action-bar {
+    display: grid;
   }
 
   .workspace-nav {
