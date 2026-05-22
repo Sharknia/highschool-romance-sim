@@ -2,12 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   DEFAULT_EMOTION_TAGS,
+  DEFAULT_HEROINE_PORTRAIT_STYLE,
   analyzeRouteGraph,
   buildProjectHtml,
   createAssetManifest,
   createDeterministicEventExpansionPlan,
   createEventExpansionRequest,
   createHeroineProfile,
+  createHeroinePortraitPrompt,
   createImageGenerationJob,
   planExpressionAssetsForHeroine,
   createProjectFromHeroine,
@@ -1462,7 +1464,7 @@ function selectGenerationInput(project: VnMakerProject, store: ProjectStore, inp
     || (heroine && kind === "portrait" ? heroine.defaultPortraitAssetId || `asset-${heroine.id}-portrait` : undefined);
   const prompt = plannedJob?.prompt
     || (typeof record.prompt === "string" ? record.prompt : undefined)
-    || (heroine ? `${heroine.name}, ${heroine.appearance}, clean visual novel heroine portrait` : "");
+    || (heroine ? createHeroinePortraitPrompt(heroine) : "");
 
   if (!["portrait", "expression", "cg"].includes(kind)) {
     throw new InputValidationError("image.kind 입력이 올바르지 않습니다.", [{ severity: "error", path: "kind", message: `지원하지 않는 이미지 종류입니다: ${String(kind)}` }]);
@@ -1475,7 +1477,7 @@ function selectGenerationInput(project: VnMakerProject, store: ProjectStore, inp
     kind,
     targetId,
     prompt,
-    style: plannedJob?.style || (typeof record.style === "string" ? record.style : heroine ? "soft, polished, romance visual novel portrait" : "soft visual novel, clean anime, production-ready"),
+    style: plannedJob?.style || (typeof record.style === "string" ? record.style : heroine ? DEFAULT_HEROINE_PORTRAIT_STYLE : "soft visual novel, clean anime, production-ready"),
     jobId: plannedJob?.id || (typeof record.jobId === "string" ? record.jobId : undefined),
     outputAssetId,
     outputDirectory: store.paths.generatedAssetsDirectory,
