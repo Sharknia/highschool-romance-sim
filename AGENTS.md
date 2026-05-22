@@ -18,6 +18,14 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 - `apps/web`: 사람이 쓰는 제작 UI와 Node API 라우트. 프론트는 Vite + React + React Router + 중앙 UI 컴포넌트를 기준으로 한다.
 - `src/engine`, `index.html`: 기존 플레이어/레거시 런타임. 요구가 없으면 중심 작업으로 삼지 않는다.
 
+## 기획/프로젝트 관리
+
+- 제품 기획 원천은 Notion의 [VN Maker](https://www.notion.so/sharknia/VN-Maker-36845e8947528170b5fdfbfec23e27a2?source=copy_link) 문서다.
+- 프로젝트 관리는 GitHub Issues를 기준으로 한다.
+- Notion 기획문서와 GitHub Issue 내용이 충돌하면 주인님에게 확인하고, 임의로 범위를 축소하지 않는다.
+- 구현 작업의 완료 조건, 진행 상황, 차단 사항, 후속 작업은 관련 GitHub Issue에 기록하는 것을 우선한다.
+- 커밋은 GitHub Issue 또는 하위 작업 단위로 분리해 생성한다.
+
 ## 작업 원칙
 
 - `/goal`은 임의로 축소하지 않는다. 완료 조건을 항목별로 확인하고, 안 된 것은 미완료로 보고한다.
@@ -53,10 +61,10 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 - 여기서 "완료"는 `/goal`의 완료 조건을 항목별로 확인하고, 완료/부분 구현/미완료/검증 결과를 최종 보고할 수 있는 상태를 말한다.
 - Gmail 사용이 불가능한 환경이면 전송하지 않고, 최종 응답에 미실행 사유와 완료 요약을 남긴다.
 
-## Linear 기반 작업 운영
+## GitHub Issues 기반 작업 운영
 
-- goal이 Linear 태스크/서브태스크로 주어진 경우, 작업 진행 상황을 해당 Linear 이슈에 기록한다.
-- 주요 단계 시작, 구현 완료, 검증 결과, 차단 사항, 후속 작업은 Linear 댓글 또는 상태 업데이트로 남긴다.
-- 커밋은 태스크 또는 서브태스크 단위로 분리해 생성한다.
+- goal이 GitHub Issue 또는 하위 작업으로 주어진 경우, 작업 진행 상황을 해당 GitHub Issue에 기록한다.
+- 주요 단계 시작, 구현 완료, 검증 결과, 차단 사항, 후속 작업은 GitHub Issue 댓글 또는 상태 업데이트로 남긴다.
+- 커밋은 Issue 또는 하위 작업 단위로 분리해 생성한다.
 - push는 사용자 요청 여부와 무관하게 태스크 또는 서브태스크 단위 커밋 후 항상 수행한다.
 - 커밋/푸시 전에 현재 변경 범위를 확인하고, 사용자가 만든 unrelated 변경은 포함하거나 되돌리지 않는다.

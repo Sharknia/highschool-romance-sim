@@ -2,6 +2,10 @@
 
 이 저장소의 현재 중심 목표는 단일 `index.html` 게임이 아니라 로컬 데스크톱형 미연시 제작 프로그램이다. 기본 작업 경계는 `VN Maker Core + CLI + Web App + Codex OAuth + 생성 어댑터`이며, 루트 `src/engine`과 `index.html`은 레거시 플레이어 런타임으로 분리해서 다룬다.
 
+## 기획과 작업 관리
+
+제품 기획 문서는 Notion의 [VN Maker](https://www.notion.so/sharknia/VN-Maker-36845e8947528170b5fdfbfec23e27a2?source=copy_link)를 기준으로 한다. 구현 작업, 진행 상태, 차단 사항, 후속 작업 관리는 GitHub Issues를 기준으로 기록한다.
+
 ## VN Maker 구조
 
 새 제작툴 구조는 `packages/engine-core`, `packages/project-store`, `packages/generation-codex`, `packages/use-cases`, `packages/cli`, `apps/web` 워크스페이스로 구성된다. 목표는 Codex가 외부에서 CLI로 호출하든, 웹앱 내부 API로 호출하든 같은 코어와 같은 use case 경계로 미연시 프로젝트를 생성, 검증, 빌드, 이미지 생성 작업화하는 것이다.
