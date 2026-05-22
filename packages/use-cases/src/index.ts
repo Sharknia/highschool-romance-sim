@@ -581,6 +581,9 @@ export function heroineFailureStatus(code: HeroineActionFailureCode): number {
   if (code === "OAUTH_REQUIRED") {
     return 401;
   }
+  if (code === "IMAGE_GENERATION_UNAVAILABLE") {
+    return 503;
+  }
   if (code === "HEROINE_NOT_FOUND") {
     return 404;
   }
@@ -718,7 +721,10 @@ function stagedPortraitReferenceFailure(input: unknown, message: string): Heroin
   });
 }
 
-function stagedPortraitAssetId(input: unknown, store: ProjectStore): { assetId: string; stagedPortraitId: string } | HeroineActionFailureDto | undefined {
+function stagedPortraitAssetId(
+  input: unknown,
+  store: ProjectStore
+): { assetId: string; stagedPortraitId: string; heroineId?: string } | HeroineActionFailureDto | undefined {
   const stagedPortraitRef = asRecord(input).stagedPortraitRef;
   if (!stagedPortraitRef || typeof stagedPortraitRef !== "object") {
     return undefined;
@@ -738,7 +744,7 @@ function stagedPortraitAssetId(input: unknown, store: ProjectStore): { assetId: 
   if (!assetExists) {
     return stagedPortraitReferenceFailure(input, "staged portrait 에셋을 찾을 수 없습니다.");
   }
-  return { assetId: staged.assetId, stagedPortraitId: staged.id };
+  return { assetId: staged.assetId, stagedPortraitId: staged.id, heroineId: staged.heroineId };
 }
 
 function attachStagedPortrait(
@@ -752,6 +758,9 @@ function attachStagedPortrait(
   }
   if (isHeroineActionFailure(stagedPortrait)) {
     return stagedPortrait;
+  }
+  if (stagedPortrait.heroineId && stagedPortrait.heroineId !== heroine.id) {
+    return stagedPortraitReferenceFailure(input, "staged portrait 참조가 현재 히로인 ID와 일치하지 않습니다.");
   }
   return {
     heroine: {
@@ -1256,7 +1265,17 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       }
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const heroine = store.saveHeroine(parsed);
+        const current = store.getHeroine(parsed.id);
+        if (current) {
+          const expected = requireExpectedRevisionValue(input);
+          if (isHeroineActionFailure(expected)) {
+            return expected;
+          }
+          if (expected !== heroineRevisionFor(current).value) {
+            return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
+          }
+        }
+        const heroine = store.saveHeroine(current ? { ...parsed, id: current.id } : parsed);
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
@@ -1298,6 +1317,13 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         if (!current) {
           return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
         }
+        const expected = requireExpectedRevisionValue(input);
+        if (isHeroineActionFailure(expected)) {
+          return expected;
+        }
+        if (expected !== heroineRevisionFor(current).value) {
+          return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
+        }
         const record = asRecord(input);
         const confirmName = typeof record.confirmName === "string" ? record.confirmName.trim() : "";
         const confirmId = typeof record.confirmId === "string" ? record.confirmId.trim() : "";
@@ -1308,13 +1334,6 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
               { severity: "error", path: "confirmId", message: "히로인 ID 확인값이 일치해야 합니다." }
             ]
           });
-        }
-        const expected = requireExpectedRevisionValue(input);
-        if (isHeroineActionFailure(expected)) {
-          return expected;
-        }
-        if (expected !== heroineRevisionFor(current).value) {
-          return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
         }
         store.deleteHeroine(heroineId);
         const heroines = listHeroinesForResponse(store).map(heroineListItem);

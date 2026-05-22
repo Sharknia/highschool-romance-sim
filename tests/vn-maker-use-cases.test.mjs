@@ -209,6 +209,13 @@ assert.equal(contractUpdated.ok, true);
 assert.equal(contractUpdated.heroine.name, "아오이 수정");
 assert.notEqual(contractUpdated.heroineRevision.value, contractFetched.heroineRevision.value);
 
+const legacySaveExistingWithoutRevision = await useCases.saveHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroine: { ...contractHeroine, name: "아오이 레거시 우회" }
+});
+assert.equal(legacySaveExistingWithoutRevision.ok, false);
+assert.equal(legacySaveExistingWithoutRevision.code, "HEROINE_INPUT_INVALID");
+
 const staleUpdate = await useCases.updateHeroine({
   projectDirectory: heroineContractDirectory,
   heroine: { ...contractHeroine, name: "아오이 충돌" },
@@ -237,6 +244,16 @@ assert.equal(missingConfirmationDelete.ok, false);
 assert.equal(missingConfirmationDelete.code, "HEROINE_INPUT_INVALID");
 assert.equal(missingConfirmationDelete.issues.some((issue) => issue.path === "confirmName"), true);
 assert.equal(missingConfirmationDelete.issues.some((issue) => issue.path === "confirmId"), true);
+
+const staleDeleteAfterRename = await useCases.deleteHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi",
+  confirmName: "아오이",
+  confirmId: "aoi",
+  expectedHeroineRevision: contractFetched.heroineRevision
+});
+assert.equal(staleDeleteAfterRename.ok, false);
+assert.equal(staleDeleteAfterRename.code, "HEROINE_REVISION_CONFLICT");
 
 const staleDelete = await useCases.deleteHeroine({
   projectDirectory: heroineContractDirectory,
@@ -304,6 +321,13 @@ const forgedStagedPortrait = await useCases.createHeroine({
 });
 assert.equal(forgedStagedPortrait.ok, false);
 assert.equal(forgedStagedPortrait.code, "HEROINE_INPUT_INVALID");
+const wrongHeroineStagedPortrait = await useCases.createHeroine({
+  projectDirectory: stagedPortraitDirectory,
+  heroine: { ...stagedDraft, id: "wrong-staged-aoi", name: "다른 스테이지" },
+  stagedPortraitRef: stagedPortrait.stagedPortraitRef
+});
+assert.equal(wrongHeroineStagedPortrait.ok, false);
+assert.equal(wrongHeroineStagedPortrait.code, "HEROINE_INPUT_INVALID");
 const createdWithStagedPortrait = await useCases.createHeroine({
   projectDirectory: stagedPortraitDirectory,
   heroine: stagedDraft,
@@ -393,13 +417,19 @@ const generatedPortrait = await useCases.generateImage({
 });
 assert.equal(generatedPortrait.ok, true);
 assert.equal(generatedPortrait.asset.id, heroine.defaultPortraitAssetId);
+const heroineBeforeGeneratedPortrait = await useCases.getHeroine({
+  projectDirectory,
+  heroineId: heroine.id
+});
+assert.equal(heroineBeforeGeneratedPortrait.ok, true);
 const heroineWithGeneratedPortrait = await useCases.saveHeroine({
   projectDirectory,
   heroine: {
     ...heroine,
     defaultPortraitAssetId: generatedPortrait.asset.id,
     portraitAssetIds: [generatedPortrait.asset.id]
-  }
+  },
+  expectedHeroineRevision: heroineBeforeGeneratedPortrait.heroineRevision
 });
 assert.equal(heroineWithGeneratedPortrait.ok, true);
 const heroineLibraryAfterPortrait = await useCases.listHeroines({ projectDirectory });

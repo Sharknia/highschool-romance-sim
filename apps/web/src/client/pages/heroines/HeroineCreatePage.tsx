@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { StatusBanner } from "../../components/ui";
 import { createHeroine, failureText, generateHeroinePortrait, listHeroines } from "./heroineApi";
@@ -43,6 +43,22 @@ export function HeroineCreatePage() {
       }
     });
   }, [postAuthedJson]);
+
+  const updateDraft = useCallback((nextDraft: HeroineDraft): void => {
+    if (stagedPortraitRef && nextDraft.id !== draft.id) {
+      setStagedPortraitRef(undefined);
+      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      setDraft({
+        ...nextDraft,
+        defaultPortraitAssetId: undefined,
+        defaultPortraitUri: undefined,
+        portraitAssetIds: [],
+        portraitAssetUris: []
+      });
+      return;
+    }
+    setDraft(nextDraft);
+  }, [draft.id, stagedPortraitRef]);
 
   async function save(): Promise<void> {
     if (!canSave) {
@@ -107,7 +123,7 @@ export function HeroineCreatePage() {
 
       <section className="heroine-editor-layout">
         <article className="page-panel heroine-editor-main">
-          <HeroineFormPanel draft={draft} mode="create" onChange={setDraft} />
+          <HeroineFormPanel draft={draft} mode="create" onChange={updateDraft} />
         </article>
         <HeroinePortraitPanel
           busy={state === "saving"}
