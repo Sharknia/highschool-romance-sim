@@ -1,4 +1,4 @@
-import { CheckCircle2, Database, FolderOpen, RotateCw, Sparkles } from "lucide-react";
+import { CheckCircle2, Database, FolderOpen, Plus, RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -7,12 +7,6 @@ import { useWorkspaceShell } from "../components/WorkspaceLayout";
 import { ProjectDetailView } from "./projects/ProjectDetailView";
 import { RecentProjectList } from "./projects/RecentProjectList";
 import { normalizeTab, type ProjectApiResult, type ProjectData, type RecentProject } from "./projects/projectPageTypes";
-
-const starterProject = {
-  id: "web-starter",
-  title: "웹 제작툴 샘플",
-  premise: "Codex와 함께 미연시를 제작하는 첫 프로젝트"
-};
 
 function validationStatusFrom(result: ProjectApiResult): string {
   if (result.validation?.ok === true) {
@@ -60,9 +54,11 @@ export function ProjectStartPage() {
   const [status, setStatus] = useState("열린 프로젝트가 없습니다.");
   const [busy, setBusy] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [recentMeta, setRecentMeta] = useState({ count: 0, missingCount: 0, loadedAt: "", sort: "lastOpenedAtDesc" });
   const [currentProject, setCurrentProject] = useState<ProjectData | null>(null);
   const [reconnectProjectId, setReconnectProjectId] = useState<string | null>(null);
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
+  const [removedProject, setRemovedProject] = useState<RecentProject | null>(null);
 
   async function refreshRecentProjects(): Promise<RecentProject[]> {
     const result = await postAuthedJson<ProjectApiResult>("/api/projects/recent/list", {});
@@ -71,6 +67,12 @@ export function ProjectStartPage() {
     }
     const projects = Array.isArray(result.projects) ? result.projects : [];
     setRecentProjects(projects);
+    setRecentMeta({
+      count: typeof result.count === "number" ? result.count : projects.length,
+      missingCount: typeof result.missingCount === "number" ? result.missingCount : projects.filter((entry) => entry.missing).length,
+      loadedAt: typeof result.loadedAt === "string" ? result.loadedAt : "",
+      sort: typeof result.sort === "string" ? result.sort : "lastOpenedAtDesc"
+    });
     return projects;
   }
 
@@ -101,7 +103,8 @@ export function ProjectStartPage() {
     setBusy(true);
     setStatus(`${label} 실행 중`);
     try {
-      const result = await postAuthedJson<ProjectApiResult>("/api/projects/open", body);
+      const endpoint = label.includes("재연결") ? "/api/projects/reconnect" : "/api/projects/open";
+      const result = await postAuthedJson<ProjectApiResult>(endpoint, body);
       if (result.ok === false) {
         handleProjectFailure(result, label);
         return;
@@ -120,31 +123,6 @@ export function ProjectStartPage() {
     }
   }
 
-  async function createSampleProject(): Promise<void> {
-    setBusy(true);
-    setStatus("샘플 프로젝트 생성 실행 중");
-    try {
-      const result = await postAuthedJson<ProjectApiResult>("/api/project/starter", {
-        projectDirectory: projectDirectoryInput || undefined,
-        starter: starterProject
-      });
-      if (result.ok === false) {
-        handleProjectFailure(result, "샘플 프로젝트 생성");
-        return;
-      }
-      const nextProjectId = applyProjectResult(result);
-      await refreshRecentProjects();
-      setStatus("샘플 프로젝트 생성 완료");
-      if (nextProjectId) {
-        navigate(`/projects/${nextProjectId}/overview`);
-      }
-    } catch (error) {
-      setStatus(`샘플 프로젝트 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function removeRecentProject(entry: RecentProject): Promise<void> {
     setBusy(true);
     setStatus("최근 목록 제거 실행 중");
@@ -156,9 +134,33 @@ export function ProjectStartPage() {
         throw new Error(result.error || "최근 목록에서 제거하지 못했습니다.");
       }
       setRecentProjects(Array.isArray(result.projects) ? result.projects : []);
-      setStatus("최근 목록에서만 제거 완료: 실제 프로젝트 파일은 삭제하지 않았습니다.");
+      setRemovedProject(result.removedProject || entry);
+      setStatus("최근 목록에서 제거했습니다. 실제 프로젝트 파일은 삭제하지 않았습니다.");
     } catch (error) {
       setStatus(`최근 목록 제거 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreRecentProject(): Promise<void> {
+    if (!removedProject) {
+      return;
+    }
+    setBusy(true);
+    setStatus("최근 목록 되돌리기 실행 중");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/projects/recent/restore", {
+        recentProject: removedProject
+      });
+      if (result.ok === false) {
+        throw new Error(result.error || "최근 목록을 되돌리지 못했습니다.");
+      }
+      setRecentProjects(Array.isArray(result.projects) ? result.projects : []);
+      setRemovedProject(null);
+      setStatus("최근 목록 되돌리기 완료");
+    } catch (error) {
+      setStatus(`최근 목록 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -199,15 +201,20 @@ export function ProjectStartPage() {
           <p>최근 프로젝트를 열고 Alpha 제작 루프의 상세 탭으로 바로 진입합니다.</p>
         </div>
         <div className="page-primary-action">
-          <span>첫 제작 기준 프로젝트가 필요합니다.</span>
-          <Button disabled={busy} icon={<Sparkles size={18} />} onClick={() => void createSampleProject()} variant="primary">
-            샘플 프로젝트 생성
+          <span>새 제작 프로젝트가 필요하면 생성 흐름으로 이동합니다.</span>
+          <Button disabled={busy} icon={<Plus size={18} />} onClick={() => navigate("/projects/new")} variant="primary">
+            새 프로젝트 만들기
           </Button>
         </div>
       </header>
 
       <StatusBanner tone={statusTone(status)}>
         <span className="page-status">{status}</span>
+        {removedProject ? (
+          <Button disabled={busy} onClick={() => void restoreRecentProject()} variant="ghost">
+            되돌리기
+          </Button>
+        ) : null}
       </StatusBanner>
 
       <section className="page-panel-grid">
@@ -249,6 +256,8 @@ export function ProjectStartPage() {
 
       <RecentProjectList
         busy={busy}
+        loadedAt={recentMeta.loadedAt}
+        missingCount={recentMeta.missingCount}
         onOpen={(entry) => void openProject("최근 프로젝트 열기", { projectId: entry.projectId })}
         onPrepareReconnect={(entry) => {
           setReconnectProjectId(entry.projectId);
@@ -258,6 +267,7 @@ export function ProjectStartPage() {
         onRefresh={() => void refreshRecentProjects()}
         onRemove={(entry) => void removeRecentProject(entry)}
         recentProjects={recentProjects}
+        totalCount={recentMeta.count}
       />
 
       {projectId || currentProject ? (

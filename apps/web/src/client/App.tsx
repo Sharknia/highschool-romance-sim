@@ -8,6 +8,7 @@ import { HeroineStartPage } from "./pages/HeroineStartPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectStartPage } from "./pages/ProjectStartPage";
+import { ProjectNewPage } from "./pages/projects/ProjectNewPage";
 import { SettingsStartPage } from "./pages/SettingsStartPage";
 
 function RootRedirect() {
@@ -33,6 +34,7 @@ export function App() {
           <Route element={<AuthGate />}>
             <Route element={<WorkspaceLayout />}>
               <Route path="/projects" element={<ProjectStartPage />} />
+              <Route path="/projects/new" element={<ProjectNewPage />} />
               <Route path="/projects/:projectId" element={<ProjectStartPage />} />
               <Route path="/projects/:projectId/:tab" element={<ProjectStartPage />} />
               <Route path="/heroines" element={<HeroineStartPage />} />

@@ -32,16 +32,23 @@ export interface RecentProject {
 
 export interface ProjectApiResult extends ApiResult {
   code?: string;
+  message?: string;
   project?: ProjectData;
   projectDirectory?: string;
   projectId?: string;
   projects?: RecentProject[];
+  count?: number;
+  missingCount?: number;
+  loadedAt?: string;
+  sort?: "lastOpenedAtDesc";
   validation?: {
     ok?: boolean;
   };
   recentProject?: RecentProject;
+  removedProject?: RecentProject;
   expectedProjectId?: string;
   actualProjectId?: string;
+  workflowSummary?: unknown;
 }
 
 export function normalizeTab(value?: string): ProjectTabId {
