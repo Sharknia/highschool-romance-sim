@@ -24,6 +24,8 @@ function editableSnapshot(draft: HeroineDraft): string {
   });
 }
 
+const readyStatus = "변경할 내용을 입력하세요.";
+
 export function HeroineEditPage() {
   const { postAuthedJson, session } = useAuth();
   const navigate = useNavigate();
@@ -40,8 +42,11 @@ export function HeroineEditPage() {
   const actionSummary = validationIssues.length > 0
     ? `필수값을 모두 입력해야 저장할 수 있습니다. ${validationIssues.join(" ")}`
     : dirty
-      ? "변경할 내용을 입력하세요."
+      ? readyStatus
       : "변경된 내용이 없습니다.";
+  const displayStatus = state === "loading" || (state === "ready" && status === readyStatus)
+    ? ""
+    : status;
 
   const load = useCallback(async () => {
     setState("loading");
@@ -61,7 +66,7 @@ export function HeroineEditPage() {
     setOriginal(nextDraft);
     setRevision(result.heroineRevision);
     setState("ready");
-    setStatus("변경할 내용을 입력하세요.");
+    setStatus(readyStatus);
   }, [heroineId, postAuthedJson]);
 
   useEffect(() => {
@@ -155,7 +160,7 @@ export function HeroineEditPage() {
       onSaveAndExit={() => void save(true)}
       saving={state === "saving"}
       session={session}
-      status={status}
+      status={displayStatus}
       statusTone={statusTone(state)}
       summary={actionSummary}
       title="히로인 수정"

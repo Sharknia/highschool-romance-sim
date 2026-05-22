@@ -20,7 +20,7 @@ interface HeroineEditorScreenProps {
   onSave: () => void;
   saving: boolean;
   session: CodexSessionResult | null;
-  status: string;
+  status?: string;
   statusTone: "neutral" | "waiting" | "success" | "error";
   summary: string;
   title: string;
@@ -77,9 +77,11 @@ export function HeroineEditorScreen({
         </div>
       </header>
 
-      <StatusBanner tone={statusTone}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
+      {status ? (
+        <StatusBanner tone={statusTone}>
+          <span className="page-status">{status}</span>
+        </StatusBanner>
+      ) : null}
 
       {notFound ? (
         <section className="page-panel">

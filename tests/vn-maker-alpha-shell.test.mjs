@@ -279,6 +279,9 @@ assert.match(heroineRouteSource, /HeroineEditorScreen/, "생성/수정 화면은
 assert.match(heroineRouteSource, /loading\?: boolean/, "공통 편집 화면은 로딩 중 폼 렌더링을 막는 loading prop을 가져야 합니다.");
 assert.match(heroineRouteSource, /const showEditor = !loading && !notFound && !error/, "로딩 중에는 빈 draft 편집 폼을 렌더링하면 안 됩니다.");
 assert.match(heroineRouteSource, /loading=\{state === "loading"\}/, "수정 화면은 데이터 로딩 중 공통 편집 폼을 숨겨야 합니다.");
+assert.match(heroineRouteSource, /const displayStatus = state === "loading" \|\| \(state === "ready" && status === readyStatus\)\s*\? ""\s*: status/, "수정 화면은 로딩 중 또는 준비 완료 기본 안내를 상단 상태 배너에 표시하지 않아야 합니다.");
+assert.match(heroineRouteSource, /status=\{displayStatus\}/, "수정 화면은 필터링된 상태 문구만 공통 편집 화면에 전달해야 합니다.");
+assert.match(heroineRouteSource, /status \? \(/, "공통 편집 화면은 상태 문구가 있을 때만 상태 배너를 렌더링해야 합니다.");
 assert.match(heroineRouteSource, /onSaveAndExit/, "생성/수정 화면은 취소/저장/저장 후 상세보기 3단 액션을 제공해야 합니다.");
 assert.match(heroineRouteSource, /field-row-invalid/, "미입력 필드는 red border 상태로 표시해야 합니다.");
 assert.doesNotMatch(heroineRouteSource, />미입력</, "미입력 안내 글자는 필드 안에 표시하지 않아야 합니다.");
