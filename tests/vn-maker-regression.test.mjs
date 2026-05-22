@@ -28,6 +28,7 @@ const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker")
 const apiRecentDirectory = join(tempRoot, "ApiRecent.vnmaker");
 const apiRecentProjectIndexFile = join(tempRoot, "api-recent-projects.json");
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
+const bundledProjectStartPagePath = join(tempRoot, "project-start-page.mjs");
 const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
 const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
 const webDevEnvKeys = ["PORT", "API_PORT", "VITE_API_PORT", "VN_MAKER_ALPHA_SANDBOX"];
@@ -669,6 +670,7 @@ const apiDeleteBlocked = await mockApi({
 assert.equal(apiDeleteBlocked.status, 400);
 assert.equal(apiDeleteBlocked.body.ok, false);
 assert.equal(apiDeleteBlocked.body.code, "PROJECT_INPUT_INVALID");
+assert.equal(apiDeleteBlocked.body.deletionPolicy, undefined);
 assert.equal(existsSync(join(apiDeleteDirectory, "project.sqlite")), true);
 const apiDeleteMissingProjectId = await mockApi({
   method: "POST",
@@ -1386,6 +1388,51 @@ await esbuild({
   outfile: bundledClientApiPath
 });
 const clientApi = await import(pathToFileURL(bundledClientApiPath).href);
+await esbuild({
+  entryPoints: ["apps/web/src/client/pages/ProjectStartPage.tsx"],
+  bundle: true,
+  charset: "utf8",
+  platform: "node",
+  format: "esm",
+  outfile: bundledProjectStartPagePath
+});
+const projectStartPage = await import(pathToFileURL(bundledProjectStartPagePath).href);
+assert.equal(typeof projectStartPage.projectListErrorViewModel, "function");
+assert.equal(typeof projectStartPage.projectDeleteErrorViewModel, "function");
+
+function viewModelText(viewModel) {
+  return Object.values(viewModel).filter((value) => typeof value === "string").join(" ");
+}
+
+for (const failure of [
+  { ok: false, code: "EMPTY_RESPONSE" },
+  { ok: false, code: "NON_JSON_RESPONSE" },
+  { ok: false, code: "SERVER_ERROR", httpStatus: 500 }
+]) {
+  const viewModel = projectStartPage.projectListErrorViewModel(failure);
+  const renderedText = viewModelText(viewModel);
+  assert.equal(viewModel.title, "프로젝트 목록을 불러오지 못했습니다");
+  assert.equal(viewModel.code, failure.code);
+  assert.equal(viewModel.retryLabel, "다시 시도");
+  assert.equal(renderedText.includes(viewModel.nextAction), true);
+  assert.match(renderedText, /프로젝트 목록을 불러오지 못했습니다/);
+  assert.match(renderedText, new RegExp(failure.code));
+  assert.match(renderedText, /다시 시도/);
+}
+
+const deleteFailureViewModel = projectStartPage.projectDeleteErrorViewModel({
+  ok: false,
+  code: "PROJECT_INPUT_INVALID",
+  message: "프로젝트 제목이 일치하지 않습니다.",
+  nextAction: "프로젝트 제목을 확인하세요."
+});
+const deleteFailureText = viewModelText(deleteFailureViewModel);
+assert.equal(deleteFailureViewModel.title, "삭제 실패");
+assert.equal(deleteFailureViewModel.retryLabel, "다시 시도");
+assert.match(deleteFailureText, /삭제 실패/);
+assert.match(deleteFailureText, /PROJECT_INPUT_INVALID|프로젝트 제목이 일치하지 않습니다/);
+assert.match(deleteFailureText, /프로젝트 제목을 확인하세요/);
+assert.match(deleteFailureText, /다시 시도/);
 const originalFetch = globalThis.fetch;
 try {
   globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, project: { id: "json-ok" } }), {

@@ -18,7 +18,7 @@
 - Create: `apps/web/src/client/pages/projects/projectApi.ts`
 - Modify: `apps/web/src/client/pages/ProjectStartPage.tsx`
 
-- [ ] **Step 1: Write failing source-contract tests**
+- [x] **Step 1: Write failing source-contract tests**
 
 In `tests/vn-maker-alpha-shell.test.mjs`, replace the old project-list assertions with:
 
@@ -67,7 +67,7 @@ assert.deepEqual([...workspaceLayoutSource.matchAll(/path: "([^"]+)"/g)].map((ma
 
 Define `appSource` in the test from `apps/web/src/client/App.tsx`. The existing navigation may keep its current project entry, but this issue must not add a new menu/nav item separate from the existing `/projects` route.
 
-- [ ] **Step 2: Run shell test to verify RED**
+- [x] **Step 2: Run shell test to verify RED**
 
 Run:
 
@@ -77,7 +77,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: FAIL because `projectApi.ts`, state enum, and local delete wording are missing.
 
-- [ ] **Step 3: Extract project API wrapper**
+- [x] **Step 3: Extract project API wrapper**
 
 Create `apps/web/src/client/pages/projects/projectApi.ts`:
 
@@ -118,7 +118,7 @@ export function deleteProjectFiles(postJson: PostAuthedJson, input: {
 }
 ```
 
-- [ ] **Step 4: Refactor `ProjectStartPage` to use list state**
+- [x] **Step 4: Refactor `ProjectStartPage` to use list state**
 
 Add:
 
@@ -154,7 +154,7 @@ Each project list item must render these fields from `RecentProject` or a derive
 
 If `updatedAt`/`lastOpenedAt` is absent, show `기록 없음` rather than leaving the field blank. Add `formatRecentProjectDate()` in `RecentProjectList.tsx` or a tiny local helper and cover it with source/behavior assertions.
 
-- [ ] **Step 5: Run shell test to verify GREEN**
+- [x] **Step 5: Run shell test to verify GREEN**
 
 Run:
 
@@ -174,7 +174,7 @@ Expected: PASS for project list source assertions.
 - Modify: `apps/web/src/client/pages/ProjectStartPage.tsx`
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 
-- [ ] **Step 1: Write failing shared delete-dialog source assertions**
+- [x] **Step 1: Write failing shared delete-dialog source assertions**
 
 Add to `tests/vn-maker-alpha-shell.test.mjs`:
 
@@ -194,7 +194,7 @@ assert.match(readText("apps/web/src/client/pages/heroines/HeroineDeleteDialog.ts
 assert.doesNotMatch(projectStartSource, /ProjectDeleteDialog/, "프로젝트 전용 삭제 모달 파일/컴포넌트를 만들면 안 됩니다.");
 ```
 
-- [ ] **Step 2: Run shell test to verify RED**
+- [x] **Step 2: Run shell test to verify RED**
 
 Run:
 
@@ -204,7 +204,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: FAIL because `DeleteConfirmDialog.tsx` does not exist and heroine/project delete flows do not use it.
 
-- [ ] **Step 3: Implement shared dialog**
+- [x] **Step 3: Implement shared dialog**
 
 Create `apps/web/src/client/components/ui/DeleteConfirmDialog.tsx` with props:
 
@@ -254,7 +254,7 @@ Render:
 
 Export it from `apps/web/src/client/components/ui/index.ts`.
 
-- [ ] **Step 4: Refactor heroine and wire project delete**
+- [x] **Step 4: Refactor heroine and wire project delete**
 
 Refactor `HeroineDeleteDialog.tsx` to render `DeleteConfirmDialog` with the existing heroine-specific title/copy. Do not change heroine deletion behavior.
 
@@ -290,7 +290,7 @@ Show project-specific copy through props, not through a project-specific modal c
 
 The retry action must re-use the same selected project and confirmation title. It must not remove the list entry after a failed local delete.
 
-- [ ] **Step 5: Wire list actions**
+- [x] **Step 5: Wire list actions**
 
 In `RecentProjectList.tsx`, expose a low-priority delete action that opens the dialog:
 
@@ -302,7 +302,7 @@ In `RecentProjectList.tsx`, expose a low-priority delete action that opens the d
 
 Keep `상세보기` as the primary action and `삭제` as the danger action.
 
-- [ ] **Step 6: Run shell test to verify GREEN**
+- [x] **Step 6: Run shell test to verify GREEN**
 
 Run:
 
@@ -318,7 +318,7 @@ Expected: PASS.
 - Modify: `apps/web/src/client/pages/ProjectStartPage.tsx`
 - Modify: `tests/vn-maker-regression.test.mjs`
 
-- [ ] **Step 1: Write failing API behavior assertions**
+- [x] **Step 1: Write failing API behavior assertions**
 
 In `tests/vn-maker-regression.test.mjs`, add an API delete case using the #20 route:
 
@@ -347,7 +347,7 @@ assert.equal(apiDeleteOk.body.ok, true);
 assert.equal(apiDeleteOk.body.deletionPolicy.mode, "localProjectFiles");
 ```
 
-- [ ] **Step 2: Run regression test to verify RED or #20 dependency**
+- [x] **Step 2: Run regression test to verify RED or #20 dependency**
 
 Run:
 
@@ -357,7 +357,7 @@ npm run build:maker && node tests/vn-maker-regression.test.mjs
 
 Expected: if #20 is complete this passes after UI wiring; if #20 is not complete it fails at missing `/api/projects/delete`.
 
-- [ ] **Step 3: Implement page behavior**
+- [x] **Step 3: Implement page behavior**
 
 In `ProjectStartPage.tsx`:
 - keep the deleted item in state only for recent-list restoration, because recent removal is reversible in the recent index and does not touch local files;
@@ -365,7 +365,7 @@ In `ProjectStartPage.tsx`:
 - on delete failure, keep the entry and show the failure plus retry action in the shared `DeleteConfirmDialog`;
 - never call local delete from `RecentProjectList` directly.
 
-- [ ] **Step 4: Add actual frontend failure rendering test**
+- [x] **Step 4: Add actual frontend failure rendering test**
 
 Add a lightweight bundled React test in `tests/vn-maker-regression.test.mjs` or a focused `tests/vn-maker-project-list-ui.test.mjs` that mounts `/projects` with mocked `postAuthedJson` returning #20 failure envelopes:
 
@@ -384,7 +384,7 @@ for (const failure of [
 
 If a full React mount helper does not exist, extract a pure `projectListErrorViewModel(result)` from `ProjectStartPage.tsx` and assert the component renders that view model. This test must execute code, not only source strings.
 
-- [ ] **Step 5: Run focused checks**
+- [x] **Step 5: Run focused checks**
 
 Run:
 
@@ -394,7 +394,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs && node tests/vn
 
 Expected: PASS.
 
-- [ ] **Step 6: Verify safe frontend API failures**
+- [x] **Step 6: Verify safe frontend API failures**
 
 Extend the executable failure-rendering test from Step 4 so it covers list load and delete failure envelopes. Do not add source-only assertions for this requirement.
 
@@ -424,7 +424,7 @@ Expected: PASS and `/projects` renders a stable error state for empty, nonJSON, 
 **Files:**
 - Modify: `docs/qa/issue-21-project-list-delete.md`
 
-- [ ] **Step 1: Create focused QA notes**
+- [x] **Step 1: Create focused QA notes**
 
 Create `docs/qa/issue-21-project-list-delete.md` with:
 
@@ -449,7 +449,7 @@ Create `docs/qa/issue-21-project-list-delete.md` with:
 - Focus moves into the delete dialog and returns to the triggering delete control after close.
 ```
 
-- [ ] **Step 2: Browser check before the #21 commit**
+- [x] **Step 2: Browser check before the #21 commit**
 
 Start the local app in this issue and fill this file before Task 5:
 
@@ -465,7 +465,7 @@ At `390x844`, `768x1024`, and `1440x900`, compare `/projects` and `/heroines` at
 - All files modified in Tasks 1-3
 - This plan file
 
-- [ ] **Step 1: Run required verification**
+- [x] **Step 1: Run required verification**
 
 Run:
 
@@ -483,7 +483,7 @@ Confirm `docs/qa/issue-21-project-list-delete.md` contains PASS/FAIL entries for
 Run:
 
 ```bash
-git add apps/web/src/client/components/ui/DeleteConfirmDialog.tsx apps/web/src/client/components/ui/index.ts apps/web/src/client/pages/heroines/HeroineDeleteDialog.tsx apps/web/src/client/pages/ProjectStartPage.tsx apps/web/src/client/pages/projects/RecentProjectList.tsx apps/web/src/client/pages/projects/projectApi.ts tests/vn-maker-alpha-shell.test.mjs tests/vn-maker-regression.test.mjs docs/qa/issue-21-project-list-delete.md docs/superpowers/plans/2026-05-22-issue-21-project-list-delete.md
+git add apps/web/src/client/auth/AuthProvider.tsx apps/web/src/client/components/ui/DeleteConfirmDialog.tsx apps/web/src/client/components/ui/index.ts apps/web/src/client/pages/heroines/HeroineDeleteDialog.tsx apps/web/src/client/pages/ProjectStartPage.tsx apps/web/src/client/pages/projects/RecentProjectList.tsx apps/web/src/client/pages/projects/projectApi.ts apps/web/src/client/styles.css tests/vn-maker-alpha-shell.test.mjs tests/vn-maker-regression.test.mjs docs/qa/issue-21-project-list-delete.md docs/superpowers/plans/2026-05-22-issue-21-project-list-delete.md
 git commit -m "feat: implement issue 21 project list deletion flow"
 git push
 ```

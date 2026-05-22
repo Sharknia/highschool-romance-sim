@@ -171,7 +171,7 @@ a {
 }
 
 .button {
-  min-height: 38px;
+  min-height: 40px;
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -1113,6 +1113,14 @@ a {
   flex: 1 1 260px;
 }
 
+.recent-project-field {
+  display: block;
+}
+
+.recent-project-field b {
+  color: #fbf7ef;
+}
+
 .recent-project-counts {
   color: #bfb6a8;
   font-size: 0.9rem;
@@ -1193,14 +1201,24 @@ a {
   display: none;
 }
 
-.recent-project-menu[open] .button {
+.recent-project-menu-actions {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
   z-index: 4;
-  min-width: 180px;
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
   background: #191814;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+}
+
+.recent-project-menu-actions .button {
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .state-chip {
