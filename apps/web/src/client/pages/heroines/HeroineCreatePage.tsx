@@ -6,7 +6,7 @@ import { createHeroine, failureText, generateHeroinePortrait, listHeroines } fro
 import { HeroineActionBar } from "./HeroineActionBar";
 import { createEmptyHeroineDraft, HeroineFormPanel, validateHeroineDraft } from "./HeroineFormPanel";
 import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
-import type { HeroineDraft, HeroineLoadState } from "./heroinePageTypes";
+import type { HeroineDraft, HeroineLibraryResult, HeroineLoadState } from "./heroinePageTypes";
 
 function statusTone(state: HeroineLoadState): "neutral" | "waiting" | "success" | "error" {
   if (state === "saving") return "waiting";
@@ -22,6 +22,7 @@ export function HeroineCreatePage() {
   const [status, setStatus] = useState("새 히로인 기본 설정을 입력하세요.");
   const [draft, setDraft] = useState<HeroineDraft>(() => createEmptyHeroineDraft());
   const [existingIds, setExistingIds] = useState<string[]>([]);
+  const [stagedPortraitRef, setStagedPortraitRef] = useState<HeroineLibraryResult["stagedPortraitRef"]>();
   const emptyDraft = useMemo(() => createEmptyHeroineDraft(), []);
   const dirty = JSON.stringify(draft) !== JSON.stringify(emptyDraft);
   const validationIssues = validateHeroineDraft(draft, "create");
@@ -70,7 +71,7 @@ export function HeroineCreatePage() {
     }
     setState("saving");
     setStatus("히로인을 저장하는 중입니다.");
-    const result = await createHeroine(postAuthedJson, draft);
+    const result = await createHeroine(postAuthedJson, draft, stagedPortraitRef);
     if (result.ok === false) {
       setState(result.code === "HEROINE_REVISION_CONFLICT" ? "conflict" : "error");
       setStatus(`히로인 저장 실패: ${failureText(result, "입력값을 확인해 주세요.")}`);
@@ -94,6 +95,7 @@ export function HeroineCreatePage() {
       defaultPortraitAssetId: result.asset?.id || draft.defaultPortraitAssetId,
       defaultPortraitUri: result.stagedPortraitRef?.previewUri || result.asset?.uri || draft.defaultPortraitUri
     });
+    setStagedPortraitRef(result.stagedPortraitRef);
     setState("ready");
     setStatus("기본 포트레이트가 연결되었습니다. 저장하면 원본 히로인 에셋으로 연결됩니다.");
   }

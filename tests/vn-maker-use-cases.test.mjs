@@ -15,6 +15,7 @@ const preserveNextProjectDirectory = join(tempRoot, "PreserveNext.vnmaker");
 const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
 const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
 const heroineContractDirectory = join(tempRoot, "HeroineContract.vnmaker");
+const stagedPortraitDirectory = join(tempRoot, "StagedPortrait.vnmaker");
 const recentProjectIndexFile = join(tempRoot, "recent-projects.json");
 const useCases = useCasesModule.createVnMakerUseCases({
   recentProjectIndexFile,
@@ -25,7 +26,7 @@ const useCases = useCasesModule.createVnMakerUseCases({
   },
   image: {
     async generateImageAsset(input) {
-      assert.equal(input.cwd, projectDirectory);
+      assert.match(input.cwd, /\.vnmaker$/);
       assert.equal(input.publicPathPrefix, "/generated-assets");
       assert.equal(Boolean(input.model), false);
       return {
@@ -243,6 +244,59 @@ const deletedAgain = await useCases.deleteHeroine({
 });
 assert.equal(deletedAgain.ok, false);
 assert.equal(deletedAgain.code, "HEROINE_NOT_FOUND");
+
+const stagedDraft = core.createHeroineProfile({
+  id: "staged-aoi",
+  name: "스테이지 아오이",
+  description: "저장 전 포트레이트 연결을 검증하는 히로인.",
+  personality: "차분하고 꼼꼼하다.",
+  speechStyle: "정확하게 말한다.",
+  appearance: "짙은 남색 리본과 단정한 교복."
+});
+const stagedPortrait = await useCases.generateHeroinePortrait({
+  projectDirectory: stagedPortraitDirectory,
+  draft: stagedDraft,
+  outputAssetId: "asset-staged-aoi-custom"
+});
+assert.equal(stagedPortrait.ok, true);
+assert.equal(stagedPortrait.generationState, "completed");
+assert.equal(stagedPortrait.stagedPortraitRef.id.startsWith("staged-"), true);
+assert.equal(stagedPortrait.asset.kind, "portrait");
+const libraryBeforeStagedCreate = await useCases.listHeroines({ projectDirectory: stagedPortraitDirectory });
+assert.equal(libraryBeforeStagedCreate.ok, true);
+assert.equal(libraryBeforeStagedCreate.empty, true);
+const createdWithStagedPortrait = await useCases.createHeroine({
+  projectDirectory: stagedPortraitDirectory,
+  heroine: stagedDraft,
+  stagedPortraitRef: stagedPortrait.stagedPortraitRef
+});
+assert.equal(createdWithStagedPortrait.ok, true);
+assert.equal(createdWithStagedPortrait.heroine.defaultPortraitAssetId, stagedPortrait.asset.id);
+assert.equal(createdWithStagedPortrait.heroine.portraitAssetIds.includes(stagedPortrait.asset.id), true);
+assert.equal(createdWithStagedPortrait.heroine.defaultPortraitUri, stagedPortrait.asset.uri);
+
+const existingPortraitHeroine = core.createHeroineProfile({
+  id: "portrait-existing",
+  name: "포트레이트 기존",
+  description: "기존 원본 포트레이트 생성을 검증한다.",
+  personality: "명랑하다.",
+  speechStyle: "활기차게 말한다.",
+  appearance: "밝은 갈색 머리와 미소."
+});
+const existingPortraitCreated = await useCases.createHeroine({
+  projectDirectory: stagedPortraitDirectory,
+  heroine: existingPortraitHeroine
+});
+assert.equal(existingPortraitCreated.ok, true);
+const generatedForExisting = await useCases.generateHeroinePortrait({
+  projectDirectory: stagedPortraitDirectory,
+  heroineId: "portrait-existing",
+  expectedHeroineRevision: existingPortraitCreated.heroineRevision
+});
+assert.equal(generatedForExisting.ok, true);
+assert.equal(generatedForExisting.heroine.defaultPortraitAssetId, generatedForExisting.asset.id);
+assert.equal(generatedForExisting.heroine.portraitAssetIds.includes(generatedForExisting.asset.id), true);
+assert.notEqual(generatedForExisting.heroineRevision.value, existingPortraitCreated.heroineRevision.value);
 
 const created = await useCases.createProjectFromHeroine({
   projectDirectory,

@@ -21,11 +21,16 @@ export function getHeroine(postJson: PostAuthedJson, heroineId: string): Promise
   return postJson<HeroineLibraryResult>("/api/heroines/get", { heroineId });
 }
 
-export function createHeroine(postJson: PostAuthedJson, draft: HeroineDraft): Promise<HeroineLibraryResult> {
+export function createHeroine(
+  postJson: PostAuthedJson,
+  draft: HeroineDraft,
+  stagedPortraitRef?: HeroineLibraryResult["stagedPortraitRef"]
+): Promise<HeroineLibraryResult> {
   return postJson<HeroineLibraryResult>("/api/heroines/create", {
     action: "createHeroine",
     requestId: `create-${draft.id}-${Date.now()}`,
-    heroine: draft
+    heroine: draft,
+    stagedPortraitRef
   });
 }
 

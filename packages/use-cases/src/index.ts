@@ -702,6 +702,32 @@ function heroineListItem(heroine: HeroineProfileDto): HeroineProfileDto & {
   };
 }
 
+function stagedPortraitAssetId(input: unknown, store: ProjectStore): string | undefined {
+  const stagedPortraitRef = asRecord(input).stagedPortraitRef;
+  if (!stagedPortraitRef || typeof stagedPortraitRef !== "object") {
+    return undefined;
+  }
+  const stagedId = (stagedPortraitRef as { id?: unknown }).id;
+  if (typeof stagedId !== "string" || !stagedId.startsWith("staged-")) {
+    return undefined;
+  }
+  const assetId = stagedId.slice("staged-".length);
+  const assetExists = store.requireProject().assets.some((asset) => asset.id === assetId && asset.kind === "portrait");
+  return assetExists ? assetId : undefined;
+}
+
+function attachStagedPortrait(heroine: HeroineProfile, input: unknown, store: ProjectStore): HeroineProfile {
+  const assetId = stagedPortraitAssetId(input, store);
+  if (!assetId) {
+    return heroine;
+  }
+  return {
+    ...heroine,
+    defaultPortraitAssetId: assetId,
+    portraitAssetIds: [...new Set([assetId, ...heroine.portraitAssetIds])]
+  };
+}
+
 async function withStore<T>(projectDirectory: string, operation: (store: ProjectStore) => Promise<T> | T): Promise<T> {
   const store = await openProjectStore(projectDirectory);
   try {
@@ -1121,7 +1147,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         if (store.getHeroine(parsed.id)) {
           return heroineFailure(input, "HEROINE_ID_CONFLICT", "이미 같은 히로인 ID가 있습니다.");
         }
-        const heroine = store.saveHeroine(parsed);
+        const heroine = store.saveHeroine(attachStagedPortrait(parsed, input, store));
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
