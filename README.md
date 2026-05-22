@@ -26,6 +26,20 @@ node packages/cli/dist/index.js codex-auth-status
 
 상세 구조와 CLI/API 계약은 [docs/vn-maker-toolkit.md](docs/vn-maker-toolkit.md)를 참고한다.
 
+## 웹앱 개발 서버
+
+기본 개발 실행은 Vite UI를 `127.0.0.1:5173`, Node API를 `127.0.0.1:5174`로 띄운다.
+
+```bash
+VN_MAKER_ALPHA_SANDBOX=1 npm run dev -w @vn-maker/web
+```
+
+포트를 바꿀 때는 UI 포트는 `VITE_PORT`, API 포트는 `API_PORT`, `VITE_API_PORT`, `PORT` 순서로 지정한다. `apps/web/scripts/dev.mjs`와 `apps/web/vite.config.ts`가 같은 계약을 사용하므로 API 포트를 override하면 Vite의 `/api`, `/generated-assets` proxy target도 같은 포트로 동기화된다.
+
+```bash
+VN_MAKER_ALPHA_SANDBOX=1 PORT=6174 VITE_PORT=6173 npm run dev -w @vn-maker/web
+```
+
 ## 레거시 플레이어 구조
 
 아래 구조는 기존 단일 HTML 플레이어 런타임이다. 신규 제작툴 기능의 중심 작업으로 삼지 않고, 회귀 검증이 필요할 때 `legacy:*` 명령으로 다룬다.

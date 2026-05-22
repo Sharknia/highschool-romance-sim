@@ -22,6 +22,7 @@ import type { ApiResult, ImagePreviewResult } from "../api/types";
 import { describeSession, useAuth } from "../auth/AuthProvider";
 import { SceneWorkbench } from "../components/SceneWorkbench";
 import { AppShell, Button, StatusBanner } from "../components/ui";
+import { alphaSandboxStatusText, isAlphaSandboxEnabled } from "../runtimeConfig";
 
 interface HeroineDraft {
   id?: string;
@@ -245,6 +246,7 @@ function jobTone(status: GenerationJob["status"]): string {
 
 export function WorkspacePage() {
   const { logout, postAuthedJson, refreshSession, session } = useAuth();
+  const alphaSandboxEnabled = isAlphaSandboxEnabled();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
   const [projectDirectory, setProjectDirectory] = useState("");
   const [project, setProject] = useState<ProjectData | null>(null);
@@ -695,6 +697,8 @@ export function WorkspacePage() {
       )}
     >
       <main className="maker-workspace">
+        {alphaSandboxEnabled ? <StatusBanner tone="success">{alphaSandboxStatusText}</StatusBanner> : null}
+
         <section className="workspace-summary">
           <div>
             <p className="eyebrow">Beta workspace</p>

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { build as esbuild } from "esbuild";
+import { loadConfigFromFile } from "vite";
 
 const core = await import("../packages/engine-core/dist/index.js");
 const codexGeneration = await import("../packages/generation-codex/dist/index.js");
@@ -24,6 +25,41 @@ const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker")
 const bundledClientApiPath = join(tempRoot, "client-api.mjs");
 const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
 const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
+const webDevEnvKeys = ["PORT", "API_PORT", "VITE_API_PORT", "VN_MAKER_ALPHA_SANDBOX"];
+
+async function loadWebViteConfigWithEnv(env) {
+  const previousEnv = new Map(webDevEnvKeys.map((key) => [key, process.env[key]]));
+  for (const key of webDevEnvKeys) {
+    if (Object.hasOwn(env, key)) {
+      process.env[key] = env[key];
+    } else {
+      delete process.env[key];
+    }
+  }
+
+  try {
+    const result = await loadConfigFromFile(
+      { command: "serve", mode: "development" },
+      "apps/web/vite.config.ts"
+    );
+    assert.notEqual(result, null);
+    return result.config;
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+function viteProxyTarget(config, path) {
+  const proxy = config.server?.proxy;
+  const entry = proxy?.[path];
+  return typeof entry === "string" ? entry : entry?.target;
+}
 
 const project = core.createStarterProject({
   id: "test-project",
@@ -574,6 +610,37 @@ assert.equal(reopenedProject.assets.some((asset) => asset.id === apiImage.body.a
 assert.equal(reopenedProject.generationJobs.some((job) => job.id === apiImage.body.job.id), true);
 reopenedStore.close();
 
+const previousAlphaSandboxEnv = process.env.VN_MAKER_ALPHA_SANDBOX;
+process.env.VN_MAKER_ALPHA_SANDBOX = "1";
+try {
+  const sandboxApi = webHandlers.createApiRequestHandler({ projectDirectory });
+  const sandboxSession = await sandboxApi({ method: "GET", path: "/api/codex/session" });
+  assert.equal(sandboxSession.status, 200);
+  assert.equal(sandboxSession.body.connected, true);
+  assert.equal(sandboxSession.body.account.email, "alpha-sandbox@local");
+  const sandboxImage = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/images",
+    body: {
+      projectDirectory,
+      kind: "cg",
+      targetId: "scene-opening",
+      prompt: "sandbox fixture cg",
+      style: "fixture visual"
+    }
+  });
+  assert.equal(sandboxImage.status, 200);
+  assert.equal(sandboxImage.body.job.status, "completed");
+  assert.equal(sandboxImage.body.job.provider, "mock-adapter");
+  assert.match(sandboxImage.body.image.uri, /^\/generated-assets\//);
+} finally {
+  if (previousAlphaSandboxEnv === undefined) {
+    delete process.env.VN_MAKER_ALPHA_SANDBOX;
+  } else {
+    process.env.VN_MAKER_ALPHA_SANDBOX = previousAlphaSandboxEnv;
+  }
+}
+
 const haruHeroine = core.createHeroineProfile({
   id: "haru",
   name: "하루",
@@ -863,10 +930,12 @@ globalThis.fetch = originalFetch;
 await esbuild({
   entryPoints: ["apps/web/src/client/pages/WorkspacePage.tsx"],
   bundle: true,
+  charset: "utf8",
   platform: "browser",
   format: "esm",
   outfile: bundledWorkspacePagePath
 });
+assert.match(readFileSync(bundledWorkspacePagePath, "utf8"), /Alpha Sandbox: fixture generation 활성/);
 const workspacePage = await import(pathToFileURL(bundledWorkspacePagePath).href);
 assert.equal(workspacePage.actionFailureMessage({ ok: true }, "이벤트 패치 제안"), null);
 assert.equal(workspacePage.actionFailureMessage({
@@ -885,5 +954,38 @@ assert.equal(workspacePage.actionFailureMessage({
 const webPackage = JSON.parse(readFileSync("apps/web/package.json", "utf8"));
 assert.equal(webPackage.scripts.dev, "node scripts/dev.mjs");
 assert.equal(existsSync("apps/web/scripts/dev.mjs"), true);
+
+const webDevServerConfig = await import("../apps/web/scripts/dev-server-config.mjs");
+assert.deepEqual(webDevServerConfig.resolveWebDevServerConfig({
+  PORT: "6174",
+  VITE_PORT: "6173"
+}), {
+  apiPort: "6174",
+  vitePort: "6173",
+  apiTarget: "http://127.0.0.1:6174"
+});
+
+const defaultViteConfig = await loadWebViteConfigWithEnv({});
+assert.equal(viteProxyTarget(defaultViteConfig, "/api"), "http://127.0.0.1:5174");
+assert.equal(viteProxyTarget(defaultViteConfig, "/generated-assets"), "http://127.0.0.1:5174");
+assert.equal(defaultViteConfig.define?.["globalThis.__VN_MAKER_ALPHA_SANDBOX__"], "false");
+
+const portOverrideViteConfig = await loadWebViteConfigWithEnv({ PORT: "6174" });
+assert.equal(viteProxyTarget(portOverrideViteConfig, "/api"), "http://127.0.0.1:6174");
+assert.equal(viteProxyTarget(portOverrideViteConfig, "/generated-assets"), "http://127.0.0.1:6174");
+
+const apiPortOverrideViteConfig = await loadWebViteConfigWithEnv({
+  PORT: "6174",
+  API_PORT: "7174"
+});
+assert.equal(viteProxyTarget(apiPortOverrideViteConfig, "/api"), "http://127.0.0.1:7174");
+assert.equal(viteProxyTarget(apiPortOverrideViteConfig, "/generated-assets"), "http://127.0.0.1:7174");
+
+const viteApiPortOverrideViteConfig = await loadWebViteConfigWithEnv({ VITE_API_PORT: "8174" });
+assert.equal(viteProxyTarget(viteApiPortOverrideViteConfig, "/api"), "http://127.0.0.1:8174");
+assert.equal(viteProxyTarget(viteApiPortOverrideViteConfig, "/generated-assets"), "http://127.0.0.1:8174");
+
+const sandboxViteConfig = await loadWebViteConfigWithEnv({ VN_MAKER_ALPHA_SANDBOX: "1" });
+assert.equal(sandboxViteConfig.define?.["globalThis.__VN_MAKER_ALPHA_SANDBOX__"], "true");
 
 await rm(tempRoot, { recursive: true, force: true });

@@ -1,6 +1,12 @@
 import { Hono, type Context } from "hono";
 import { join } from "node:path";
-import { sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSession } from "@vn-maker/generation-codex";
+import { createDeterministicEventExpansionPlan } from "@vn-maker/engine-core";
+import {
+  createCodexImageAssetResult,
+  sharedCodexAppServerClient,
+  type CodexLoginStartResult,
+  type CodexSession
+} from "@vn-maker/generation-codex";
 import { resolveProjectWorkspacePaths } from "@vn-maker/project-store";
 import {
   createVnMakerUseCases,
@@ -48,7 +54,63 @@ function getLoginFlow(value: unknown): "browser" | "device" {
   return value === "device" ? "device" : "browser";
 }
 
+function isAlphaSandboxEnabled(): boolean {
+  return process.env.VN_MAKER_ALPHA_SANDBOX === "1";
+}
+
+function createAlphaSandboxCodexAdapter(): CodexGenerationAdapter {
+  const fixtureImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+  return {
+    async readSession() {
+      return {
+        connected: true,
+        mode: "chatgpt",
+        account: { type: "chatgpt", email: "alpha-sandbox@local", planType: "fixture" },
+        requiresOpenaiAuth: false,
+        capabilities: { imageGeneration: true, namespaceTools: false, webSearch: false }
+      };
+    },
+    async startLogin(flow: "browser" | "device") {
+      return flow === "device"
+        ? { type: "chatgptDeviceCode", loginId: "alpha-sandbox", verificationUrl: "http://127.0.0.1/alpha-sandbox", userCode: "ALPHA-0000" }
+        : { type: "chatgpt", loginId: "alpha-sandbox", authUrl: "http://127.0.0.1/alpha-sandbox" };
+    },
+    async logout() {
+      return undefined;
+    },
+    async generateImageAsset(input: ProjectImageGenerationInput) {
+      const result = await createCodexImageAssetResult(input, {
+        id: "alpha-sandbox-image",
+        type: "imageGeneration",
+        result: fixtureImageBase64,
+        status: "completed",
+        revisedPrompt: "alpha sandbox fixture image",
+        savedPath: null
+      });
+      return {
+        ...result,
+        job: {
+          ...result.job,
+          provider: "mock-adapter"
+        },
+        raw: {
+          sandbox: "alpha-fixture",
+          item: result.raw?.item
+        }
+      };
+    },
+    async generateEventExpansionPlan({ request }) {
+      return createDeterministicEventExpansionPlan(request);
+    }
+  };
+}
+
 function createDefaultCodexAdapter(): CodexGenerationAdapter {
+  if (isAlphaSandboxEnabled()) {
+    return createAlphaSandboxCodexAdapter();
+  }
+
   return {
     readSession: (refreshToken?: boolean) => sharedCodexAppServerClient.readSession(refreshToken),
     startLogin: (flow: "browser" | "device") => sharedCodexAppServerClient.startLogin(flow),
