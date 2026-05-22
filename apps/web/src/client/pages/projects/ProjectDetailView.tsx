@@ -10,9 +10,11 @@ import {
   type ProjectAsset,
   type ProjectData,
   type ProjectEventPlan,
+  type ProjectExportPlan,
   type ProjectExportResult,
   type ProjectGenerationJob,
   type ProjectIssue,
+  type ProjectPreviewReadiness,
   type ProjectRuntime,
   type ProjectRuntimeScene,
   type ProjectSmokeResult,
@@ -191,6 +193,76 @@ function exportStateLabel(value: ExportState): string {
   return "준비됨";
 }
 
+function tabFromAction(action?: string): ProjectTabId {
+  if (action === "goToHeroine") return "heroine";
+  if (action === "goToBackground") return "background";
+  if (action === "goToStudio") return "studio";
+  if (action === "goToExport") return "export";
+  return "preview";
+}
+
+function fallbackPreviewReadiness(project: ProjectData | null, summary: ProjectWorkflowSummary): ProjectPreviewReadiness {
+  const hasHeroine = Boolean(project?.characters?.length);
+  const hasBackground = Boolean(project?.assets?.some((asset) => asset.kind === "background"));
+  const hasEventScenes = Boolean((project?.scenes?.length || 0) > 1);
+  const canRun = Boolean(project && summary.previewState !== "blocked" && summary.previewState !== "failed");
+  const missingItems = [
+    !hasHeroine ? { id: "heroine", label: "히로인 1명", tab: "heroine" } : null,
+    !hasBackground ? { id: "background", label: "배경 화면", tab: "background" } : null,
+    !hasEventScenes ? { id: "studio", label: "제작 씬", tab: "studio" } : null
+  ].filter(Boolean) as NonNullable<ProjectPreviewReadiness["missingItems"]>;
+
+  return {
+    state: canRun ? "prepared" : "blocked",
+    availableState: summary.previewState || "blocked",
+    canRun,
+    requiredData: {
+      heroine: hasHeroine ? "ready" : "missing",
+      background: hasBackground ? "ready" : "missing",
+      scenes: hasEventScenes ? "ready" : "missing",
+      validation: summary.validationState === "error" ? "invalid" : "ready",
+      generationJobs: summary.generationState === "failed" || summary.generationState === "partialFailed" ? "failed" : summary.generationState === "planned" || summary.generationState === "running" ? "pending" : "ready"
+    },
+    missingItems,
+    blockingIssues: summary.blockingIssues || [],
+    nextActions: missingItems.map((item) => ({
+      tab: item.tab,
+      label: `해결 탭으로 이동: ${item.label}`
+    })),
+    failureCause: (summary.blockingIssues || []).join(" ") || "프리뷰 실행 전 준비 상태를 확인합니다.",
+    retryable: false,
+    nextAction: missingItems[0] ? `해결 탭으로 이동: ${missingItems[0].label}` : "프리뷰를 실행하세요."
+  };
+}
+
+function fallbackExportPlan(project: ProjectData | null, summary: ProjectWorkflowSummary): ProjectExportPlan {
+  const blockers = (summary.blockingIssues || []).map((message) => ({
+    kind: message.includes("이미지") || message.includes("배경") ? "generationJob" : "validation",
+    message,
+    tab: message.includes("이미지") || message.includes("배경") ? "background" : "studio"
+  }));
+  const blocked = blockers.length > 0 || summary.exportState === "blocked";
+  return {
+    state: blocked ? "blocked" : "ready",
+    canExport: !blocked && Boolean(project),
+    target: "localDesktopWebApp",
+    githubPagesTarget: false,
+    validationSummary: {
+      ok: summary.validationState !== "error",
+      issueCount: blockers.length,
+      errors: blockers.map((blocker) => ({ severity: "error", path: String(blocker.tab), message: blocker.message })),
+      warnings: []
+    },
+    includedData: ["project", "runtime", "assetManifest"],
+    includedAssets: project?.assets || [],
+    blockers,
+    warnings: [],
+    failureCause: blockers.map((blocker) => blocker.message).join(" ") || "내보내기 전 검증 요약을 확인합니다.",
+    retryable: false,
+    nextAction: blockers[0] ? "차단 항목을 해결한 뒤 다시 실행하세요." : "내보내기를 실행할 수 있습니다."
+  };
+}
+
 function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): ProjectRuntimeScene | null {
   if (!runtime?.scenes?.length) {
     return null;
@@ -235,10 +307,12 @@ export function ProjectDetailView({
   const [previewRuntime, setPreviewRuntime] = useState<ProjectRuntime | null>(null);
   const [previewSceneId, setPreviewSceneId] = useState("");
   const [previewIssues, setPreviewIssues] = useState<string[]>([]);
+  const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
   const [exportResult, setExportResult] = useState<ProjectExportResult | null>(null);
+  const [exportPlan, setExportPlan] = useState<ProjectExportPlan | null>(null);
   const [smokeResult, setSmokeResult] = useState<ProjectSmokeResult | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const summary = workflowSummary || fallbackWorkflowSummary(currentProject);
@@ -280,6 +354,8 @@ export function ProjectDetailView({
   const hasBackgroundAsset = Boolean(currentBackgroundAsset);
   const hasBackgroundJob = backgroundJobs.length > 0;
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
+  const currentPreviewReadiness = previewReadiness || fallbackPreviewReadiness(currentProject, summary);
+  const currentExportPlan = exportPlan || fallbackExportPlan(currentProject, summary);
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -396,9 +472,11 @@ export function ProjectDetailView({
     setPreviewRuntime(null);
     setPreviewSceneId("");
     setPreviewIssues([]);
+    setPreviewReadiness(null);
     setPreviewState(nextState.previewState);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
+    setExportPlan(null);
     setSmokeResult(null);
     setExportState(nextState.exportState);
     setExportStatus(nextState.exportStatus);
@@ -757,6 +835,14 @@ export function ProjectDetailView({
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       setPreviewState("failed");
       setPreviewIssues(messages);
+      setPreviewReadiness({
+        ...currentPreviewReadiness,
+        state: "failed",
+        availableState: "failed",
+        failureCause: result.error || messages[0] || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.",
+        retryable: false,
+        nextAction: "다음 행동: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
+      });
       setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
       return false;
     }
@@ -767,6 +853,7 @@ export function ProjectDetailView({
   async function runPreview(startSceneId?: string): Promise<void> {
     setPreviewBusy(true);
     setPreviewState("running");
+    setPreviewReadiness({ ...currentPreviewReadiness, state: "running", availableState: "running" });
     setPreviewStatus("검증 실행 후 프리뷰 생성 중입니다.");
     try {
       const valid = await validateBeforePreview();
@@ -779,6 +866,13 @@ export function ProjectDetailView({
       });
       if (result.ok === false) {
         setPreviewState("failed");
+        setPreviewReadiness(result.previewReadiness || {
+          ...currentPreviewReadiness,
+          state: "failed",
+          availableState: "failed",
+          failureCause: result.message || result.error || "프리뷰 생성에 실패했습니다.",
+          retryable: result.retryable
+        });
         setPreviewStatus(result.message || result.error || "프리뷰 생성에 실패했습니다.");
         setPreviewIssues(validationMessages(result));
         return;
@@ -787,11 +881,21 @@ export function ProjectDetailView({
       setPreviewRuntime(nextRuntime);
       setPreviewSceneId(startSceneId || nextRuntime?.startSceneId || "");
       setPreviewIssues(validationMessages(result));
+      setPreviewReadiness(result.previewReadiness || null);
       setPreviewState(result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
       setPreviewStatus(result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");
-      setPreviewStatus(`프리뷰 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setPreviewReadiness({
+        ...currentPreviewReadiness,
+        state: "failed",
+        availableState: "failed",
+        failureCause: message,
+        retryable: true,
+        nextAction: "다음 행동: API 응답과 네트워크 상태를 확인한 뒤 다시 시도하세요."
+      });
+      setPreviewStatus(`프리뷰 생성 실패: ${message}`);
     } finally {
       setPreviewBusy(false);
     }
@@ -800,12 +904,14 @@ export function ProjectDetailView({
   async function runExport(): Promise<void> {
     setExportBusy(true);
     setExportState("running");
+    setExportPlan({ ...currentExportPlan, state: "running" });
     setExportStatus("검증 실행 후 내보내기 실행 중입니다.");
     try {
       const result = await postAuthedJson<ProjectApiResult>("/api/project/export", {
         projectDirectory
       });
       setExportResult(result.export || null);
+      setExportPlan(result.exportPlan || null);
       setSmokeResult(result.smoke || null);
       if (result.ok === false) {
         setExportState(result.code === "EXPORT_BLOCKED" ? "blocked" : "failed");
@@ -820,8 +926,17 @@ export function ProjectDetailView({
       setExportState("completed");
       setExportStatus("내보내기와 실행 확인이 완료되었습니다.");
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       setExportState("failed");
-      setExportStatus(`내보내기 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setExportPlan({
+        ...currentExportPlan,
+        state: "failed",
+        canExport: false,
+        failureCause: message,
+        retryable: true,
+        nextAction: "저장 위치와 API 응답을 확인한 뒤 다시 실행하세요."
+      });
+      setExportStatus(`내보내기 실패: ${message}`);
     } finally {
       setExportBusy(false);
     }
@@ -1091,6 +1206,28 @@ export function ProjectDetailView({
               <div className={previewState === "failed" || previewState === "blocked" ? "inline-status warning" : "inline-status success"}>
                 {previewStatus}
               </div>
+              <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. availableState: {currentPreviewReadiness.availableState || "unknown"}</p>
+              <dl className="summary-list">
+                <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${name}: ${value}`).join(" · ") || "확인 전"}</dd></div>
+                <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
+                <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>
+                <div><dt>다음 행동</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
+              </dl>
+              {currentPreviewReadiness.missingItems?.length ? (
+                <div>
+                  <h4>누락 항목</h4>
+                  <ul className="compact-list">
+                    {currentPreviewReadiness.missingItems.map((item) => <li key={`${item.id}-${item.tab}`}>{item.label || item.id}</li>)}
+                  </ul>
+                  <div className="button-row">
+                    {(currentPreviewReadiness.nextActions || []).map((action) => (
+                      <Button key={`${action.tab}-${action.label}`} icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${action.tab || tabFromAction(summary.primaryAction)}`)} variant="ghost">
+                        해결 탭으로 이동
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ) : <p className="page-muted">누락 항목 없음</p>}
               <label className="field-row">
                 <span>시작 씬</span>
                 <select disabled={previewBusy} onChange={(event) => setPreviewSceneId(event.target.value)} value={previewSceneId || currentProject?.scenes?.[0]?.id || ""}>
@@ -1147,6 +1284,18 @@ export function ProjectDetailView({
               <div className={exportState === "failed" || exportState === "blocked" ? "inline-status warning" : "inline-status success"}>
                 {exportStatus}
               </div>
+              <p className="page-muted">내보내기 대상: 로컬 데스크톱형 웹 앱 · githubPagesTarget: {String(currentExportPlan.githubPagesTarget)}</p>
+              <p className="page-muted">GitHub Pages는 레거시 대상이며 이번 내보내기 대상이 아닙니다.</p>
+              <dl className="summary-list">
+                <div><dt>검증 요약</dt><dd>validationSummary {currentExportPlan.validationSummary?.ok ? "통과" : "차단"} · issues {currentExportPlan.validationSummary?.issueCount ?? 0}</dd></div>
+                <div><dt>포함될 프로젝트 데이터</dt><dd>{currentExportPlan.includedData?.join(" · ") || "확인 전"}</dd></div>
+                <div><dt>포함될 에셋</dt><dd>{currentExportPlan.includedAssets?.length ? currentExportPlan.includedAssets.map((asset) => `${asset.kind}:${asset.id}`).join(" · ") : "없음"}</dd></div>
+                <div><dt>차단 항목</dt><dd>{currentExportPlan.blockers?.length ? currentExportPlan.blockers.map((blocker) => blocker.message || blocker.id || blocker.kind).join(" · ") : "없음"}</dd></div>
+                <div><dt>실패 원인</dt><dd>{currentExportPlan.failureCause || "없음"}</dd></div>
+                <div><dt>재시도 가능 여부</dt><dd>{currentExportPlan.retryable ? "가능" : "불필요"}</dd></div>
+                <div><dt>다음 행동</dt><dd>{currentExportPlan.nextAction || "내보내기를 실행하세요."}</dd></div>
+              </dl>
+              <p className="page-muted">실패 상태가 완료 상태로 오인되지 않습니다: {currentExportPlan.state === "failed" || currentExportPlan.state === "blocked" ? "완료 아님" : currentExportPlan.state || "확인 전"}</p>
               {incompleteImageJobs.length ? (
                 <ul className="compact-list">
                   {incompleteImageJobs.map((job) => <li key={job.id}>필수 이미지 미완료: {imageJobKindLabel(job.kind)} · {job.id}</li>)}

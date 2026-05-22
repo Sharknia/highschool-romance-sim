@@ -455,6 +455,13 @@ const blockedExportWithPlannedBackground = await useCases.exportProject({ projec
 assert.equal(blockedExportWithPlannedBackground.code, "EXPORT_BLOCKED");
 assert.match(blockedExportWithPlannedBackground.message, /job-usecase-background/);
 assert.equal(blockedExportWithPlannedBackground.workflowSummary.primaryAction, "goToBackground");
+assert.equal(blockedExportWithPlannedBackground.exportPlan.state, "blocked");
+assert.equal(blockedExportWithPlannedBackground.exportPlan.canExport, false);
+assert.equal(blockedExportWithPlannedBackground.exportPlan.target, "localDesktopWebApp");
+assert.equal(blockedExportWithPlannedBackground.exportPlan.githubPagesTarget, false);
+assert.equal(blockedExportWithPlannedBackground.exportPlan.blockers.some((blocker) => blocker.kind === "generationJob"), true);
+assert.equal(blockedExportWithPlannedBackground.exportPlan.validationSummary.ok, true);
+assert.equal(blockedExportWithPlannedBackground.exportPlan.state === "complete", false);
 
 const generatedBackground = await useCases.generateImage({
   projectDirectory,
@@ -488,6 +495,13 @@ assert.equal(
   true,
   "생성된 배경은 프로젝트 장면 backgroundAssetId에 연결되어야 합니다."
 );
+const previewAfterBackground = await useCases.previewProject({ projectDirectory });
+assert.equal(previewAfterBackground.previewReadiness.state, "prepared");
+assert.equal(previewAfterBackground.previewReadiness.availableState, "ready");
+assert.equal(previewAfterBackground.previewReadiness.canRun, true);
+assert.deepEqual(previewAfterBackground.previewReadiness.missingItems, []);
+assert.equal(previewAfterBackground.previewReadiness.requiredData.scenes, "ready");
+assert.equal(previewAfterBackground.previewReadiness.requiredData.background, "ready");
 
 const secondBackground = await useCases.createGenerationJob({
   projectDirectory,
@@ -501,6 +515,17 @@ assert.equal(secondBackground.ok, true);
 assert.equal(secondBackground.backgroundPolicy.limit, 1);
 assert.equal(secondBackground.backgroundPolicy.existingAssetId, "asset-usecase-background");
 assert.equal(secondBackground.backgroundPolicy.replacesExisting, true);
+const secondBackgroundRun = await useCases.runGenerationJobs({
+  projectDirectory,
+  jobIds: ["job-usecase-background-second"],
+  replaceCompleted: true
+});
+assert.equal(secondBackgroundRun.ok, true);
+assert.equal(secondBackgroundRun.project.assets.filter((asset) => asset.kind === "background").length, 1);
+assert.equal(
+  secondBackgroundRun.project.scenes.some((scene) => scene.backgroundAssetId === "asset-usecase-background-second"),
+  true
+);
 
 const heroineBeforeGeneratedPortrait = await useCases.getHeroine({
   projectDirectory,
@@ -644,6 +669,15 @@ const blankProject = await useCases.createProject({
 });
 assert.equal(blankProject.ok, true);
 assert.equal(blankProject.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), true);
+const previewBeforeReady = await useCases.previewProject({ projectDirectory: blankProjectDirectory });
+assert.equal(previewBeforeReady.ok, true);
+assert.equal(previewBeforeReady.previewReadiness.state, "blocked");
+assert.equal(previewBeforeReady.previewReadiness.availableState, "blocked");
+assert.equal(previewBeforeReady.previewReadiness.canRun, false);
+assert.equal(previewBeforeReady.previewReadiness.missingItems.some((item) => item.tab === "heroine"), true);
+assert.equal(previewBeforeReady.previewReadiness.missingItems.some((item) => item.tab === "background"), true);
+assert.equal(previewBeforeReady.previewReadiness.nextActions.some((action) => action.tab === "heroine" && action.label.includes("해결 탭으로 이동")), true);
+assert.equal(previewBeforeReady.previewReadiness.retryable, false);
 const assignedSnapshot = await useCases.assignHeroineSnapshot({
   projectDirectory: blankProjectDirectory,
   heroine
@@ -748,6 +782,10 @@ assert.equal(invalidPreview.ok, true);
 assert.equal(invalidPreview.runtime.validation.ok, false);
 assert.equal(invalidPreview.validation.ok, false);
 assert.equal(invalidPreview.routeGraphAnalysis.uncoveredTerminalSceneIds.includes(manualOpening), true);
+assert.equal(invalidPreview.previewReadiness.state, "blocked");
+assert.equal(invalidPreview.previewReadiness.failureCause.includes("문제 확인 결과"), true);
+assert.equal(invalidPreview.previewReadiness.blockingIssues.length > 0, true);
+assert.equal(invalidPreview.previewReadiness.nextAction.includes("해결 탭으로 이동"), true);
 
 const insertedGood = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
@@ -888,6 +926,10 @@ assert.equal(Boolean(plannedJob), true);
 const blockedExportWithPlannedCg = await useCases.exportProject({ projectDirectory }).catch((error) => error);
 assert.equal(blockedExportWithPlannedCg.code, "EXPORT_BLOCKED");
 assert.match(blockedExportWithPlannedCg.message, /완료되지 않은 이미지 작업/);
+assert.equal(blockedExportWithPlannedCg.exportPlan.state, "blocked");
+assert.equal(blockedExportWithPlannedCg.exportPlan.canExport, false);
+assert.equal(blockedExportWithPlannedCg.exportPlan.blockers.some((blocker) => blocker.id === plannedJob.id), true);
+assert.equal(blockedExportWithPlannedCg.exportPlan.state === "complete", false);
 const runningStore = await projectStoreModule.openProjectStore(projectDirectory);
 try {
   const project = runningStore.requireProject();
@@ -903,6 +945,8 @@ assert.equal(blockedExportWithRunningCg.code, "EXPORT_BLOCKED");
 assert.equal(blockedExportWithRunningCg.workflowSummary.generationState, "running");
 assert.equal(blockedExportWithRunningCg.workflowSummary.exportState, "blocked");
 assert.equal(blockedExportWithRunningCg.workflowSummary.primaryAction, "goToBackground");
+assert.equal(blockedExportWithRunningCg.exportPlan.state, "blocked");
+assert.equal(blockedExportWithRunningCg.exportPlan.blockers.some((blocker) => blocker.status === "running"), true);
 const plannedStore = await projectStoreModule.openProjectStore(projectDirectory);
 try {
   const project = plannedStore.requireProject();
@@ -924,6 +968,38 @@ assert.equal(generated.asset.id, plannedJob.outputAssetId);
 const opened = await useCases.openProject({ projectDirectory });
 assert.equal(opened.ok, true);
 assert.equal(opened.project.assets.some((asset) => asset.id === plannedJob.outputAssetId), true);
+
+const exportReady = await useCases.exportProject({ projectDirectory });
+assert.equal(exportReady.ok, true);
+assert.equal(exportReady.exportPlan.state, "complete");
+assert.equal(exportReady.exportPlan.canExport, true);
+assert.equal(exportReady.exportPlan.target, "localDesktopWebApp");
+assert.equal(exportReady.exportPlan.githubPagesTarget, false);
+assert.equal(exportReady.exportPlan.validationSummary.ok, true);
+assert.deepEqual(exportReady.exportPlan.validationSummary.errors, []);
+assert.equal(exportReady.exportPlan.includedData.includes("project"), true);
+assert.equal(exportReady.exportPlan.includedData.includes("runtime"), true);
+assert.equal(exportReady.exportPlan.includedData.includes("assetManifest"), true);
+assert.equal(exportReady.exportPlan.includedAssets.some((asset) => asset.kind === "background"), true);
+assert.equal(exportReady.exportPlan.includedAssets.some((asset) => asset.id === plannedJob.outputAssetId), true);
+
+const unwritableExportDirectory = join(tempRoot, "UnwritableExport");
+await mkdir(unwritableExportDirectory, { recursive: true });
+await chmod(unwritableExportDirectory, 0o500);
+try {
+  const failedExport = await useCases.exportProject({
+    projectDirectory,
+    outputDirectory: join(unwritableExportDirectory, "blocked")
+  }).catch((error) => error);
+  assert.equal(failedExport.exportPlan.state, "failed");
+  assert.equal(failedExport.exportPlan.canExport, false);
+  assert.equal(failedExport.exportPlan.state === "complete", false);
+  assert.equal(failedExport.exportPlan.retryable, true);
+  assert.match(failedExport.exportPlan.failureCause, /EACCES|permission|권한|허가/i);
+  assert.equal(failedExport.exportPlan.validationSummary.ok, true);
+} finally {
+  await chmod(unwritableExportDirectory, 0o700);
+}
 
 const readOnlyRecentIndexDirectory = join(tempRoot, "ReadOnlyRecentIndex");
 await mkdir(readOnlyRecentIndexDirectory, { recursive: true });

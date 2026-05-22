@@ -131,6 +131,52 @@ export interface ProjectExportResult {
   runtimeScriptPath?: string;
 }
 
+export interface ProjectPreviewReadiness {
+  state?: "blocked" | "prepared" | "running" | "failed" | string;
+  availableState?: string;
+  canRun?: boolean;
+  requiredData?: Record<string, string>;
+  missingItems?: Array<{
+    id?: string;
+    label?: string;
+    tab?: ProjectTabId | string;
+  }>;
+  blockingIssues?: string[];
+  nextActions?: Array<{
+    label?: string;
+    tab?: ProjectTabId | string;
+  }>;
+  failureCause?: string;
+  retryable?: boolean;
+  nextAction?: string;
+}
+
+export interface ProjectExportPlan {
+  state?: "ready" | "blocked" | "running" | "complete" | "failed" | string;
+  canExport?: boolean;
+  target?: "localDesktopWebApp" | string;
+  githubPagesTarget?: boolean;
+  validationSummary?: {
+    ok?: boolean;
+    issueCount?: number;
+    errors?: ProjectIssue[];
+    warnings?: ProjectIssue[];
+  };
+  includedData?: string[];
+  includedAssets?: ProjectAsset[];
+  blockers?: Array<{
+    kind?: string;
+    id?: string;
+    status?: string;
+    message?: string;
+    tab?: ProjectTabId | string;
+  }>;
+  warnings?: string[];
+  failureCause?: string;
+  retryable?: boolean;
+  nextAction?: string;
+}
+
 export interface ProjectSmokeResult {
   ok?: boolean;
   checks?: Record<string, boolean>;
@@ -198,6 +244,8 @@ export interface ProjectApiResult extends ApiResult {
   patchHistoryEntry?: ProjectPatchHistoryEntry;
   plan?: ProjectEventPlan;
   export?: ProjectExportResult;
+  previewReadiness?: ProjectPreviewReadiness;
+  exportPlan?: ProjectExportPlan;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
   request?: ProjectEventRequest;

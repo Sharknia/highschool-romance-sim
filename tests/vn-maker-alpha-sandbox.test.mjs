@@ -409,6 +409,11 @@ try {
   assert.equal(apiBlockedExport.body.action, "exportProject");
   assert.equal(apiBlockedExport.body.code, "EXPORT_BLOCKED");
   assert.equal(apiBlockedExport.body.workflowSummary.generationState, "planned");
+  assert.equal(apiBlockedExport.body.exportPlan.state, "blocked");
+  assert.equal(apiBlockedExport.body.exportPlan.canExport, false);
+  assert.equal(apiBlockedExport.body.exportPlan.target, "localDesktopWebApp");
+  assert.equal(apiBlockedExport.body.exportPlan.githubPagesTarget, false);
+  assert.equal(apiBlockedExport.body.exportPlan.blockers.some((blocker) => blocker.kind === "generationJob"), true);
 
   const apiGeneratedImage = await sandboxApi({
     method: "POST",
@@ -483,6 +488,9 @@ try {
   });
   assert.equal(apiPreview.status, 200);
   assert.equal(apiPreview.body.runtime.scenes.some((scene) => scene.cgAsset?.id === apiPlannedCgJob.outputAssetId), true);
+  assert.equal(apiPreview.body.previewReadiness.state, "prepared");
+  assert.equal(apiPreview.body.previewReadiness.canRun, true);
+  assert.equal(apiPreview.body.previewReadiness.requiredData.background, "ready");
 
   const apiExport = await sandboxApi({
     method: "POST",
@@ -491,6 +499,11 @@ try {
   });
   assert.equal(apiExport.status, 200);
   assert.equal(apiExport.body.smoke.ok, true);
+  assert.equal(apiExport.body.exportPlan.state, "complete");
+  assert.equal(apiExport.body.exportPlan.target, "localDesktopWebApp");
+  assert.equal(apiExport.body.exportPlan.githubPagesTarget, false);
+  assert.equal(apiExport.body.exportPlan.includedData.includes("assetManifest"), true);
+  assert.equal(apiExport.body.exportPlan.includedAssets.some((asset) => asset.kind === "background"), true);
   assert.equal(existsSync(join(apiExport.body.export.outputDirectory, "index.html")), true);
   const apiProjectData = JSON.parse(readFileSync(join(apiExport.body.export.outputDirectory, "project-data.json"), "utf8"));
   assert.equal(apiProjectData.assets.some((asset) => String(asset.label).includes(alphaSandbox.ALPHA_SANDBOX_PROVENANCE)), true);
@@ -552,6 +565,10 @@ try {
   assert.equal(cliBlockedExport.action, "exportProject");
   assert.equal(cliBlockedExport.code, "EXPORT_BLOCKED");
   assert.equal(cliBlockedExport.workflowSummary.generationState, "planned");
+  assert.equal(cliBlockedExport.exportPlan.state, "blocked");
+  assert.equal(cliBlockedExport.exportPlan.canExport, false);
+  assert.equal(cliBlockedExport.exportPlan.target, "localDesktopWebApp");
+  assert.equal(cliBlockedExport.exportPlan.blockers.some((blocker) => blocker.kind === "generationJob"), true);
 
   const cliGeneratedImage = runCli("generate-image", {
     projectDirectory: cliProjectDirectory,
@@ -607,12 +624,19 @@ try {
   }, cliEnv);
   assert.equal(cliPreview.ok, true);
   assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.id === cliPlannedCgJob.outputAssetId), true);
+  assert.equal(cliPreview.previewReadiness.state, "prepared");
+  assert.equal(cliPreview.previewReadiness.canRun, true);
+  assert.equal(cliPreview.previewReadiness.requiredData.background, "ready");
 
   const cliExport = runCli("export-web", {
     projectDirectory: cliProjectDirectory
   }, cliEnv);
   assert.equal(cliExport.ok, true);
   assert.equal(cliExport.smoke.ok, true);
+  assert.equal(cliExport.exportPlan.state, "complete");
+  assert.equal(cliExport.exportPlan.target, "localDesktopWebApp");
+  assert.equal(cliExport.exportPlan.githubPagesTarget, false);
+  assert.equal(cliExport.exportPlan.includedData.includes("runtime"), true);
 
   const cliSmoke = runCli("smoke-export", {
     outputPath: cliExport.export.outputDirectory
