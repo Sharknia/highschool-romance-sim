@@ -44,6 +44,16 @@ function statusTone(status: string): "neutral" | "waiting" | "success" | "error"
   return "neutral";
 }
 
+function projectResultStatus(result: ProjectApiResult): string {
+  if (result.action === "approveEvent") {
+    return "이벤트 제안 승인 완료";
+  }
+  if (result.action === "assignHeroineSnapshot") {
+    return "히로인 스냅샷 배정 완료";
+  }
+  return "프로젝트 업데이트 완료";
+}
+
 export function ProjectStartPage() {
   const { postAuthedJson } = useAuth();
   const { setShellState, shellState, summarizeDirectory } = useWorkspaceShell();
@@ -278,7 +288,7 @@ export function ProjectStartPage() {
           currentProject={currentProject}
           onProjectResult={(result) => {
             applyProjectResult(result);
-            setStatus("히로인 스냅샷 배정 완료");
+            setStatus(projectResultStatus(result));
           }}
           projectId={projectId}
           projectDirectory={shellState.projectDirectory}

@@ -62,6 +62,8 @@ assert.match(notFoundSource, /to="\/projects"/, "인증 후 Not Found 복귀 링
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");
+assert.match(projectStartSource, /approveEvent/, "ProjectStartPage는 이벤트 승인 action 결과를 구분해 상태 문구를 표시해야 합니다.");
+assert.match(projectStartSource, /이벤트 제안 승인 완료/, "ProjectStartPage는 이벤트 승인 후 히로인 배정 완료 문구를 재사용하면 안 됩니다.");
 const recentProjectListPath = "apps/web/src/client/pages/projects/RecentProjectList.tsx";
 const projectDetailViewPath = "apps/web/src/client/pages/projects/ProjectDetailView.tsx";
 const projectNewPagePath = "apps/web/src/client/pages/projects/ProjectNewPage.tsx";
@@ -112,6 +114,26 @@ const projectNewPageSource = readText(projectNewPagePath);
   assert.match(projectDetailViewSource, pattern, `ProjectDetailView에 '${requiredText}' 문구 또는 상태 표시가 있어야 합니다.`);
 });
 assert.doesNotMatch(projectDetailViewSource, /후속 이슈에서 편집 흐름을 연결합니다/, "히로인 탭은 placeholder가 아니라 실제 배정 흐름이어야 합니다.");
+[
+  "/api/events/expand",
+  "/api/events/approve",
+  "blockedNoHeroine",
+  "patchPending",
+  "patchInvalid",
+  "patchStale",
+  "baseProjectHash",
+  "이벤트 제안 받기",
+  "제안 승인",
+  "제안 취소",
+  "바뀔 내용",
+  "문제 확인",
+  "Alpha는 작은 이벤트 삽입만 허용",
+  "CG 작업이 있으면 에셋/생성 탭으로 이동합니다."
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView 이벤트 탭에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.doesNotMatch(projectDetailViewSource, /제작\/이벤트 탭입니다\. 자연어 이벤트 패치를 연결합니다\./, "이벤트 탭은 placeholder가 아니라 실제 제안-검토-승인 흐름이어야 합니다.");
 [
   "/api/projects",
   "/api/projects/from-heroine",

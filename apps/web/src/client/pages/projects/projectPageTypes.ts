@@ -23,8 +23,51 @@ export interface ProjectData {
     sourceSnapshotCreatedAt?: string;
   }>;
   routes?: Array<{ id?: string; title?: string; entrySceneId?: string; heroineId?: string }>;
-  scenes?: Array<{ id?: string; label?: string }>;
-  generationJobs?: Array<{ status?: string; kind?: string }>;
+  scenes?: Array<{ id?: string; label?: string; speaker?: string; text?: string; ending?: { title?: string; kind?: string } }>;
+  generationJobs?: Array<{ id?: string; status?: string; kind?: string }>;
+}
+
+export interface ProjectIssue {
+  severity?: string;
+  path?: string;
+  message?: string;
+}
+
+export interface ProjectPatchDescription {
+  text?: string;
+  sceneCount?: number;
+  choiceCount?: number;
+  assetCount?: number;
+  generationJobCount?: number;
+  operations?: string[];
+}
+
+export interface ProjectEventRequest {
+  baseProjectHash?: string;
+  routeId?: string;
+  afterSceneId?: string;
+  heroineId?: string;
+  userEvent?: string;
+}
+
+export interface ProjectEventPlan {
+  summary?: string;
+  decision?: {
+    sceneCount?: number;
+    choiceCount?: number;
+    cgCount?: number;
+    newExpressionAssetCount?: number;
+    tone?: string;
+  };
+  patch?: {
+    operations?: Array<{ type?: string }>;
+  };
+}
+
+export interface ProjectPatchHistoryEntry {
+  id?: string;
+  status?: string;
+  summary?: string;
 }
 
 export interface ProjectWorkflowSummary {
@@ -53,11 +96,14 @@ export interface RecentProject {
 }
 
 export interface ProjectApiResult extends ApiResult {
+  action?: string;
+  baseProjectHash?: string;
   code?: string;
   message?: string;
   project?: ProjectData;
   projectDirectory?: string;
   projectId?: string;
+  projectRevision?: string;
   projects?: RecentProject[];
   count?: number;
   missingCount?: number;
@@ -65,9 +111,16 @@ export interface ProjectApiResult extends ApiResult {
   sort?: "lastOpenedAtDesc";
   validation?: {
     ok?: boolean;
+    issues?: ProjectIssue[];
+    diff?: ProjectPatchDescription;
   };
+  diff?: ProjectPatchDescription;
+  issues?: ProjectIssue[];
+  patchHistoryEntry?: ProjectPatchHistoryEntry;
+  plan?: ProjectEventPlan;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
+  request?: ProjectEventRequest;
   expectedProjectId?: string;
   actualProjectId?: string;
   workflowSummary?: ProjectWorkflowSummary;
