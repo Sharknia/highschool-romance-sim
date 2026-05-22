@@ -1,11 +1,12 @@
-import { useBeforeUnload, useBlocker, useNavigate } from "react-router-dom";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { StatusBanner } from "../../components/ui";
 import { createHeroine, failureText, generateHeroinePortrait, listHeroines } from "./heroineApi";
 import { HeroineActionBar } from "./HeroineActionBar";
 import { createEmptyHeroineDraft, HeroineFormPanel, validateHeroineDraft } from "./HeroineFormPanel";
 import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
+import { useUnsavedHeroineNavigationGuard } from "./useUnsavedHeroineNavigationGuard";
 import type { HeroineDraft, HeroineLibraryResult, HeroineLoadState } from "./heroinePageTypes";
 
 function statusTone(state: HeroineLoadState): "neutral" | "waiting" | "success" | "error" {
@@ -33,28 +34,7 @@ export function HeroineCreatePage() {
     ? `필수값을 모두 입력해야 저장할 수 있습니다. ${allIssues.join(" ")}`
     : "저장하려면 이름, 설명, 성격, 말투, 외형 설명을 입력해야 합니다. ID는 이름으로 자동 제안됩니다.";
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => (
-    dirty
-    && !allowNavigationRef.current
-    && currentLocation.pathname !== nextLocation.pathname
-  ));
-
-  useEffect(() => {
-    if (blocker.state === "blocked") {
-      if (window.confirm("저장하지 않은 히로인 draft가 있습니다. 페이지를 떠나시겠습니까?")) {
-        allowNavigationRef.current = true;
-        blocker.proceed();
-      } else {
-        blocker.reset();
-      }
-    }
-  }, [blocker]);
-
-  useBeforeUnload(useCallback((event) => {
-    if (dirty && !allowNavigationRef.current) {
-      event.preventDefault();
-    }
-  }, [dirty]));
+  useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 히로인 draft가 있습니다. 페이지를 떠나시겠습니까?");
 
   useEffect(() => {
     void listHeroines(postAuthedJson).then((result) => {

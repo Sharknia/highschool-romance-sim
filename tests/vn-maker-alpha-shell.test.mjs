@@ -98,6 +98,7 @@ const heroineComponentPaths = [
   "apps/web/src/client/pages/heroines/HeroineActionBar.tsx",
   "apps/web/src/client/pages/heroines/HeroineDeleteDialog.tsx",
   "apps/web/src/client/pages/heroines/HeroinePortraitPanel.tsx",
+  "apps/web/src/client/pages/heroines/useUnsavedHeroineNavigationGuard.ts",
   "apps/web/src/client/pages/heroines/heroineApi.ts"
 ];
 heroineComponentPaths.forEach((path) => {
@@ -123,7 +124,8 @@ assert.match(heroineRouteSource, /imageGeneration/, "HeroinePortraitPanel은 ima
 assert.match(heroineRouteSource, /readOnly=\{mode === "edit"\}/, "저장된 히로인을 편집할 때 ID 필드는 읽기 전용이어야 합니다.");
 assert.match(heroineRouteSource, /suggestHeroineId/, "생성 화면은 이름 기반 ID 제안값을 제공해야 합니다.");
 assert.match(heroineRouteSource, /reservedHeroineIds/, "신규 히로인 생성 시 예약어 ID는 저장 전에 차단해야 합니다.");
-assert.match(heroineRouteSource, /useBlocker|beforeunload/, "dirty draft 이탈 확인이 있어야 합니다.");
+assert.match(heroineRouteSource, /beforeunload/, "dirty draft 이탈 확인이 있어야 합니다.");
+assert.doesNotMatch(heroineRouteSource, /useBlocker/, "BrowserRouter route에서 data-router blocker를 쓰면 런타임 오류가 납니다.");
 assert.match(heroineRouteSource, /heroine-action-bar/, "생성/수정 화면은 sticky action bar를 가져야 합니다.");
 assert.match(heroineRouteSource, /HEROINE_REVISION_CONFLICT/, "revision 충돌은 별도 코드로 처리해야 합니다.");
 assert.doesNotMatch(heroineRouteSource, /generatedAssetPreviewUri/, "기본 포트레이트 프리뷰는 존재 여부를 모르는 경로를 추정 렌더링하면 안 됩니다.");

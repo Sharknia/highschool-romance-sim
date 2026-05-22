@@ -1154,6 +1154,22 @@ const emptyLoginResponse = await clientApi.postJson("/api/codex/login", { flow: 
 assert.equal(emptyLoginResponse.ok, false);
 assert.equal(emptyLoginResponse.httpStatus, 500);
 assert.match(emptyLoginResponse.error, /응답이 비어 있습니다|JSON/);
+globalThis.fetch = async () => new Response("<!doctype html>proxy error", {
+  status: 502,
+  headers: { "Content-Type": "text/html" }
+});
+const nonJsonLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
+assert.equal(nonJsonLoginResponse.ok, false);
+assert.equal(nonJsonLoginResponse.httpStatus, 502);
+assert.match(nonJsonLoginResponse.error, /JSON으로 읽을 수 없습니다/);
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, connected: true }), {
+  status: 503,
+  headers: { "Content-Type": "application/json" }
+});
+const json5xxLoginResponse = await clientApi.postJson("/api/codex/login", { flow: "browser" });
+assert.equal(json5xxLoginResponse.ok, false);
+assert.equal(json5xxLoginResponse.httpStatus, 503);
+assert.match(json5xxLoginResponse.error, /요청이 실패했습니다/);
 globalThis.fetch = originalFetch;
 
 await esbuild({

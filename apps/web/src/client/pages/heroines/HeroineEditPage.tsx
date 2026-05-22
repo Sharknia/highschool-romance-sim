@@ -1,12 +1,13 @@
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useBeforeUnload, useBlocker, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button, StatusBanner } from "../../components/ui";
 import { failureText, generateHeroinePortrait, getHeroine, updateHeroine } from "./heroineApi";
 import { HeroineActionBar } from "./HeroineActionBar";
 import { createEmptyHeroineDraft, HeroineFormPanel, validateHeroineDraft } from "./HeroineFormPanel";
 import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
+import { useUnsavedHeroineNavigationGuard } from "./useUnsavedHeroineNavigationGuard";
 import type { HeroineDraft, HeroineLoadState, HeroineRevisionRef } from "./heroinePageTypes";
 
 function statusTone(state: HeroineLoadState): "neutral" | "waiting" | "success" | "error" {
@@ -70,28 +71,7 @@ export function HeroineEditPage() {
     void load();
   }, [load]);
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => (
-    dirty
-    && !allowNavigationRef.current
-    && currentLocation.pathname !== nextLocation.pathname
-  ));
-
-  useEffect(() => {
-    if (blocker.state === "blocked") {
-      if (window.confirm("저장하지 않은 변경 사항이 있습니다. 페이지를 떠나시겠습니까?")) {
-        allowNavigationRef.current = true;
-        blocker.proceed();
-      } else {
-        blocker.reset();
-      }
-    }
-  }, [blocker]);
-
-  useBeforeUnload(useCallback((event) => {
-    if (dirty && !allowNavigationRef.current) {
-      event.preventDefault();
-    }
-  }, [dirty]));
+  useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 변경 사항이 있습니다. 페이지를 떠나시겠습니까?");
 
   async function save(): Promise<void> {
     if (!canSave) {
