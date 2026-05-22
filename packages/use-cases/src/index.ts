@@ -279,6 +279,21 @@ export class HeroineReplaceBlockedError extends Error {
   }
 }
 
+export class ExportBlockedError extends Error {
+  readonly code = "EXPORT_BLOCKED";
+  readonly projectId: string;
+  readonly projectDirectory: string;
+  readonly issues: ValidationIssue[];
+
+  constructor(input: { projectId: string; projectDirectory: string; message: string; issues?: ValidationIssue[] }) {
+    super(input.message);
+    this.name = "ExportBlockedError";
+    this.projectId = input.projectId;
+    this.projectDirectory = input.projectDirectory;
+    this.issues = input.issues || [];
+  }
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
@@ -484,6 +499,11 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
   const code = failureCodeFromError(error);
   const message = error instanceof Error ? error.message : String(error);
   const expectedProjectId = typeof errorRecord.expectedProjectId === "string" ? errorRecord.expectedProjectId : undefined;
+  const issues = error instanceof InputValidationError
+    ? error.issues
+    : Array.isArray(errorRecord.issues)
+      ? errorRecord.issues as ValidationIssue[]
+      : undefined;
   return {
     ok: false,
     action,
@@ -495,7 +515,7 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
     expectedProjectId,
     actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
-    issues: error instanceof InputValidationError ? error.issues : undefined,
+    issues,
     retryable: retryableFailureCode(code)
   };
 }
@@ -1675,6 +1695,23 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const project = store.requireProject();
+        const validation = store.validateAndStore();
+        if (!validation.ok) {
+          throw new ExportBlockedError({
+            projectId: project.id,
+            projectDirectory: store.paths.projectDirectory,
+            message: `검증 실패 프로젝트는 export할 수 없습니다: ${validation.issues.map((issue) => issue.message).join(", ")}`,
+            issues: validation.issues
+          });
+        }
+        const incompleteCgJobs = project.generationJobs.filter((job) => job.kind === "cg" && job.status !== "completed");
+        if (incompleteCgJobs.length > 0) {
+          throw new ExportBlockedError({
+            projectId: project.id,
+            projectDirectory: store.paths.projectDirectory,
+            message: `완료되지 않은 이미지 작업이 있습니다: ${incompleteCgJobs.map((job) => job.id).join(", ")}`
+          });
+        }
         const result = await store.exportWebPlayer(typeof record.outputDirectory === "string" ? record.outputDirectory : undefined);
         return withActionState("exportProject", { projectDirectory: store.paths.projectDirectory, ...result }, {
           project,

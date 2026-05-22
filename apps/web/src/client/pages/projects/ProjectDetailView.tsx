@@ -9,8 +9,12 @@ import {
   type ProjectApiResult,
   type ProjectData,
   type ProjectEventPlan,
+  type ProjectExportResult,
   type ProjectGenerationJob,
   type ProjectIssue,
+  type ProjectRuntime,
+  type ProjectRuntimeScene,
+  type ProjectSmokeResult,
   type ProjectTabId,
   type ProjectWorkflowSummary
 } from "./projectPageTypes";
@@ -28,6 +32,8 @@ interface ProjectDetailViewProps {
 type EventTabState = "blockedNoHeroine" | "ready" | "expanding" | "patchPending" | "patchInvalid" | "patchStale" | "approving";
 type PendingEventPatch = ProjectApiResult & Required<Pick<ProjectApiResult, "request" | "plan">>;
 type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "partialFailed";
+type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
+type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
 
 function fallbackWorkflowSummary(project: ProjectData | null): ProjectWorkflowSummary {
   const hasProject = Boolean(project);
@@ -125,6 +131,31 @@ function jobStatusLabel(value?: string): string {
   return value || "확인 필요";
 }
 
+function previewStateLabel(value: PreviewState): string {
+  if (value === "empty") return "프리뷰 없음";
+  if (value === "blocked") return "차단";
+  if (value === "stale") return "다시 생성 필요";
+  if (value === "running") return "생성 중";
+  if (value === "failed") return "실패";
+  return "준비됨";
+}
+
+function exportStateLabel(value: ExportState): string {
+  if (value === "empty") return "내보내기 없음";
+  if (value === "blocked") return "차단";
+  if (value === "running") return "실행 중";
+  if (value === "completed") return "완료";
+  if (value === "failed") return "실패";
+  return "준비됨";
+}
+
+function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): ProjectRuntimeScene | null {
+  if (!runtime?.scenes?.length) {
+    return null;
+  }
+  return runtime.scenes.find((scene) => scene.id === sceneId) || runtime.scenes.find((scene) => scene.id === runtime.startSceneId) || runtime.scenes[0] || null;
+}
+
 export function ProjectDetailView({
   activeTab,
   currentProject,
@@ -152,6 +183,17 @@ export function ProjectDetailView({
   const [assetStatus, setAssetStatus] = useState("이벤트 승인 후 CG 작업을 확인합니다.");
   const [assetErrors, setAssetErrors] = useState<string[]>([]);
   const [assetBusy, setAssetBusy] = useState(false);
+  const [previewState, setPreviewState] = useState<PreviewState>("empty");
+  const [previewStatus, setPreviewStatus] = useState("프리뷰 생성 전입니다.");
+  const [previewRuntime, setPreviewRuntime] = useState<ProjectRuntime | null>(null);
+  const [previewSceneId, setPreviewSceneId] = useState("");
+  const [previewIssues, setPreviewIssues] = useState<string[]>([]);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [exportState, setExportState] = useState<ExportState>("empty");
+  const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
+  const [exportResult, setExportResult] = useState<ProjectExportResult | null>(null);
+  const [smokeResult, setSmokeResult] = useState<ProjectSmokeResult | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
   const summary = workflowSummary || fallbackWorkflowSummary(currentProject);
   const assignedHeroine = currentProject?.characters?.[0] || null;
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || heroines[0] || null;
@@ -173,6 +215,8 @@ export function ProjectDetailView({
   const currentAssetState = assetState(cgJobs);
   const plannedCgJobIds = cgJobs.filter((job) => job.status === "planned" && job.id).map((job) => String(job.id));
   const failedCgJobIds = cgJobs.filter((job) => job.status === "failed" && job.id).map((job) => String(job.id));
+  const incompleteCgJobs = (currentProject?.generationJobs || []).filter((job) => job.kind === "cg" && job.status !== "completed");
+  const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -242,6 +286,15 @@ export function ProjectDetailView({
     setAssetJobs([]);
     setAssetErrors([]);
     setAssetStatus("이벤트 승인 후 CG 작업을 확인합니다.");
+    setPreviewRuntime(null);
+    setPreviewSceneId("");
+    setPreviewIssues([]);
+    setPreviewState(currentProject ? "stale" : "empty");
+    setPreviewStatus(currentProject ? "프로젝트 변경 후 프리뷰가 아직 생성되지 않았습니다." : "프리뷰 생성 전입니다.");
+    setExportResult(null);
+    setSmokeResult(null);
+    setExportState(currentProject ? "ready" : "empty");
+    setExportStatus(currentProject ? "내보내기를 실행할 수 있습니다." : "내보내기 전입니다.");
   }, [currentProject?.id]);
 
   useEffect(() => {
@@ -439,6 +492,89 @@ export function ProjectDetailView({
       setAssetStatus(`이미지 만들기 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setAssetBusy(false);
+    }
+  }
+
+  function validationMessages(result: ProjectApiResult): string[] {
+    return result.issues?.map(issueText)
+      || result.validation?.issues?.map(issueText)
+      || result.runtime?.validation?.issues?.map(issueText)
+      || [];
+  }
+
+  async function validateBeforePreview(): Promise<boolean> {
+    const result = await postAuthedJson<ProjectApiResult>("/api/project/validate", { projectDirectory });
+    const issues = validationMessages(result);
+    if (result.ok === false || issues.some(Boolean)) {
+      setPreviewState("failed");
+      setPreviewIssues(issues);
+      setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
+      return false;
+    }
+    setPreviewIssues([]);
+    return true;
+  }
+
+  async function runPreview(startSceneId?: string): Promise<void> {
+    setPreviewBusy(true);
+    setPreviewState("running");
+    setPreviewStatus("검증 실행 후 프리뷰 생성 중입니다.");
+    try {
+      const valid = await validateBeforePreview();
+      if (!valid) {
+        return;
+      }
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/preview", {
+        projectDirectory,
+        startSceneId
+      });
+      if (result.ok === false) {
+        setPreviewState("failed");
+        setPreviewStatus(result.message || result.error || "프리뷰 생성에 실패했습니다.");
+        setPreviewIssues(validationMessages(result));
+        return;
+      }
+      const nextRuntime = result.runtime || null;
+      setPreviewRuntime(nextRuntime);
+      setPreviewSceneId(startSceneId || nextRuntime?.startSceneId || "");
+      setPreviewIssues(validationMessages(result));
+      setPreviewState(result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
+      setPreviewStatus(result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
+    } catch (error) {
+      setPreviewState("failed");
+      setPreviewStatus(`프리뷰 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function runExport(): Promise<void> {
+    setExportBusy(true);
+    setExportState("running");
+    setExportStatus("검증 실행 후 내보내기 실행 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/export", {
+        projectDirectory
+      });
+      setExportResult(result.export || null);
+      setSmokeResult(result.smoke || null);
+      if (result.ok === false) {
+        setExportState(result.code === "EXPORT_BLOCKED" ? "blocked" : "failed");
+        setExportStatus(result.message || result.error || "내보내기 실행에 실패했습니다.");
+        return;
+      }
+      if (result.smoke?.ok === false) {
+        setExportState("failed");
+        setExportStatus("실행 확인 결과 실패했습니다. 산출물과 smoke issue를 확인하세요.");
+        return;
+      }
+      setExportState("completed");
+      setExportStatus("내보내기와 실행 확인이 완료되었습니다.");
+    } catch (error) {
+      setExportState("failed");
+      setExportStatus(`내보내기 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setExportBusy(false);
     }
   }
 
@@ -715,8 +851,119 @@ export function ProjectDetailView({
             </section>
           </div>
         ) : null}
-        {activeTab === "preview" ? "프리뷰 탭입니다. 플레이 검증을 연결합니다." : null}
-        {activeTab === "export" ? "내보내기 탭입니다. export와 실행 확인 결과를 연결합니다." : null}
+        {activeTab === "preview" ? (
+          <div className="detail-tab-grid">
+            <section className="detail-card">
+              <h3>프리뷰 생성</h3>
+              <span className="state-chip">{previewStateLabel(previewState)}</span>
+              <div className={previewState === "failed" || previewState === "blocked" ? "inline-status warning" : "inline-status success"}>
+                {previewStatus}
+              </div>
+              <label className="field-row">
+                <span>시작 씬</span>
+                <select disabled={previewBusy} onChange={(event) => setPreviewSceneId(event.target.value)} value={previewSceneId || currentProject?.scenes?.[0]?.id || ""}>
+                  {(currentProject?.scenes || []).map((scene) => <option key={scene.id} value={scene.id}>{sceneLabel(scene)}</option>)}
+                </select>
+              </label>
+              <div className="button-row">
+                <Button disabled={previewBusy || !currentProject} icon={<Play size={16} />} onClick={() => void runPreview()} variant="primary">
+                  처음부터 플레이
+                </Button>
+                <Button disabled={previewBusy || !currentProject} icon={<Play size={16} />} onClick={() => void runPreview(previewSceneId || currentProject?.scenes?.[0]?.id)}>
+                  현재 씬
+                </Button>
+                <Button disabled={previewBusy || !currentProject} icon={<CheckCircle2 size={16} />} onClick={() => void validateBeforePreview()}>
+                  검증 실행
+                </Button>
+              </div>
+              {previewIssues.length ? (
+                <ul className="compact-list">
+                  {previewIssues.map((issue) => <li key={issue}>{issue}</li>)}
+                </ul>
+              ) : <p className="page-muted">검증 문제 없음</p>}
+            </section>
+            <section className="detail-card">
+              <h3>runtime 플레이</h3>
+              {currentPreviewScene ? (
+                <div className="runtime-preview">
+                  {currentPreviewScene.cgAsset?.uri ? <img alt={currentPreviewScene.cgAsset.label || "CG"} src={currentPreviewScene.cgAsset.uri} /> : null}
+                  <span>{currentPreviewScene.label || currentPreviewScene.id}</span>
+                  <strong>{currentPreviewScene.speaker || "나레이션"}</strong>
+                  <p>{currentPreviewScene.text || "본문 없음"}</p>
+                  {currentPreviewScene.choices?.length ? (
+                    <ul className="compact-list">
+                      {currentPreviewScene.choices.map((choice) => <li key={choice.id || choice.text}>{choice.text}</li>)}
+                    </ul>
+                  ) : null}
+                  {currentPreviewScene.ending ? <small>엔딩: {currentPreviewScene.ending.title}</small> : null}
+                </div>
+              ) : (
+                <p className="page-muted">프리뷰를 생성하면 runtime 플레이 화면이 표시됩니다.</p>
+              )}
+              <details className="developer-drawer">
+                <summary>개발자 상세</summary>
+                <pre>{previewRuntime ? JSON.stringify({ label: "runtime JSON", runtime: previewRuntime }, null, 2) : "runtime JSON 없음"}</pre>
+              </details>
+            </section>
+          </div>
+        ) : null}
+        {activeTab === "export" ? (
+          <div className="detail-tab-grid">
+            <section className="detail-card">
+              <h3>내보내기 실행</h3>
+              <span className="state-chip">{exportStateLabel(exportState)}</span>
+              <div className={exportState === "failed" || exportState === "blocked" ? "inline-status warning" : "inline-status success"}>
+                {exportStatus}
+              </div>
+              {incompleteCgJobs.length ? (
+                <ul className="compact-list">
+                  {incompleteCgJobs.map((job) => <li key={job.id}>필수 CG 미완료: {job.id}</li>)}
+                </ul>
+              ) : <p className="page-muted">필수 CG 작업이 완료됐거나 필요하지 않습니다.</p>}
+              <div className="button-row">
+                <Button disabled={exportBusy || !currentProject} icon={<CheckCircle2 size={16} />} onClick={() => void runExport()} variant="primary">
+                  내보내기 실행
+                </Button>
+                <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
+                  다음 action: 프리뷰 확인
+                </Button>
+              </div>
+              <p className="page-muted">EXPORT_BLOCKED 상태는 검증 실패나 필수 CG 미완료일 때 표시됩니다.</p>
+            </section>
+            <section className="detail-card">
+              <h3>산출물 위치</h3>
+              {exportResult ? (
+                <dl className="summary-list">
+                  <div><dt>폴더</dt><dd>{exportResult.outputDirectory || "기록 없음"}</dd></div>
+                  <div><dt>index</dt><dd>{exportResult.indexPath || "기록 없음"}</dd></div>
+                  <div><dt>data</dt><dd>{exportResult.projectDataPath || "기록 없음"}</dd></div>
+                </dl>
+              ) : (
+                <p className="page-muted">내보내기를 실행하면 산출물 위치가 표시됩니다.</p>
+              )}
+            </section>
+            <section className="detail-card detail-card-wide">
+              <h3>실행 확인 결과</h3>
+              {smokeResult ? (
+                <>
+                  <div className={smokeResult.ok ? "inline-status success" : "inline-status warning"}>
+                    smoke {smokeResult.ok ? "통과" : "실패"}
+                  </div>
+                  <dl className="summary-list">
+                    {Object.entries(smokeResult.checks || {}).map(([name, ok]) => <div key={name}><dt>{name}</dt><dd>{ok ? "통과" : "실패"}</dd></div>)}
+                  </dl>
+                  {smokeResult.issues?.length ? (
+                    <ul className="compact-list">
+                      {smokeResult.issues.map((issue) => <li key={issue}>{issue}</li>)}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <p className="page-muted">아직 실행 확인 결과가 없습니다.</p>
+              )}
+            </section>
+          </div>
+        ) : null}
       </div>
     </section>
   );

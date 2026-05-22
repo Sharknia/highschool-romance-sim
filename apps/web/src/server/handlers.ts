@@ -111,7 +111,7 @@ function statusForError(error: unknown): number {
   if (errorRecord.code === "RECENT_PROJECT_INDEX_MISS" || errorRecord.code === "PROJECT_DIRECTORY_MISSING" || errorRecord.code === "PROJECT_NOT_FOUND") {
     return 404;
   }
-  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT") {
+  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "EXPORT_BLOCKED") {
     return 409;
   }
   if (errorRecord.code === "PROJECT_ID_RESERVED") {

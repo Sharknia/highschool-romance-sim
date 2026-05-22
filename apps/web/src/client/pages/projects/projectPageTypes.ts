@@ -93,6 +93,48 @@ export interface ProjectPatchHistoryEntry {
   summary?: string;
 }
 
+export interface ProjectRuntimeScene {
+  id?: string;
+  label?: string;
+  speaker?: string;
+  text?: string;
+  next?: string;
+  choices?: Array<{ id?: string; text?: string; next?: string }>;
+  ending?: { id?: string; title?: string; kind?: string };
+  cgAsset?: ProjectAsset;
+  backgroundAsset?: ProjectAsset;
+  characters?: Array<{ characterId?: string; asset?: ProjectAsset }>;
+}
+
+export interface ProjectRuntime {
+  projectId?: string;
+  title?: string;
+  startSceneId?: string;
+  routeId?: string;
+  scenes?: ProjectRuntimeScene[];
+  assets?: ProjectAsset[];
+  validation?: {
+    ok?: boolean;
+    issues?: ProjectIssue[];
+  };
+}
+
+export interface ProjectExportResult {
+  outputDirectory?: string;
+  indexPath?: string;
+  projectDataPath?: string;
+  runtimeScriptPath?: string;
+}
+
+export interface ProjectSmokeResult {
+  ok?: boolean;
+  checks?: Record<string, boolean>;
+  issues?: string[];
+  reachableEndingIds?: string[];
+  uncoveredTerminalSceneIds?: string[];
+  cyclesWithoutEndingPath?: string[][];
+}
+
 export interface ProjectWorkflowSummary {
   primaryAction?: string;
   primaryLabel?: string;
@@ -144,9 +186,18 @@ export interface ProjectApiResult extends ApiResult {
   jobs?: ProjectGenerationJob[];
   patchHistoryEntry?: ProjectPatchHistoryEntry;
   plan?: ProjectEventPlan;
+  export?: ProjectExportResult;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
   request?: ProjectEventRequest;
+  routeGraphAnalysis?: {
+    issues?: ProjectIssue[];
+    missingTargets?: unknown[];
+    reachableEndingIds?: string[];
+    uncoveredTerminalSceneIds?: string[];
+  };
+  runtime?: ProjectRuntime;
+  smoke?: ProjectSmokeResult;
   expectedProjectId?: string;
   actualProjectId?: string;
   workflowSummary?: ProjectWorkflowSummary;

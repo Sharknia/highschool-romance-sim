@@ -497,6 +497,9 @@ assert.equal(approved.project.scenes.length, 5);
 
 const plannedJob = approved.project.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");
 assert.equal(Boolean(plannedJob), true);
+const blockedExportWithPlannedCg = await useCases.exportProject({ projectDirectory }).catch((error) => error);
+assert.equal(blockedExportWithPlannedCg.code, "EXPORT_BLOCKED");
+assert.match(blockedExportWithPlannedCg.message, /완료되지 않은 이미지 작업/);
 const generated = await useCases.generateImage({
   projectDirectory,
   jobId: plannedJob.id
