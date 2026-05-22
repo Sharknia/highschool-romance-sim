@@ -91,6 +91,10 @@ export function HeroineEditPage() {
   }
 
   async function generatePortrait(): Promise<void> {
+    if (dirty) {
+      setStatus("저장하지 않은 변경 사항이 있어 기본 포트레이트 생성 전에 저장해야 합니다.");
+      return;
+    }
     setState("saving");
     setStatus("기본 포트레이트를 생성하는 중입니다.");
     const result = await generateHeroinePortrait(postAuthedJson, {

@@ -771,6 +771,20 @@ assert.equal(apiGetHeroine.status, 200);
 assert.equal(apiGetHeroine.body.ok, true);
 assert.equal(apiGetHeroine.body.heroine.name, "하루");
 
+const apiMissingRevisionUpdate = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/update",
+  body: {
+    requestId: "api-update-missing-revision",
+    projectDirectory: heroineApiContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 API revision 누락" }
+  }
+});
+assert.equal(apiMissingRevisionUpdate.status, 400);
+assert.equal(apiMissingRevisionUpdate.body.ok, false);
+assert.equal(apiMissingRevisionUpdate.body.code, "HEROINE_INPUT_INVALID");
+assert.equal(apiMissingRevisionUpdate.body.issues.some((issue) => issue.path === "expectedHeroineRevision"), true);
+
 const apiUpdateHeroine = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/heroines/update",
@@ -800,6 +814,63 @@ assert.equal(apiRevisionConflict.body.code, "HEROINE_REVISION_CONFLICT");
 assert.equal(apiRevisionConflict.body.requestId, "api-update-conflict");
 assert.equal(apiRevisionConflict.body.retryable, true);
 
+const apiMissingConfirmDelete = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/delete",
+  body: {
+    requestId: "api-delete-missing-confirm",
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    expectedHeroineRevision: apiUpdateHeroine.body.heroineRevision
+  }
+});
+assert.equal(apiMissingConfirmDelete.status, 400);
+assert.equal(apiMissingConfirmDelete.body.ok, false);
+assert.equal(apiMissingConfirmDelete.body.code, "HEROINE_INPUT_INVALID");
+assert.equal(apiMissingConfirmDelete.body.issues.some((issue) => issue.path === "confirmName"), true);
+assert.equal(apiMissingConfirmDelete.body.issues.some((issue) => issue.path === "confirmId"), true);
+
+const apiMissingRevisionDelete = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/delete",
+  body: {
+    requestId: "api-delete-missing-revision",
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    confirmName: "하루 API 수정",
+    confirmId: "haru"
+  }
+});
+assert.equal(apiMissingRevisionDelete.status, 400);
+assert.equal(apiMissingRevisionDelete.body.ok, false);
+assert.equal(apiMissingRevisionDelete.body.code, "HEROINE_INPUT_INVALID");
+assert.equal(apiMissingRevisionDelete.body.issues.some((issue) => issue.path === "expectedHeroineRevision"), true);
+
+const apiProjectFromHeroine = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/projects/from-heroine",
+  body: {
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru",
+    title: "하루 API 프로젝트",
+    premise: "상세 화면 이동 계약 검증"
+  }
+});
+assert.equal(apiProjectFromHeroine.status, 200);
+assert.equal(apiProjectFromHeroine.body.ok, true);
+assert.equal(apiProjectFromHeroine.body.projectId, apiProjectFromHeroine.body.project.id);
+assert.equal(apiProjectFromHeroine.body.targetRoute, `/projects/${apiProjectFromHeroine.body.project.id}/overview`);
+
+const apiGetAfterProjectCreate = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/heroines/get",
+  body: {
+    projectDirectory: heroineApiContractDirectory,
+    heroineId: "haru"
+  }
+});
+assert.equal(apiGetAfterProjectCreate.status, 200);
+
 const apiDeleteHeroine = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/heroines/delete",
@@ -808,7 +879,7 @@ const apiDeleteHeroine = await webHandlers.handleApiRequest({
     heroineId: "haru",
     confirmName: "하루 API 수정",
     confirmId: "haru",
-    expectedHeroineRevision: apiUpdateHeroine.body.heroineRevision
+    expectedHeroineRevision: apiGetAfterProjectCreate.body.heroineRevision
   }
 });
 assert.equal(apiDeleteHeroine.status, 200);
@@ -845,6 +916,17 @@ const cliGetHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/i
 const cliGetHeroine = JSON.parse(cliGetHeroineOutput);
 assert.equal(cliGetHeroine.ok, true);
 
+const cliMissingRevisionUpdateOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "update-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroine: { ...haruHeroine, name: "하루 CLI revision 누락" }
+  }),
+  encoding: "utf8"
+});
+const cliMissingRevisionUpdate = JSON.parse(cliMissingRevisionUpdateOutput);
+assert.equal(cliMissingRevisionUpdate.ok, false);
+assert.equal(cliMissingRevisionUpdate.code, "HEROINE_INPUT_INVALID");
+
 const cliUpdateHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "update-heroine"], {
   input: JSON.stringify({
     projectDirectory: heroineCliContractDirectory,
@@ -864,6 +946,18 @@ const cliDuplicateHeroineOutput = execFileSync(process.execPath, ["packages/cli/
 const cliDuplicateHeroine = JSON.parse(cliDuplicateHeroineOutput);
 assert.equal(cliDuplicateHeroine.ok, false);
 assert.equal(cliDuplicateHeroine.code, "HEROINE_ID_CONFLICT");
+
+const cliMissingConfirmDeleteOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "delete-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: heroineCliContractDirectory,
+    heroineId: "haru",
+    expectedHeroineRevision: cliUpdateHeroine.heroineRevision
+  }),
+  encoding: "utf8"
+});
+const cliMissingConfirmDelete = JSON.parse(cliMissingConfirmDeleteOutput);
+assert.equal(cliMissingConfirmDelete.ok, false);
+assert.equal(cliMissingConfirmDelete.code, "HEROINE_INPUT_INVALID");
 
 const cliDeleteHeroineOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "delete-heroine"], {
   input: JSON.stringify({

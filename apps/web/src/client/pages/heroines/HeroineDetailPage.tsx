@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button, StatusBanner } from "../../components/ui";
 import { createProjectFromHeroine, deleteHeroine, failureText, getHeroine } from "./heroineApi";
-import { HeroineDeleteDialog } from "./HeroineDeleteDialog";
+import { HeroineDeleteDialog, type HeroineDeleteConfirmation } from "./HeroineDeleteDialog";
 import type { HeroineDraft, HeroineLoadState } from "./heroinePageTypes";
 
 function statusTone(state: HeroineLoadState): "neutral" | "waiting" | "success" | "error" {
@@ -46,10 +46,10 @@ export function HeroineDetailPage() {
     void load();
   }, [load]);
 
-  async function confirmDelete(target: HeroineDraft): Promise<void> {
+  async function confirmDelete(target: HeroineDraft, confirmation: HeroineDeleteConfirmation): Promise<void> {
     setState("deleting");
     setDeleteError("");
-    const result = await deleteHeroine(postAuthedJson, target, target.heroineRevision);
+    const result = await deleteHeroine(postAuthedJson, target, confirmation, target.heroineRevision);
     if (result.ok === false) {
       setState(result.code === "HEROINE_REVISION_CONFLICT" ? "conflict" : "ready");
       setDeleteError(failureText(result, "히로인 삭제 실패"));
@@ -159,7 +159,7 @@ export function HeroineDetailPage() {
           setDeleteOpen(false);
           setDeleteError("");
         }}
-        onConfirm={(target) => void confirmDelete(target)}
+        onConfirm={(target, confirmation) => void confirmDelete(target, confirmation)}
         onReload={() => void load()}
       />
     </section>

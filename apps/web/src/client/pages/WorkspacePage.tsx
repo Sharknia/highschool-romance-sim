@@ -18,6 +18,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { ApiResult, ImagePreviewResult } from "../api/types";
 import { describeSession, useAuth } from "../auth/AuthProvider";
 import { SceneWorkbench } from "../components/SceneWorkbench";
@@ -246,6 +247,7 @@ function jobTone(status: GenerationJob["status"]): string {
 
 export function WorkspacePage() {
   const { logout, postAuthedJson, refreshSession, session } = useAuth();
+  const navigate = useNavigate();
   const alphaSandboxEnabled = isAlphaSandboxEnabled();
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
   const [projectDirectory, setProjectDirectory] = useState("");
@@ -300,7 +302,7 @@ export function WorkspacePage() {
       return { label: "샘플 프로젝트 생성", reason: "프로젝트가 아직 열리지 않았습니다.", run: () => void createStarterProject() };
     }
     if (!currentHeroine) {
-      return { label: "선택 히로인으로 프로젝트 생성", reason: "프로젝트 스냅샷 히로인이 필요합니다.", run: () => void createProjectFromSelectedHeroine() };
+      return { label: "히로인 관리 열기", reason: "프로젝트 스냅샷 히로인은 히로인 상세 화면에서 생성합니다.", run: () => navigate("/heroines") };
     }
     if (pendingPatch) {
       return { label: "검증된 패치 승인", reason: patchCanApply ? "검증 통과 패치가 대기 중입니다." : "검증 실패 항목을 먼저 확인해야 합니다.", run: () => void approveEvent(), disabled: !patchCanApply };
@@ -315,7 +317,7 @@ export function WorkspacePage() {
       return { label: "선택 이미지 작업 실행", reason: selectedJobIds.length > 0 ? "선택된 작업을 일괄 실행합니다." : "실행할 이미지 작업을 선택하세요.", run: () => void runSelectedGenerationJobs(), disabled: selectedJobIds.length === 0 };
     }
     return { label: "웹 플레이어 export", reason: "검증과 smoke check를 포함해 산출물을 만듭니다.", run: () => void exportProject() };
-  }, [project, currentHeroine, pendingPatch, patchCanApply, runtime, lastExport, plannedJobCount, selectedJobIds.length]);
+  }, [project, currentHeroine, pendingPatch, patchCanApply, runtime, lastExport, plannedJobCount, selectedJobIds.length, navigate]);
 
   function updateHeroineField(field: keyof HeroineDraft, value: string): void {
     setHeroineDraft((current) => {
@@ -454,22 +456,6 @@ export function WorkspacePage() {
       projectDirectory: projectDirectory || undefined,
       heroineId: selectedHeroineId
     }));
-  }
-
-  async function createProjectFromSelectedHeroine(): Promise<void> {
-    const selectedLibraryHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId);
-    await runAction("히로인 프로젝트 생성", async () => postAuthedJson<ApiResult>("/api/projects/from-heroine", {
-      projectDirectory: projectDirectory || undefined,
-      heroineId: selectedLibraryHeroine?.id || undefined,
-      heroine: selectedLibraryHeroine ? undefined : heroineDraft,
-      title: `${heroineDraft.name} Beta`,
-      premise: `${heroineDraft.name}와 반복 제작을 검증하는 Beta 루트`
-    }));
-    setRuntime(null);
-    setPreviewStale(false);
-    setPendingPatch(null);
-    await loadPatchHistory();
-    await loadGenerationJobs();
   }
 
   async function createStarterProject(): Promise<void> {

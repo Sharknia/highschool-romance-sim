@@ -1,22 +1,37 @@
 import { AlertTriangle, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "../../components/ui";
 import type { HeroineDraft, HeroineRevisionRef } from "./heroinePageTypes";
+
+export interface HeroineDeleteConfirmation {
+  confirmName: string;
+  confirmId: string;
+}
 
 interface HeroineDeleteDialogProps {
   deleting: boolean;
   error?: string;
   heroine: HeroineDraft | null;
   onClose: () => void;
-  onConfirm: (heroine: HeroineDraft, expectedHeroineRevision?: HeroineRevisionRef) => void;
+  onConfirm: (heroine: HeroineDraft, confirmation: HeroineDeleteConfirmation, expectedHeroineRevision?: HeroineRevisionRef) => void;
   onReload?: () => void;
 }
 
 export function HeroineDeleteDialog({ deleting, error, heroine, onClose, onConfirm, onReload }: HeroineDeleteDialogProps) {
+  const [confirmName, setConfirmName] = useState("");
+  const [confirmId, setConfirmId] = useState("");
+
+  useEffect(() => {
+    setConfirmName("");
+    setConfirmId("");
+  }, [heroine?.id]);
+
   if (!heroine) {
     return null;
   }
 
   const isConflict = Boolean(error?.includes("충돌"));
+  const confirmationMatches = confirmName.trim() === heroine.name && confirmId.trim() === heroine.id;
 
   return (
     <div className="dialog-backdrop" role="presentation">
@@ -35,6 +50,27 @@ export function HeroineDeleteDialog({ deleting, error, heroine, onClose, onConfi
           <div><dt>ID</dt><dd>{heroine.id}</dd></div>
           <div><dt>영향 범위</dt><dd>라이브러리 원본만 삭제하고 기존 프로젝트 스냅샷은 유지합니다.</dd></div>
         </dl>
+        <div className="delete-confirm-fields">
+          <label className="field-row" htmlFor="confirmHeroineName">
+            <span>삭제 확인 이름</span>
+            <input
+              autoComplete="off"
+              id="confirmHeroineName"
+              onChange={(event) => setConfirmName(event.target.value)}
+              value={confirmName}
+            />
+          </label>
+          <label className="field-row" htmlFor="confirmHeroineId">
+            <span>삭제 확인 ID</span>
+            <input
+              autoComplete="off"
+              id="confirmHeroineId"
+              onChange={(event) => setConfirmId(event.target.value)}
+              value={confirmId}
+            />
+          </label>
+          <p className="field-hint">삭제 확인값을 입력해야 합니다. 이름과 ID가 모두 일치해야 삭제할 수 있습니다.</p>
+        </div>
         {error ? (
           <div className="inline-status warning">
             {error}
@@ -49,7 +85,12 @@ export function HeroineDeleteDialog({ deleting, error, heroine, onClose, onConfi
           <Button disabled={deleting} icon={<X size={16} />} onClick={onClose}>
             취소
           </Button>
-          <Button disabled={deleting} icon={<Trash2 size={16} />} onClick={() => onConfirm(heroine, heroine.heroineRevision)} variant="primary">
+          <Button
+            disabled={deleting || !confirmationMatches}
+            icon={<Trash2 size={16} />}
+            onClick={() => onConfirm(heroine, { confirmName: confirmName.trim(), confirmId: confirmId.trim() }, heroine.heroineRevision)}
+            variant="primary"
+          >
             삭제
           </Button>
         </div>

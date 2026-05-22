@@ -50,14 +50,15 @@ export function updateHeroine(
 export function deleteHeroine(
   postJson: PostAuthedJson,
   heroine: HeroineDraft,
+  confirmation: { confirmName: string; confirmId: string },
   expectedHeroineRevision?: HeroineRevisionRef
 ): Promise<HeroineLibraryResult> {
   return postJson<HeroineLibraryResult>("/api/heroines/delete", {
     action: "deleteHeroine",
     requestId: `delete-${heroine.id}-${Date.now()}`,
     heroineId: heroine.id,
-    confirmName: heroine.name,
-    confirmId: heroine.id,
+    confirmName: confirmation.confirmName,
+    confirmId: confirmation.confirmId,
     expectedHeroineRevision
   });
 }

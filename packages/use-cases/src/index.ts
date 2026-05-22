@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   DEFAULT_EMOTION_TAGS,
@@ -655,6 +655,16 @@ function expectedRevisionValue(input: unknown): string | undefined {
     : undefined;
 }
 
+function requireExpectedRevisionValue(input: unknown): string | HeroineActionFailureDto {
+  const expected = expectedRevisionValue(input);
+  if (!expected) {
+    return heroineFailure(input, "HEROINE_INPUT_INVALID", "expectedHeroineRevision 입력이 필요합니다.", {
+      issues: [{ severity: "error", path: "expectedHeroineRevision", message: "최신 revision 기준으로만 변경할 수 있습니다." }]
+    });
+  }
+  return expected;
+}
+
 function withHeroineContract(
   store: ProjectStore,
   heroine: HeroineProfileDto
@@ -702,30 +712,66 @@ function heroineListItem(heroine: HeroineProfileDto): HeroineProfileDto & {
   };
 }
 
-function stagedPortraitAssetId(input: unknown, store: ProjectStore): string | undefined {
+function stagedPortraitReferenceFailure(input: unknown, message: string): HeroineActionFailureDto {
+  return heroineFailure(input, "HEROINE_INPUT_INVALID", message, {
+    issues: [{ severity: "error", path: "stagedPortraitRef", message }]
+  });
+}
+
+function stagedPortraitAssetId(input: unknown, store: ProjectStore): { assetId: string; stagedPortraitId: string } | HeroineActionFailureDto | undefined {
   const stagedPortraitRef = asRecord(input).stagedPortraitRef;
   if (!stagedPortraitRef || typeof stagedPortraitRef !== "object") {
     return undefined;
   }
   const stagedId = (stagedPortraitRef as { id?: unknown }).id;
   if (typeof stagedId !== "string" || !stagedId.startsWith("staged-")) {
-    return undefined;
+    return stagedPortraitReferenceFailure(input, "staged portrait 참조 형식이 올바르지 않습니다.");
   }
-  const assetId = stagedId.slice("staged-".length);
-  const assetExists = store.requireProject().assets.some((asset) => asset.id === assetId && asset.kind === "portrait");
-  return assetExists ? assetId : undefined;
+  const staged = store.getStagedPortrait(stagedId);
+  if (!staged || staged.consumedAt) {
+    return stagedPortraitReferenceFailure(input, "staged portrait 참조를 찾을 수 없거나 이미 사용되었습니다.");
+  }
+  if (Date.parse(staged.expiresAt) <= Date.now()) {
+    return stagedPortraitReferenceFailure(input, "staged portrait 참조가 만료되었습니다.");
+  }
+  const assetExists = store.requireProject().assets.some((asset) => asset.id === staged.assetId && asset.kind === "portrait");
+  if (!assetExists) {
+    return stagedPortraitReferenceFailure(input, "staged portrait 에셋을 찾을 수 없습니다.");
+  }
+  return { assetId: staged.assetId, stagedPortraitId: staged.id };
 }
 
-function attachStagedPortrait(heroine: HeroineProfile, input: unknown, store: ProjectStore): HeroineProfile {
-  const assetId = stagedPortraitAssetId(input, store);
-  if (!assetId) {
-    return heroine;
+function attachStagedPortrait(
+  heroine: HeroineProfile,
+  input: unknown,
+  store: ProjectStore
+): { heroine: HeroineProfile; stagedPortraitId?: string } | HeroineActionFailureDto {
+  const stagedPortrait = stagedPortraitAssetId(input, store);
+  if (!stagedPortrait) {
+    return { heroine };
+  }
+  if (isHeroineActionFailure(stagedPortrait)) {
+    return stagedPortrait;
   }
   return {
-    ...heroine,
-    defaultPortraitAssetId: assetId,
-    portraitAssetIds: [...new Set([assetId, ...heroine.portraitAssetIds])]
+    heroine: {
+      ...heroine,
+      defaultPortraitAssetId: stagedPortrait.assetId,
+      portraitAssetIds: [...new Set([stagedPortrait.assetId, ...heroine.portraitAssetIds])]
+    },
+    stagedPortraitId: stagedPortrait.stagedPortraitId
   };
+}
+
+function heroineImageGenerationFailure(input: unknown, error: unknown): HeroineActionFailureDto {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("OAuth 로그인이 필요")) {
+    return heroineFailure(input, "OAUTH_REQUIRED", "Codex ChatGPT OAuth 로그인이 필요합니다.", { retryable: true });
+  }
+  if (message.includes("imageGeneration")) {
+    return heroineFailure(input, "IMAGE_GENERATION_UNAVAILABLE", "현재 Codex app-server가 imageGeneration 기능을 제공하지 않습니다.", { retryable: true });
+  }
+  return heroineFailure(input, "SERVER_ERROR", `이미지 생성 중 오류가 발생했습니다. ${message}`, { retryable: true });
 }
 
 async function withStore<T>(projectDirectory: string, operation: (store: ProjectStore) => Promise<T> | T): Promise<T> {
@@ -1056,6 +1102,8 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           paths: store.paths,
           heroine,
           project,
+          projectId: project.id,
+          targetRoute: `/projects/${project.id}/overview`,
           validation
         };
       } finally {
@@ -1147,7 +1195,14 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         if (store.getHeroine(parsed.id)) {
           return heroineFailure(input, "HEROINE_ID_CONFLICT", "이미 같은 히로인 ID가 있습니다.");
         }
-        const heroine = store.saveHeroine(attachStagedPortrait(parsed, input, store));
+        const staged = attachStagedPortrait(parsed, input, store);
+        if (isHeroineActionFailure(staged)) {
+          return staged;
+        }
+        const heroine = store.saveHeroine(staged.heroine);
+        if (staged.stagedPortraitId) {
+          store.consumeStagedPortrait(staged.stagedPortraitId);
+        }
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
@@ -1169,8 +1224,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         if (!current) {
           return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
         }
-        const expected = expectedRevisionValue(input);
-        if (expected && expected !== heroineRevisionFor(current).value) {
+        const expected = requireExpectedRevisionValue(input);
+        if (isHeroineActionFailure(expected)) {
+          return expected;
+        }
+        if (expected !== heroineRevisionFor(current).value) {
           return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
         }
         const heroine = store.saveHeroine({ ...parsed, id: current.id });
@@ -1241,8 +1299,8 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           return heroineFailure(input, "HEROINE_NOT_FOUND", "히로인을 찾을 수 없습니다.");
         }
         const record = asRecord(input);
-        const confirmName = typeof record.confirmName === "string" ? record.confirmName.trim() : current.name;
-        const confirmId = typeof record.confirmId === "string" ? record.confirmId.trim() : current.id;
+        const confirmName = typeof record.confirmName === "string" ? record.confirmName.trim() : "";
+        const confirmId = typeof record.confirmId === "string" ? record.confirmId.trim() : "";
         if (confirmName !== current.name || confirmId !== current.id) {
           return heroineFailure(input, "HEROINE_INPUT_INVALID", "삭제 확인값이 히로인과 일치하지 않습니다.", {
             issues: [
@@ -1251,8 +1309,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             ]
           });
         }
-        const expected = expectedRevisionValue(input);
-        if (expected && expected !== heroineRevisionFor(current).value) {
+        const expected = requireExpectedRevisionValue(input);
+        if (isHeroineActionFailure(expected)) {
+          return expected;
+        }
+        if (expected !== heroineRevisionFor(current).value) {
           return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
         }
         store.deleteHeroine(heroineId);
@@ -1769,12 +1830,15 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             : heroineFailure(input, "HEROINE_INPUT_INVALID", "포트레이트를 생성할 히로인 정보가 필요합니다.", {
                 issues: [{ severity: "error", path: "draft", message: "heroineId 또는 draft 입력이 필요합니다." }]
               });
-        if ("ok" in parsedDraft && parsedDraft.ok === false) {
+        if (isHeroineActionFailure(parsedDraft)) {
           return parsedDraft;
         }
 
-        const expected = expectedRevisionValue(input);
-        if (existingHeroine && expected && expected !== heroineRevisionFor(existingHeroine).value) {
+        const expected = existingHeroine ? requireExpectedRevisionValue(input) : undefined;
+        if (isHeroineActionFailure(expected)) {
+          return expected;
+        }
+        if (existingHeroine && expected !== heroineRevisionFor(existingHeroine).value) {
           return heroineFailure(input, "HEROINE_REVISION_CONFLICT", "다른 변경과 충돌했습니다. 최신 정보를 다시 불러오세요.", { retryable: true });
         }
 
@@ -1783,7 +1847,12 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           kind: "portrait",
           heroine: parsedDraft
         });
-        const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
+        let result: ProjectImageGenerationResult;
+        try {
+          result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
+        } catch (error) {
+          return heroineImageGenerationFailure(input, error);
+        }
         await store.storeGenerationResult(result);
 
         if (existingHeroine) {
@@ -1802,13 +1871,20 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           };
         }
 
+        const stagedPortrait = store.saveStagedPortrait({
+          id: `staged-${randomUUID()}`,
+          assetId: result.asset.id,
+          heroineId: parsedDraft.id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+        });
+
         return {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
           asset: result.asset,
           stagedPortraitRef: {
-            id: `staged-${result.asset.id}`,
-            expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            id: stagedPortrait.id,
+            expiresAt: stagedPortrait.expiresAt,
             previewUri: result.image?.dataUrl || result.image?.uri || result.asset.uri
           },
           generationState: "completed" as const

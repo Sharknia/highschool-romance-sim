@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button, StatusBanner } from "../../components/ui";
 import { deleteHeroine, failureText, listHeroines } from "./heroineApi";
-import { HeroineDeleteDialog } from "./HeroineDeleteDialog";
+import { HeroineDeleteDialog, type HeroineDeleteConfirmation } from "./HeroineDeleteDialog";
 import type { HeroineDraft, HeroineListState } from "./heroinePageTypes";
 
 function statusTone(state: HeroineListState): "neutral" | "waiting" | "success" | "error" {
@@ -55,10 +55,10 @@ export function HeroineListPage() {
     void load();
   }, [load]);
 
-  async function confirmDelete(heroine: HeroineDraft): Promise<void> {
+  async function confirmDelete(heroine: HeroineDraft, confirmation: HeroineDeleteConfirmation): Promise<void> {
     setState("deleting");
     setDeleteError("");
-    const result = await deleteHeroine(postAuthedJson, heroine, heroine.heroineRevision);
+    const result = await deleteHeroine(postAuthedJson, heroine, confirmation, heroine.heroineRevision);
     if (result.ok === false) {
       setState("ready");
       setDeleteError(failureText(result, "히로인 삭제 실패"));
@@ -155,7 +155,7 @@ export function HeroineListPage() {
           setDeleteTarget(null);
           setDeleteError("");
         }}
-        onConfirm={(heroine) => void confirmDelete(heroine)}
+        onConfirm={(heroine, confirmation) => void confirmDelete(heroine, confirmation)}
         onReload={() => void load()}
       />
     </section>

@@ -192,6 +192,14 @@ assert.equal(missingHeroine.ok, false);
 assert.equal(missingHeroine.code, "HEROINE_NOT_FOUND");
 assert.equal(missingHeroine.requestId, "heroine-missing");
 
+const missingRevisionUpdate = await useCases.updateHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroine: { ...contractHeroine, name: "아오이 revision 누락" }
+});
+assert.equal(missingRevisionUpdate.ok, false);
+assert.equal(missingRevisionUpdate.code, "HEROINE_INPUT_INVALID");
+assert.equal(missingRevisionUpdate.issues.some((issue) => issue.path === "expectedHeroineRevision"), true);
+
 const contractUpdated = await useCases.updateHeroine({
   projectDirectory: heroineContractDirectory,
   heroine: { ...contractHeroine, name: "아오이 수정" },
@@ -209,6 +217,26 @@ const staleUpdate = await useCases.updateHeroine({
 assert.equal(staleUpdate.ok, false);
 assert.equal(staleUpdate.code, "HEROINE_REVISION_CONFLICT");
 assert.equal(staleUpdate.retryable, true);
+
+const missingRevisionDelete = await useCases.deleteHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi",
+  confirmName: "아오이 수정",
+  confirmId: "aoi"
+});
+assert.equal(missingRevisionDelete.ok, false);
+assert.equal(missingRevisionDelete.code, "HEROINE_INPUT_INVALID");
+assert.equal(missingRevisionDelete.issues.some((issue) => issue.path === "expectedHeroineRevision"), true);
+
+const missingConfirmationDelete = await useCases.deleteHeroine({
+  projectDirectory: heroineContractDirectory,
+  heroineId: "aoi",
+  expectedHeroineRevision: contractUpdated.heroineRevision
+});
+assert.equal(missingConfirmationDelete.ok, false);
+assert.equal(missingConfirmationDelete.code, "HEROINE_INPUT_INVALID");
+assert.equal(missingConfirmationDelete.issues.some((issue) => issue.path === "confirmName"), true);
+assert.equal(missingConfirmationDelete.issues.some((issue) => issue.path === "confirmId"), true);
 
 const staleDelete = await useCases.deleteHeroine({
   projectDirectory: heroineContractDirectory,
@@ -265,6 +293,17 @@ assert.equal(stagedPortrait.asset.kind, "portrait");
 const libraryBeforeStagedCreate = await useCases.listHeroines({ projectDirectory: stagedPortraitDirectory });
 assert.equal(libraryBeforeStagedCreate.ok, true);
 assert.equal(libraryBeforeStagedCreate.empty, true);
+const forgedStagedPortrait = await useCases.createHeroine({
+  projectDirectory: stagedPortraitDirectory,
+  heroine: { ...stagedDraft, id: "forged-staged-aoi", name: "위조 스테이지" },
+  stagedPortraitRef: {
+    id: `staged-${stagedPortrait.asset.id}`,
+    expiresAt: stagedPortrait.stagedPortraitRef.expiresAt,
+    previewUri: stagedPortrait.stagedPortraitRef.previewUri
+  }
+});
+assert.equal(forgedStagedPortrait.ok, false);
+assert.equal(forgedStagedPortrait.code, "HEROINE_INPUT_INVALID");
 const createdWithStagedPortrait = await useCases.createHeroine({
   projectDirectory: stagedPortraitDirectory,
   heroine: stagedDraft,
@@ -274,6 +313,13 @@ assert.equal(createdWithStagedPortrait.ok, true);
 assert.equal(createdWithStagedPortrait.heroine.defaultPortraitAssetId, stagedPortrait.asset.id);
 assert.equal(createdWithStagedPortrait.heroine.portraitAssetIds.includes(stagedPortrait.asset.id), true);
 assert.equal(createdWithStagedPortrait.heroine.defaultPortraitUri, stagedPortrait.asset.uri);
+const reusedStagedPortrait = await useCases.createHeroine({
+  projectDirectory: stagedPortraitDirectory,
+  heroine: { ...stagedDraft, id: "reused-staged-aoi", name: "재사용 스테이지" },
+  stagedPortraitRef: stagedPortrait.stagedPortraitRef
+});
+assert.equal(reusedStagedPortrait.ok, false);
+assert.equal(reusedStagedPortrait.code, "HEROINE_INPUT_INVALID");
 
 const existingPortraitHeroine = core.createHeroineProfile({
   id: "portrait-existing",
@@ -298,6 +344,36 @@ assert.equal(generatedForExisting.heroine.defaultPortraitAssetId, generatedForEx
 assert.equal(generatedForExisting.heroine.portraitAssetIds.includes(generatedForExisting.asset.id), true);
 assert.notEqual(generatedForExisting.heroineRevision.value, existingPortraitCreated.heroineRevision.value);
 
+const oauthFailureUseCases = useCasesModule.createVnMakerUseCases({
+  image: {
+    async generateImageAsset() {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+  }
+});
+const oauthPortrait = await oauthFailureUseCases.generateHeroinePortrait({
+  projectDirectory: join(tempRoot, "OAuthPortrait.vnmaker"),
+  draft: stagedDraft
+});
+assert.equal(oauthPortrait.ok, false);
+assert.equal(oauthPortrait.code, "OAUTH_REQUIRED");
+assert.equal(oauthPortrait.retryable, true);
+
+const unavailableImageUseCases = useCasesModule.createVnMakerUseCases({
+  image: {
+    async generateImageAsset() {
+      throw new Error("현재 Codex app-server가 imageGeneration 기능을 제공하지 않습니다.");
+    }
+  }
+});
+const unavailablePortrait = await unavailableImageUseCases.generateHeroinePortrait({
+  projectDirectory: join(tempRoot, "UnavailablePortrait.vnmaker"),
+  draft: stagedDraft
+});
+assert.equal(unavailablePortrait.ok, false);
+assert.equal(unavailablePortrait.code, "IMAGE_GENERATION_UNAVAILABLE");
+assert.equal(unavailablePortrait.retryable, true);
+
 const created = await useCases.createProjectFromHeroine({
   projectDirectory,
   heroine,
@@ -306,6 +382,8 @@ const created = await useCases.createProjectFromHeroine({
 });
 assert.equal(created.ok, true);
 assert.equal(created.projectDirectory, projectDirectory);
+assert.equal(created.projectId, created.project.id);
+assert.equal(created.targetRoute, `/projects/${created.project.id}/overview`);
 assert.equal(created.project.characters.length, 1);
 
 const generatedPortrait = await useCases.generateImage({
@@ -329,9 +407,17 @@ assert.equal(heroineLibraryAfterPortrait.heroines.find((item) => item.id === her
 assert.equal(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.defaultPortraitUri, generatedPortrait.asset.uri);
 assert.deepEqual(heroineLibraryAfterPortrait.heroines.find((item) => item.id === heroine.id)?.portraitAssetIds, [generatedPortrait.asset.id]);
 
-const deletedLibraryHeroine = await useCases.deleteHeroine({
+const libraryHeroineBeforeDelete = await useCases.getHeroine({
   projectDirectory,
   heroineId: heroine.id
+});
+assert.equal(libraryHeroineBeforeDelete.ok, true);
+const deletedLibraryHeroine = await useCases.deleteHeroine({
+  projectDirectory,
+  heroineId: heroine.id,
+  confirmName: heroine.name,
+  confirmId: heroine.id,
+  expectedHeroineRevision: libraryHeroineBeforeDelete.heroineRevision
 });
 assert.equal(deletedLibraryHeroine.ok, true);
 assert.equal(deletedLibraryHeroine.heroines.some((item) => item.id === heroine.id), false);

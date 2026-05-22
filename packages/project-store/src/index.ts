@@ -71,6 +71,22 @@ export interface StoredHeroineProfile extends HeroineProfile {
   updatedAt: string;
 }
 
+export interface StoreStagedPortraitInput {
+  id: string;
+  assetId: string;
+  heroineId?: string;
+  expiresAt: string;
+}
+
+export interface StoredStagedPortrait {
+  id: string;
+  assetId: string;
+  heroineId?: string;
+  expiresAt: string;
+  consumedAt?: string;
+  createdAt: string;
+}
+
 export interface UpsertRecentProjectInput {
   projectId: string;
   projectDirectory: string;
@@ -225,6 +241,15 @@ interface HeroineRow {
   position: number;
   created_at: string;
   updated_at: string;
+}
+
+interface StagedPortraitRow {
+  id: string;
+  asset_id: string;
+  heroine_id: string | null;
+  expires_at: string;
+  consumed_at: string | null;
+  created_at: string;
 }
 
 interface RouteRow {
@@ -479,6 +504,24 @@ CREATE INDEX IF NOT EXISTS idx_patch_history_project_created ON patch_history(pr
     sql: `
 ALTER TABLE scenes ADD COLUMN ending_json TEXT;
 `
+  },
+  {
+    id: 5,
+    name: "staged_portrait_refs",
+    sql: `
+CREATE TABLE IF NOT EXISTS staged_portraits (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  heroine_id TEXT,
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staged_portraits_project_asset ON staged_portraits(project_id, asset_id);
+`
   }
 ] as const;
 
@@ -533,6 +576,17 @@ function storedHeroineFromRow(row: HeroineRow): StoredHeroineProfile {
     ...heroineFromRow(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function stagedPortraitFromRow(row: StagedPortraitRow): StoredStagedPortrait {
+  return {
+    id: row.id,
+    assetId: row.asset_id,
+    heroineId: row.heroine_id || undefined,
+    expiresAt: row.expires_at,
+    consumedAt: row.consumed_at || undefined,
+    createdAt: row.created_at
   };
 }
 
@@ -1079,6 +1133,56 @@ ON CONFLICT(id) DO UPDATE SET
 
   deleteHeroine(heroineId: string): boolean {
     const result = this.db.prepare("DELETE FROM heroine_library WHERE id = ?").run(heroineId);
+    return result.changes > 0;
+  }
+
+  saveStagedPortrait(input: StoreStagedPortraitInput): StoredStagedPortrait {
+    const project = this.requireProject();
+    const now = nowIso();
+    this.db.prepare(`
+INSERT INTO staged_portraits (project_id, id, asset_id, heroine_id, expires_at, consumed_at, created_at)
+VALUES (@projectId, @id, @assetId, @heroineId, @expiresAt, NULL, @now)
+ON CONFLICT(project_id, id) DO UPDATE SET
+  asset_id = excluded.asset_id,
+  heroine_id = excluded.heroine_id,
+  expires_at = excluded.expires_at,
+  consumed_at = NULL
+`).run({
+      projectId: project.id,
+      id: input.id,
+      assetId: input.assetId,
+      heroineId: input.heroineId || null,
+      expiresAt: input.expiresAt,
+      now
+    });
+    const staged = this.getStagedPortrait(input.id);
+    if (!staged) {
+      throw new Error(`staged portrait 저장에 실패했습니다: ${input.id}`);
+    }
+    return staged;
+  }
+
+  getStagedPortrait(stagedPortraitId: string): StoredStagedPortrait | null {
+    const project = this.requireProject();
+    const row = this.db.prepare(`
+SELECT id, asset_id, heroine_id, expires_at, consumed_at, created_at
+FROM staged_portraits
+WHERE project_id = ? AND id = ?
+`).get(project.id, stagedPortraitId) as StagedPortraitRow | undefined;
+    return row ? stagedPortraitFromRow(row) : null;
+  }
+
+  consumeStagedPortrait(stagedPortraitId: string): boolean {
+    const project = this.requireProject();
+    const result = this.db.prepare(`
+UPDATE staged_portraits
+SET consumed_at = @now
+WHERE project_id = @projectId AND id = @id AND consumed_at IS NULL
+`).run({
+      projectId: project.id,
+      id: stagedPortraitId,
+      now: nowIso()
+    });
     return result.changes > 0;
   }
 
