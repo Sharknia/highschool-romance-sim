@@ -23,7 +23,7 @@ function RootRedirect() {
   }
 
   return status === "authenticated" || alphaSandboxEnabled
-    ? <Navigate to="/projects" replace />
+    ? <Navigate to="/heroines" replace />
     : <Navigate to="/login" replace />;
 }
 

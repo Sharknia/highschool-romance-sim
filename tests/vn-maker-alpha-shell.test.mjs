@@ -16,6 +16,7 @@ assert.match(
   /<Route path="\/" element={<RootRedirect \/?>} \/>/,
   "`/`는 전용 RootRedirect로 인증 상태에 따라 분기해야 합니다."
 );
+assert.match(appSource, /<Navigate to="\/heroines" replace \/>/, "`/` 인증 후 기본 화면은 히로인 관리여야 합니다.");
 ["/projects", "/heroines", "/settings"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 인증 앱 라우트가 있어야 합니다.`);
 });
@@ -45,30 +46,33 @@ const workspaceLayoutSource = readText(workspaceLayoutPath);
 assert.match(workspaceLayoutSource, /projectDirectory: string;/, "WorkspaceLayout은 현재 프로젝트 저장 위치를 전역 상태로 소유해야 합니다.");
 const navLabels = [...workspaceLayoutSource.matchAll(/label: "([^"]+)"/g)].map((match) => match[1]);
 const navPaths = [...workspaceLayoutSource.matchAll(/path: "([^"]+)"/g)].map((match) => match[1]);
-assert.deepEqual(navLabels, ["프로젝트 관리", "히로인 관리", "설정"], "인증 후 앱 네비게이션은 3개 항목만 보여야 합니다.");
-assert.deepEqual(navPaths, ["/projects", "/heroines", "/settings"], "인증 후 앱 네비게이션 path는 /projects, /heroines, /settings만 허용합니다.");
+assert.deepEqual(navLabels, ["히로인 관리", "프로젝트 관리", "설정"], "히로인 관리는 프로젝트 관리보다 먼저 보여야 합니다.");
+assert.deepEqual(navPaths, ["/heroines", "/projects", "/settings"], "인증 후 앱 네비게이션 path는 /heroines, /projects, /settings 순서여야 합니다.");
 assert.doesNotMatch(workspaceLayoutSource, /\/login/, "`/login`은 앱 네비게이션에 포함되면 안 됩니다.");
+assert.doesNotMatch(workspaceLayoutSource, /상태 갱신|로그아웃|refreshSession|logout/, "상단 상태 갱신/로그아웃 버튼은 앱 shell에서 제거해야 합니다.");
 
 const appShellSource = readText("apps/web/src/client/components/ui/AppShell.tsx");
-["projectTitle", "storageSummary", "validationStatus", "codexStatus"].forEach((propName) => {
-  assert.match(appShellSource, new RegExp(propName), `AppShell은 ${propName} 전역 상태를 받아야 합니다.`);
+["projectTitle", "storageSummary", "validationStatus", "codexStatus", "topbar-meta"].forEach((removedText) => {
+  assert.doesNotMatch(appShellSource, new RegExp(removedText), `AppShell 상단 상태바에서 ${removedText}는 제거되어야 합니다.`);
 });
-["프로젝트 없음", "저장 위치", "검증", "Codex ChatGPT OAuth"].forEach((label) => {
-  assert.match(appShellSource, new RegExp(label), `AppShell은 '${label}' 전역 상태를 표시해야 합니다.`);
+["저장 위치", "검증", "Codex ChatGPT OAuth"].forEach((label) => {
+  assert.doesNotMatch(appShellSource, new RegExp(label), `AppShell은 '${label}' 전역 상태를 표시하면 안 됩니다.`);
 });
 
 const notFoundSource = readText("apps/web/src/client/pages/NotFoundPage.tsx");
-assert.match(notFoundSource, /to="\/projects"/, "인증 후 Not Found 복귀 링크는 /projects여야 합니다.");
+assert.match(notFoundSource, /to="\/heroines"/, "인증 후 Not Found 복귀 링크는 /heroines여야 합니다.");
 
 [
   "apps/web/src/client/pages/ProjectStartPage.tsx",
-  "apps/web/src/client/pages/heroines/HeroineListPage.tsx",
-  "apps/web/src/client/pages/SettingsStartPage.tsx"
+  "apps/web/src/client/pages/heroines/HeroineListPage.tsx"
 ].forEach((pagePath) => {
   const pageSource = readText(pagePath);
   assert.match(pageSource, /page-primary-action/, `${pagePath}는 page-local primary action을 가져야 합니다.`);
   assert.match(pageSource, /page-status/, `${pagePath}는 page-local 상태 문장을 가져야 합니다.`);
 });
+const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
+assert.match(settingsStartSource, /page-status/, "SettingsStartPage는 page-local 상태 문장을 가져야 합니다.");
+assert.doesNotMatch(settingsStartSource, /상태 갱신|로그아웃|refreshSession/, "SettingsStartPage는 수동 상태 갱신/로그아웃 버튼을 노출하면 안 됩니다.");
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");
@@ -239,8 +243,8 @@ heroineComponentPaths.forEach((path) => {
   assert.ok(existsSync(join(root, path)), `${path} 파일이 있어야 합니다.`);
 });
 const heroineRouteSource = heroineComponentPaths.map((path) => readText(path)).join("\n");
-const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
 assert.doesNotMatch(heroineRouteSource, /setShellState/, "히로인 route는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
+assert.doesNotMatch(heroineRouteSource, /상태 갱신|onRefreshSession/, "히로인 화면은 수동 상태 갱신 버튼을 노출하면 안 됩니다.");
 [
   "/api/heroines/list",
   "/api/heroines/get",
@@ -255,24 +259,30 @@ assert.doesNotMatch(heroineRouteSource, /setShellState/, "히로인 route는 현
 assert.match(heroineRouteSource, /session/, "HeroinePortraitPanel은 Codex 연결 세션을 읽어야 합니다.");
 assert.match(heroineRouteSource, /capabilities/, "HeroinePortraitPanel은 Codex capability를 표시해야 합니다.");
 assert.match(heroineRouteSource, /imageGeneration/, "HeroinePortraitPanel은 imageGeneration 가능 여부를 표시해야 합니다.");
-assert.match(heroineRouteSource, /readOnly=\{mode === "edit"\}/, "저장된 히로인을 편집할 때 ID 필드는 읽기 전용이어야 합니다.");
-assert.match(heroineRouteSource, /suggestHeroineId/, "생성 화면은 이름 기반 ID 제안값을 제공해야 합니다.");
+assert.doesNotMatch(heroineRouteSource, /htmlFor="heroineId"|id="heroineId"|히로인 ID/, "히로인 ID는 생성/수정/상세 UI에서 노출하지 않아야 합니다.");
+assert.match(heroineRouteSource, /suggestUniqueHeroineId/, "생성 화면은 이름 기반 고유 ID를 자동 부여해야 합니다.");
 assert.match(heroineRouteSource, /reservedHeroineIds/, "신규 히로인 생성 시 예약어 ID는 저장 전에 차단해야 합니다.");
 assert.match(heroineRouteSource, /beforeunload/, "dirty draft 이탈 확인이 있어야 합니다.");
 assert.doesNotMatch(heroineRouteSource, /useBlocker/, "BrowserRouter route에서 data-router blocker를 쓰면 런타임 오류가 납니다.");
 assert.match(heroineRouteSource, /confirmHeroineName/, "삭제 dialog는 히로인 이름 확인 입력을 받아야 합니다.");
-assert.match(heroineRouteSource, /confirmHeroineId/, "삭제 dialog는 히로인 ID 확인 입력을 받아야 합니다.");
-assert.match(heroineRouteSource, /삭제 확인값을 입력해야 합니다/, "삭제 확인값이 맞기 전에는 삭제를 막아야 합니다.");
+assert.doesNotMatch(heroineRouteSource, /confirmHeroineId|삭제 확인 ID/, "삭제 dialog도 숨긴 히로인 ID 입력을 요구하면 안 됩니다.");
+assert.match(heroineRouteSource, /삭제 확인 이름을 입력해야 합니다/, "삭제 확인 이름이 맞기 전에는 삭제를 막아야 합니다.");
 assert.match(heroineRouteSource, /저장하지 않은 변경 사항이 있어 기본 포트레이트 생성 전에 저장해야 합니다/, "dirty edit 상태에서 포트레이트 생성으로 텍스트 변경을 잃으면 안 됩니다.");
-assert.match(heroineRouteSource, /setStagedPortraitRef\(undefined\)/, "생성 화면에서 히로인 ID가 바뀌면 staged portrait 참조를 해제해야 합니다.");
-assert.match(heroineRouteSource, /히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다/, "생성 화면은 staged portrait 참조 해제 상태를 알려야 합니다.");
+assert.match(heroineRouteSource, /setStagedPortraitRef\(undefined\)/, "생성 화면에서 저장용 식별자가 바뀌면 staged portrait 참조를 해제해야 합니다.");
+assert.match(heroineRouteSource, /저장용 식별자가 바뀌어 준비한 포트레이트 연결을 해제했습니다/, "생성 화면은 staged portrait 참조 해제 상태를 알려야 합니다.");
 assert.match(heroineRouteSource, /const requestDraft = draftRef\.current/, "포트레이트 생성은 요청 시작 시점의 draft ID를 보관해야 합니다.");
 assert.match(heroineRouteSource, /currentDraft\.id !== requestDraft\.id/, "포트레이트 생성 완료 시 현재 draft ID가 달라졌으면 staged ref를 붙이면 안 됩니다.");
 assert.match(heroineRouteSource, /refreshedDeleteTarget/, "삭제 conflict reload는 dialog의 deleteTarget도 최신 revision으로 교체해야 합니다.");
 assert.match(heroineRouteSource, /heroine-action-bar/, "생성/수정 화면은 sticky action bar를 가져야 합니다.");
+assert.match(heroineRouteSource, /onSaveAndExit/, "수정 화면은 취소/저장/저장 후 상세보기 3단 액션을 제공해야 합니다.");
+assert.match(heroineRouteSource, /field-row-invalid/, "미입력 필드는 red border 상태로 표시해야 합니다.");
+assert.doesNotMatch(heroineRouteSource, /MoreVertical/, "히로인 리스트 삭제 버튼은 더보기 아이콘 없이 휴지통만 보여야 합니다.");
 assert.match(heroineRouteSource, /HEROINE_REVISION_CONFLICT/, "revision 충돌은 별도 코드로 처리해야 합니다.");
 assert.doesNotMatch(heroineRouteSource, /generatedAssetPreviewUri/, "기본 포트레이트 프리뷰는 존재 여부를 모르는 경로를 추정 렌더링하면 안 됩니다.");
 assert.doesNotMatch(heroineRouteSource, /API key|API 키/, "API key 흐름을 Codex OAuth 로그인처럼 표현하면 안 됩니다.");
+const sharedListSource = readText("apps/web/src/client/components/ui/ContentList.tsx");
+assert.match(heroineRouteSource, /ContentList/, "히로인 리스트는 공통 리스트 컴포넌트를 사용해야 합니다.");
+assert.match(sharedListSource, /content-list-item/, "공통 리스트 컴포넌트는 동일한 row UI class를 소유해야 합니다.");
 [
   "아직 히로인이 없습니다.",
   "히로인 목록을 불러오는 중입니다.",
@@ -286,7 +296,6 @@ assert.doesNotMatch(heroineRouteSource, /API key|API 키/, "API key 흐름을 Co
   "필수값을 모두 입력해야 저장할 수 있습니다.",
   "변경된 내용이 없습니다.",
   "변경됨",
-  "히로인 ID",
   "말투",
   "외형 설명",
   "Codex 연결",

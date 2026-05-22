@@ -15,8 +15,20 @@ function statusTone(state: HeroineLoadState): "neutral" | "waiting" | "success" 
   return "neutral";
 }
 
+function editableCreateSnapshot(draft: HeroineDraft): string {
+  return JSON.stringify({
+    name: draft.name,
+    description: draft.description,
+    personality: draft.personality,
+    speechStyle: draft.speechStyle,
+    appearance: draft.appearance,
+    defaultPortraitAssetId: draft.defaultPortraitAssetId,
+    defaultPortraitUri: draft.defaultPortraitUri
+  });
+}
+
 export function HeroineCreatePage() {
-  const { postAuthedJson, refreshSession, session } = useAuth();
+  const { postAuthedJson, session } = useAuth();
   const navigate = useNavigate();
   const allowNavigationRef = useRef(false);
   const [state, setState] = useState<HeroineLoadState>("ready");
@@ -26,14 +38,14 @@ export function HeroineCreatePage() {
   const [existingIds, setExistingIds] = useState<string[]>([]);
   const [stagedPortraitRef, setStagedPortraitRef] = useState<HeroineLibraryResult["stagedPortraitRef"]>();
   const emptyDraft = useMemo(() => createEmptyHeroineDraft(), []);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(emptyDraft);
+  const dirty = editableCreateSnapshot(draft) !== editableCreateSnapshot(emptyDraft);
   const validationIssues = validateHeroineDraft(draft, "create");
   const idConflict = Boolean(draft.id.trim() && existingIds.includes(draft.id.trim()));
-  const allIssues = idConflict ? [...validationIssues, "이미 같은 히로인 ID가 있습니다."] : validationIssues;
+  const allIssues = idConflict ? [...validationIssues, "이미 같은 자동 식별자가 있습니다."] : validationIssues;
   const canSave = allIssues.length === 0 && !state.includes("saving");
   const actionSummary = allIssues.length > 0
     ? `필수값을 모두 입력해야 저장할 수 있습니다. ${allIssues.join(" ")}`
-    : "저장하려면 이름, 설명, 성격, 말투, 외형 설명을 입력해야 합니다. ID는 이름으로 자동 제안됩니다.";
+    : "저장하려면 이름, 설명, 성격, 말투, 외형 설명을 입력해야 합니다. 저장용 식별자는 자동 생성됩니다.";
 
   useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 히로인 draft가 있습니다. 페이지를 떠나시겠습니까?");
 
@@ -60,7 +72,7 @@ export function HeroineCreatePage() {
         portraitAssetUris: []
       };
       setStagedPortraitRef(undefined);
-      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      setStatus("저장용 식별자가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
       draftRef.current = clearedDraft;
       setDraft(clearedDraft);
       return;
@@ -100,7 +112,7 @@ export function HeroineCreatePage() {
     if (currentDraft.id !== requestDraft.id) {
       setStagedPortraitRef(undefined);
       setState("ready");
-      setStatus("히로인 ID가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
+      setStatus("저장용 식별자가 바뀌어 준비한 포트레이트 연결을 해제했습니다.");
       return;
     }
     const nextDraft = {
@@ -142,13 +154,12 @@ export function HeroineCreatePage() {
 
       <section className="heroine-editor-layout">
         <article className="page-panel heroine-editor-main">
-          <HeroineFormPanel draft={draft} mode="create" onChange={updateDraft} />
+          <HeroineFormPanel draft={draft} existingIds={existingIds} mode="create" onChange={updateDraft} />
         </article>
         <HeroinePortraitPanel
           busy={state === "saving"}
           heroine={draft}
           onGenerate={() => void generatePortrait()}
-          onRefreshSession={() => void refreshSession()}
           session={session}
         />
       </section>

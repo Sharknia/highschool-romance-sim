@@ -1,4 +1,4 @@
-import { ImagePlus, RefreshCw, Settings } from "lucide-react";
+import { ImagePlus, Settings } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { CodexSessionResult } from "../../api/types";
 import { Button } from "../../components/ui";
@@ -8,11 +8,10 @@ interface HeroinePortraitPanelProps {
   busy: boolean;
   heroine: HeroineDraft;
   onGenerate: () => void;
-  onRefreshSession: () => void;
   session: CodexSessionResult | null;
 }
 
-export function HeroinePortraitPanel({ busy, heroine, onGenerate, onRefreshSession, session }: HeroinePortraitPanelProps) {
+export function HeroinePortraitPanel({ busy, heroine, onGenerate, session }: HeroinePortraitPanelProps) {
   const imageGenerationAvailable = Boolean(session?.connected && (session.capabilities?.imageGeneration ?? true));
   const previewUri = heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0] || "";
   const codexText = !session
@@ -47,9 +46,6 @@ export function HeroinePortraitPanel({ busy, heroine, onGenerate, onRefreshSessi
       )}
       <p className="page-muted">이미지 생성을 사용할 수 없어도 기본 정보는 저장할 수 있습니다. 포트레이트는 나중에 추가할 수 있습니다.</p>
       <div className="panel-actions">
-        <Button disabled={busy} icon={<RefreshCw size={16} />} onClick={onRefreshSession}>
-          상태 갱신
-        </Button>
         {imageGenerationAvailable ? (
           <Button disabled={busy} icon={<ImagePlus size={16} />} onClick={onGenerate} variant="primary">
             기본 포트레이트 생성

@@ -1,12 +1,11 @@
-import { FolderKanban, Heart, LogOut, RefreshCw, Settings } from "lucide-react";
+import { FolderKanban, Heart, Settings } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { describeSession, useAuth } from "../auth/AuthProvider";
-import { AppShell, Button } from "./ui";
+import { AppShell } from "./ui";
 
 export const workspaceNavigation = [
-  { label: "프로젝트 관리", path: "/projects", icon: FolderKanban },
   { label: "히로인 관리", path: "/heroines", icon: Heart },
+  { label: "프로젝트 관리", path: "/projects", icon: FolderKanban },
   { label: "설정", path: "/settings", icon: Settings }
 ];
 
@@ -38,7 +37,6 @@ function summarizeDirectory(projectDirectory?: string): string {
 }
 
 export function WorkspaceLayout() {
-  const { logout, refreshSession, session } = useAuth();
   const [shellState, setShellStateValue] = useState<WorkspaceShellState>(defaultShellState);
   const setShellState = useCallback((state: Partial<WorkspaceShellState>) => {
     setShellStateValue((current) => {
@@ -57,18 +55,7 @@ export function WorkspaceLayout() {
 
   return (
     <WorkspaceShellContext.Provider value={contextValue}>
-      <AppShell
-        codexStatus={describeSession(session)}
-        projectTitle={shellState.projectTitle}
-        storageSummary={summarizeDirectory(shellState.projectDirectory)}
-        validationStatus={shellState.validationStatus}
-        actions={(
-          <>
-            <Button icon={<RefreshCw size={16} />} onClick={() => void refreshSession()} variant="ghost">상태 갱신</Button>
-            <Button icon={<LogOut size={16} />} onClick={() => void logout()} variant="secondary">로그아웃</Button>
-          </>
-        )}
-      >
+      <AppShell>
         <div className="workspace-layout">
           <nav className="workspace-nav" aria-label="앱 네비게이션">
             {workspaceNavigation.map((item) => (

@@ -79,12 +79,6 @@ export function HeroineDetailPage() {
           <h1 id="heroineDetailTitle">{heroine?.name || "히로인 상세"}</h1>
           <p>이 화면은 라이브러리 원본 히로인을 확인합니다.</p>
         </div>
-        <div className="page-primary-action">
-          <span>이미 만든 프로젝트에 복사된 히로인 스냅샷은 자동으로 바뀌지 않습니다.</span>
-          <Button icon={<Edit3 size={18} />} onClick={() => navigate(`/heroines/${encodeURIComponent(heroineId)}/edit`)} variant="primary">
-            수정
-          </Button>
-        </div>
       </header>
 
       <StatusBanner tone={statusTone(state)}>
@@ -113,7 +107,6 @@ export function HeroineDetailPage() {
             <h2>원본 정보</h2>
             <dl className="summary-list detail-summary">
               <div><dt>이름</dt><dd>{heroine.name}</dd></div>
-              <div><dt>히로인 ID</dt><dd>{heroine.id}</dd></div>
               <div><dt>설명</dt><dd>{heroine.description}</dd></div>
               <div><dt>성격</dt><dd>{heroine.personality}</dd></div>
               <div><dt>말투</dt><dd>{heroine.speechStyle}</dd></div>

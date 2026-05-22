@@ -28,7 +28,7 @@ function editableSnapshot(draft: HeroineDraft): string {
 }
 
 export function HeroineEditPage() {
-  const { postAuthedJson, refreshSession, session } = useAuth();
+  const { postAuthedJson, session } = useAuth();
   const navigate = useNavigate();
   const { heroineId = "" } = useParams<{ heroineId: string }>();
   const allowNavigationRef = useRef(false);
@@ -73,7 +73,7 @@ export function HeroineEditPage() {
 
   useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 변경 사항이 있습니다. 페이지를 떠나시겠습니까?");
 
-  async function save(): Promise<void> {
+  async function save(navigateAfterSave = false): Promise<void> {
     if (!canSave) {
       setStatus(actionSummary);
       return;
@@ -86,8 +86,19 @@ export function HeroineEditPage() {
       setStatus(`히로인 저장 실패: ${failureText(result, "입력값을 확인해 주세요.")}`);
       return;
     }
-    allowNavigationRef.current = true;
-    navigate(`/heroines/${encodeURIComponent(result.heroine?.id || draft.id)}`);
+    const nextDraft = {
+      ...result.heroine!,
+      heroineRevision: result.heroineRevision
+    };
+    setDraft(nextDraft);
+    setOriginal(nextDraft);
+    setRevision(result.heroineRevision);
+    setState("ready");
+    setStatus(navigateAfterSave ? "히로인을 저장했습니다. 상세보기로 이동합니다." : "히로인을 저장했습니다.");
+    if (navigateAfterSave) {
+      allowNavigationRef.current = true;
+      navigate(`/heroines/${encodeURIComponent(result.heroine?.id || draft.id)}`);
+    }
   }
 
   async function generatePortrait(): Promise<void> {
@@ -133,10 +144,6 @@ export function HeroineEditPage() {
           <h1 id="heroineEditTitle">히로인 수정</h1>
           <p>원본 히로인을 수정해도 기존 프로젝트 스냅샷은 자동 갱신하지 않습니다.</p>
         </div>
-        <div className="page-primary-action">
-          <span>수정 취소 또는 저장 성공 후에는 상세보기로 이동합니다.</span>
-          <Button icon={<ArrowLeft size={16} />} onClick={cancel}>상세보기로 돌아가기</Button>
-        </div>
       </header>
 
       <StatusBanner tone={statusTone(state)}>
@@ -168,7 +175,6 @@ export function HeroineEditPage() {
               busy={state === "saving"}
               heroine={draft}
               onGenerate={() => void generatePortrait()}
-              onRefreshSession={() => void refreshSession()}
               session={session}
             />
           </section>
@@ -180,6 +186,7 @@ export function HeroineEditPage() {
             onCancel={cancel}
             onReload={() => void load()}
             onSave={() => void save()}
+            onSaveAndExit={() => void save(true)}
             saving={state === "saving"}
             summary={actionSummary}
           />
