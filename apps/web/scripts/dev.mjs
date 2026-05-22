@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { resolveWebDevServerConfig } from "./dev-server-config.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const isWindows = process.platform === "win32";
@@ -64,11 +65,13 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+const devServerConfig = resolveWebDevServerConfig(process.env);
+
 await run(npmCommand, ["run", "build:server"]);
 start(process.execPath, ["dist/server/server.js"], {
   env: {
-    PORT: process.env.PORT || "5174",
+    PORT: devServerConfig.apiPort,
     VN_MAKER_API_ONLY: "1"
   }
 });
-start(viteCommand, ["--host", "127.0.0.1", "--port", process.env.VITE_PORT || "5173"]);
+start(viteCommand, ["--host", "127.0.0.1", "--port", devServerConfig.vitePort]);
