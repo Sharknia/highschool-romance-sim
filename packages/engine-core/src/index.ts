@@ -65,7 +65,7 @@ export const DEFAULT_HEROINE_PORTRAIT_STYLE = "soft, polished romance visual nov
 export function createHeroinePortraitPrompt(heroine: Pick<HeroineProfile, "name" | "appearance">): string {
   const name = heroine.name.trim();
   const appearance = heroine.appearance.trim() || "visual novel heroine";
-  return `${name}, ${appearance}, full-body standing visual novel heroine character sprite, head-to-toe framing, transparent background, clean anime style, teen safe`;
+  return `${name}, ${appearance}, full-body standing visual novel heroine character sprite, entire body visible from head to shoes, feet fully visible, centered with margin, transparent background, clean anime style, teen safe, not a close-up, not bust-up, not waist-up, not cropped, no body parts out of frame`;
 }
 
 export interface VnMakerCharacter {
