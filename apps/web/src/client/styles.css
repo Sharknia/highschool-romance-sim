@@ -1757,12 +1757,6 @@ pre {
   box-shadow: 0 0 0 1px rgba(214, 107, 95, 0.28);
 }
 
-.field-error {
-  color: #ffd7d2;
-  font-size: 0.86rem;
-  line-height: 1.35;
-}
-
 .heroine-action-bar {
   position: sticky;
   z-index: 10;

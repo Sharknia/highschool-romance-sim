@@ -142,7 +142,7 @@ export function HeroineListPage() {
               ),
               title: heroine.name,
               description: heroine.summary || heroine.description,
-              meta: `${heroine.portraitStatus || "missing"} · ${formatUpdatedAt(heroine.updatedAt)}`,
+              meta: formatUpdatedAt(heroine.updatedAt),
               onSelect: () => navigate(`/heroines/${encodeURIComponent(heroine.id)}`),
               actions: (
                 <button

@@ -1,12 +1,9 @@
-import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, StatusBanner } from "../../components/ui";
 import { failureText, generateHeroinePortrait, getHeroine, updateHeroine } from "./heroineApi";
-import { HeroineActionBar } from "./HeroineActionBar";
-import { createEmptyHeroineDraft, HeroineFormPanel, validateHeroineDraft } from "./HeroineFormPanel";
-import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
+import { HeroineEditorScreen } from "./HeroineEditorScreen";
+import { createEmptyHeroineDraft, validateHeroineDraft } from "./HeroineFormPanel";
 import { useUnsavedHeroineNavigationGuard } from "./useUnsavedHeroineNavigationGuard";
 import type { HeroineDraft, HeroineLoadState, HeroineRevisionRef } from "./heroinePageTypes";
 
@@ -137,61 +134,31 @@ export function HeroineEditPage() {
   }
 
   return (
-    <section className="app-page heroine-page" aria-labelledby="heroineEditTitle">
-      <header className="page-hero">
-        <div>
-          <p className="eyebrow">Edit Heroine</p>
-          <h1 id="heroineEditTitle">히로인 수정</h1>
-          <p>원본 히로인을 수정해도 기존 프로젝트 스냅샷은 자동 갱신하지 않습니다.</p>
-        </div>
-      </header>
-
-      <StatusBanner tone={statusTone(state)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
-
-      {state === "notFound" ? (
-        <section className="page-panel">
-          <h2>히로인을 찾을 수 없습니다.</h2>
-          <Button icon={<ArrowLeft size={16} />} onClick={() => navigate("/heroines")}>
-            목록으로 돌아가기
-          </Button>
-        </section>
-      ) : null}
-
-      {state === "error" ? (
-        <div className="panel-actions">
-          <Button icon={<RefreshCw size={16} />} onClick={() => void load()}>다시 시도</Button>
-        </div>
-      ) : null}
-
-      {state !== "loading" && state !== "notFound" && state !== "error" ? (
-        <>
-          <section className="heroine-editor-layout">
-            <article className="page-panel heroine-editor-main">
-              <HeroineFormPanel draft={draft} mode="edit" onChange={setDraft} />
-            </article>
-            <HeroinePortraitPanel
-              busy={state === "saving"}
-              heroine={draft}
-              onGenerate={() => void generatePortrait()}
-              session={session}
-            />
-          </section>
-
-          <HeroineActionBar
-            canSave={canSave}
-            conflict={state === "conflict"}
-            dirty={dirty}
-            onCancel={cancel}
-            onReload={() => void load()}
-            onSave={() => void save()}
-            onSaveAndExit={() => void save(true)}
-            saving={state === "saving"}
-            summary={actionSummary}
-          />
-        </>
-      ) : null}
-    </section>
+    <HeroineEditorScreen
+      canSave={canSave}
+      conflict={state === "conflict"}
+      description="원본 히로인을 수정해도 기존 프로젝트 스냅샷은 자동 갱신하지 않습니다."
+      dirty={dirty}
+      draft={draft}
+      error={state === "error"}
+      eyebrow="Edit Heroine"
+      mode="edit"
+      notFound={state === "notFound"}
+      onBackToList={() => navigate("/heroines")}
+      onCancel={cancel}
+      onChange={setDraft}
+      onGeneratePortrait={() => void generatePortrait()}
+      onReload={() => void load()}
+      onRetry={() => void load()}
+      onSave={() => void save()}
+      onSaveAndExit={() => void save(true)}
+      saving={state === "saving"}
+      session={session}
+      status={status}
+      statusTone={statusTone(state)}
+      summary={actionSummary}
+      title="히로인 수정"
+      titleId="heroineEditTitle"
+    />
   );
 }

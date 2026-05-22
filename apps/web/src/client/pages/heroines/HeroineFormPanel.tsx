@@ -78,11 +78,7 @@ function isRequiredEmpty(draft: HeroineDraft, field: keyof HeroineDraft): boolea
 }
 
 function requiredClassName(draft: HeroineDraft, field: keyof HeroineDraft, mode: "create" | "edit"): string {
-  return mode === "edit" && isRequiredEmpty(draft, field) ? "field-row field-row-invalid" : "field-row";
-}
-
-function missingText(draft: HeroineDraft, field: keyof HeroineDraft, mode: "create" | "edit") {
-  return mode === "edit" && isRequiredEmpty(draft, field) ? <span className="field-error">미입력</span> : null;
+  return (mode === "create" || mode === "edit") && isRequiredEmpty(draft, field) ? "field-row field-row-invalid" : "field-row";
 }
 
 export function HeroineFormPanel({ draft, existingIds = [], mode, onChange }: HeroineFormPanelProps) {
@@ -103,29 +99,24 @@ export function HeroineFormPanel({ draft, existingIds = [], mode, onChange }: He
       <div className={requiredClassName(draft, "name", mode)}>
         <label htmlFor="heroineName">이름</label>
         <input aria-invalid={isRequiredEmpty(draft, "name")} id="heroineName" onChange={(event) => update("name", event.target.value)} value={draft.name} />
-        {missingText(draft, "name", mode)}
       </div>
       <div className={requiredClassName(draft, "description", mode)}>
         <label htmlFor="heroineDescription">설명</label>
         <textarea aria-invalid={isRequiredEmpty(draft, "description")} id="heroineDescription" onChange={(event) => update("description", event.target.value)} value={draft.description} />
-        {missingText(draft, "description", mode)}
       </div>
       <div className="heroine-form-grid">
         <label className={requiredClassName(draft, "personality", mode)} htmlFor="heroinePersonality">
           <span>성격</span>
           <textarea aria-invalid={isRequiredEmpty(draft, "personality")} id="heroinePersonality" onChange={(event) => update("personality", event.target.value)} value={draft.personality} />
-          {missingText(draft, "personality", mode)}
         </label>
         <label className={requiredClassName(draft, "speechStyle", mode)} htmlFor="heroineSpeechStyle">
           <span>말투</span>
           <textarea aria-invalid={isRequiredEmpty(draft, "speechStyle")} id="heroineSpeechStyle" onChange={(event) => update("speechStyle", event.target.value)} value={draft.speechStyle} />
-          {missingText(draft, "speechStyle", mode)}
         </label>
       </div>
       <div className={requiredClassName(draft, "appearance", mode)}>
         <label htmlFor="heroineAppearance">외형 설명</label>
         <textarea aria-invalid={isRequiredEmpty(draft, "appearance")} id="heroineAppearance" onChange={(event) => update("appearance", event.target.value)} value={draft.appearance} />
-        {missingText(draft, "appearance", mode)}
       </div>
     </section>
   );
