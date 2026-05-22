@@ -4,12 +4,15 @@ import { NavLink, Outlet } from "react-router-dom";
 import { describeSession, useAuth } from "../auth/AuthProvider";
 import { AppShell, Button } from "./ui";
 
-export const workspaceNavigationLabels = ["프로젝트 관리", "히로인 관리", "설정"];
-export const workspaceNavigationPaths = ["/projects", "/heroines", "/settings"];
+export const workspaceNavigation = [
+  { label: "프로젝트 관리", path: "/projects", icon: FolderKanban },
+  { label: "히로인 관리", path: "/heroines", icon: Heart },
+  { label: "설정", path: "/settings", icon: Settings }
+];
 
 interface WorkspaceShellState {
+  projectDirectory: string;
   projectTitle: string;
-  storageSummary: string;
   validationStatus: string;
 }
 
@@ -19,22 +22,16 @@ interface WorkspaceShellContextValue {
 }
 
 const defaultShellState: WorkspaceShellState = {
+  projectDirectory: "",
   projectTitle: "프로젝트 없음",
-  storageSummary: "저장 위치 미연결",
   validationStatus: "검증 미실행"
 };
 
 const WorkspaceShellContext = createContext<WorkspaceShellContextValue | null>(null);
 
-const workspaceNavigation = [
-  { label: workspaceNavigationLabels[0], path: workspaceNavigationPaths[0], icon: <FolderKanban size={18} /> },
-  { label: workspaceNavigationLabels[1], path: workspaceNavigationPaths[1], icon: <Heart size={18} /> },
-  { label: workspaceNavigationLabels[2], path: workspaceNavigationPaths[2], icon: <Settings size={18} /> }
-];
-
 function summarizeDirectory(projectDirectory?: string): string {
   if (!projectDirectory) {
-    return defaultShellState.storageSummary;
+    return "저장 위치 미연결";
   }
   const parts = projectDirectory.split(/[\\/]/).filter(Boolean);
   return parts.length > 2 ? `.../${parts.slice(-2).join("/")}` : projectDirectory;
@@ -46,8 +43,8 @@ export function WorkspaceLayout() {
   const setShellState = useCallback((state: Partial<WorkspaceShellState>) => {
     setShellStateValue((current) => {
       const next = { ...current, ...state };
-      return current.projectTitle === next.projectTitle
-        && current.storageSummary === next.storageSummary
+      return current.projectDirectory === next.projectDirectory
+        && current.projectTitle === next.projectTitle
         && current.validationStatus === next.validationStatus
         ? current
         : next;
@@ -63,7 +60,7 @@ export function WorkspaceLayout() {
       <AppShell
         codexStatus={describeSession(session)}
         projectTitle={shellState.projectTitle}
-        storageSummary={shellState.storageSummary}
+        storageSummary={summarizeDirectory(shellState.projectDirectory)}
         validationStatus={shellState.validationStatus}
         actions={(
           <>
@@ -76,7 +73,7 @@ export function WorkspaceLayout() {
           <nav className="workspace-nav" aria-label="앱 네비게이션">
             {workspaceNavigation.map((item) => (
               <NavLink className={({ isActive }) => isActive ? "workspace-nav-item active" : "workspace-nav-item"} key={item.path} to={item.path}>
-                <span aria-hidden="true">{item.icon}</span>
+                <span aria-hidden="true"><item.icon size={18} /></span>
                 <span>{item.label}</span>
               </NavLink>
             ))}

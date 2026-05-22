@@ -1,24 +1,14 @@
 import { Heart, ImagePlus, Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ApiResult } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, StatusBanner } from "../components/ui";
-import { useWorkspaceShell } from "../components/WorkspaceLayout";
 
 export function HeroineStartPage() {
   const { postAuthedJson } = useAuth();
-  const { setShellState } = useWorkspaceShell();
   const [heroineName, setHeroineName] = useState("하루");
   const [status, setStatus] = useState("히로인 라이브러리 시작점입니다.");
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setShellState({
-      projectTitle: "프로젝트 없음",
-      storageSummary: "히로인 라이브러리",
-      validationStatus: "검증 미실행"
-    });
-  }, [setShellState]);
 
   async function saveStarterHeroine(): Promise<void> {
     setBusy(true);

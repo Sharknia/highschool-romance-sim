@@ -1,5 +1,5 @@
 import { CheckCircle2, Database, FolderOpen, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ApiResult } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, StatusBanner } from "../components/ui";
@@ -13,19 +13,10 @@ const starterProject = {
 
 export function ProjectStartPage() {
   const { postAuthedJson } = useAuth();
-  const { setShellState, summarizeDirectory } = useWorkspaceShell();
-  const [projectDirectory, setProjectDirectory] = useState("");
+  const { setShellState, shellState, summarizeDirectory } = useWorkspaceShell();
+  const [projectDirectoryInput, setProjectDirectoryInput] = useState(shellState.projectDirectory);
   const [status, setStatus] = useState("열린 프로젝트가 없습니다.");
-  const [projectTitle, setProjectTitle] = useState("프로젝트 없음");
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setShellState({
-      projectTitle,
-      storageSummary: summarizeDirectory(projectDirectory),
-      validationStatus: projectTitle === "프로젝트 없음" ? "검증 미실행" : "검증 대기"
-    });
-  }, [projectDirectory, projectTitle, setShellState, summarizeDirectory]);
 
   async function runProjectAction(label: string, action: () => Promise<ApiResult>): Promise<void> {
     setBusy(true);
@@ -36,9 +27,13 @@ export function ProjectStartPage() {
         throw new Error(result.error || `${label} 요청이 실패했습니다.`);
       }
       const nextProject = result.project as { title?: string } | undefined;
-      const nextDirectory = typeof result.projectDirectory === "string" ? result.projectDirectory : projectDirectory;
-      setProjectDirectory(nextDirectory);
-      setProjectTitle(nextProject?.title || projectTitle);
+      const nextDirectory = typeof result.projectDirectory === "string" ? result.projectDirectory : projectDirectoryInput;
+      setProjectDirectoryInput(nextDirectory);
+      setShellState({
+        projectDirectory: nextDirectory,
+        projectTitle: nextProject?.title || shellState.projectTitle,
+        validationStatus: "검증 대기"
+      });
       setStatus(`${label} 완료`);
     } catch (error) {
       setStatus(`${label} 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -58,7 +53,7 @@ export function ProjectStartPage() {
         <div className="page-primary-action">
           <span>첫 제작 기준 프로젝트가 필요합니다.</span>
           <Button disabled={busy} icon={<Sparkles size={18} />} onClick={() => void runProjectAction("샘플 프로젝트 생성", () => postAuthedJson<ApiResult>("/api/project/starter", {
-            projectDirectory: projectDirectory || undefined,
+            projectDirectory: projectDirectoryInput || undefined,
             starter: starterProject
           }))} variant="primary">
             샘플 프로젝트 생성
@@ -76,10 +71,10 @@ export function ProjectStartPage() {
           <h2>저장 위치</h2>
           <label className="field-row">
             <span>프로젝트 디렉터리</span>
-            <input aria-label="프로젝트 디렉터리" onChange={(event) => setProjectDirectory(event.target.value)} placeholder="기본 작업공간 사용" value={projectDirectory} />
+            <input aria-label="프로젝트 디렉터리" onChange={(event) => setProjectDirectoryInput(event.target.value)} placeholder="기본 작업공간 사용" value={projectDirectoryInput} />
           </label>
           <Button disabled={busy} icon={<FolderOpen size={16} />} onClick={() => void runProjectAction("프로젝트 열기", () => postAuthedJson<ApiResult>("/api/project/open", {
-            projectDirectory: projectDirectory || undefined
+            projectDirectory: projectDirectoryInput || undefined
           }))}>
             프로젝트 열기
           </Button>
@@ -88,9 +83,9 @@ export function ProjectStartPage() {
           <div className="page-panel-icon"><CheckCircle2 size={18} /></div>
           <h2>현재 상태</h2>
           <dl className="summary-list">
-            <div><dt>프로젝트</dt><dd>{projectTitle}</dd></div>
-            <div><dt>저장 위치</dt><dd>{summarizeDirectory(projectDirectory)}</dd></div>
-            <div><dt>검증</dt><dd>{projectTitle === "프로젝트 없음" ? "검증 미실행" : "검증 대기"}</dd></div>
+            <div><dt>프로젝트</dt><dd>{shellState.projectTitle}</dd></div>
+            <div><dt>저장 위치</dt><dd>{summarizeDirectory(shellState.projectDirectory)}</dd></div>
+            <div><dt>검증</dt><dd>{shellState.validationStatus}</dd></div>
           </dl>
         </article>
       </section>
