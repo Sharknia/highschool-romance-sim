@@ -2,6 +2,7 @@ import { CheckCircle2, Heart, ImagePlus, Plus, RefreshCw, Save, Trash2 } from "l
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import type { ImageGenerationResult } from "../api/types";
 import { Button, StatusBanner } from "../components/ui";
 import type { HeroineDraft, HeroineLibraryResult, HeroineListState } from "./heroines/heroinePageTypes";
 
@@ -73,8 +74,12 @@ function heroineListMessage(listState: HeroineListState): string {
   return "히로인을 선택하거나 새로 만드세요.";
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
 export function HeroineStartPage() {
-  const { postAuthedJson } = useAuth();
+  const { postAuthedJson, refreshSession, session } = useAuth();
   const navigate = useNavigate();
   const { heroineId } = useParams<{ heroineId?: string }>();
   const [listState, setListState] = useState<HeroineListState>("loading");
@@ -84,16 +89,28 @@ export function HeroineStartPage() {
   const [draft, setDraft] = useState<HeroineDraft>(emptyDraft);
   const [selectedHeroineId, setSelectedHeroineId] = useState("");
   const [projectDirectory, setProjectDirectory] = useState("");
+  const [portraitPreviewUri, setPortraitPreviewUri] = useState("");
 
   const missingRequiredLabels = useMemo(() => requiredFields
     .filter(({ field }) => !String(draft[field] || "").trim())
     .map(({ label }) => label), [draft]);
-  const canSave = missingRequiredLabels.length === 0 && !busy;
+  const profileComplete = missingRequiredLabels.length === 0;
+  const canSave = profileComplete && !busy;
   const saveBlockedReason = missingRequiredLabels.length > 0
     ? `필수값을 모두 입력해야 저장할 수 있습니다. 빠진 항목: ${missingRequiredLabels.join(", ")}`
     : "필수값이 모두 입력되었습니다.";
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || null;
   const hasSavedSelection = Boolean(selectedHeroine);
+  const imageGenerationAvailable = Boolean(session?.connected && (session.capabilities?.imageGeneration ?? true));
+  const codexConnectionText = !session
+    ? "Codex 연결 확인 중"
+    : session.connected
+      ? `Codex 연결됨${session.account?.email ? ` · ${session.account.email}` : ""}`
+      : session.error || "Codex 연결 필요";
+  const imageGenerationText = imageGenerationAvailable
+    ? "imageGeneration 가능"
+    : "생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.";
+  const canGeneratePortrait = profileComplete && imageGenerationAvailable && !busy;
 
   function applyHeroineList(result: HeroineLibraryResult, preferredHeroineId?: string): void {
     const nextHeroines = Array.isArray(result.heroines) ? result.heroines : [];
@@ -105,6 +122,7 @@ export function HeroineStartPage() {
     setListState(nextHeroines.length > 0 ? "ready" : "empty");
     setSelectedHeroineId(nextSelected?.id || "");
     setDraft(nextSelected ? cloneDraft(nextSelected) : createNewDraft());
+    setPortraitPreviewUri("");
     setStatus(nextHeroines.length > 0 ? "히로인을 선택하거나 새로 만드세요." : "아직 히로인이 없습니다.");
   }
 
@@ -140,6 +158,7 @@ export function HeroineStartPage() {
     const nextDraft = createNewDraft();
     setDraft(nextDraft);
     setSelectedHeroineId("");
+    setPortraitPreviewUri("");
     setStatus("새 히로인 기본 설정을 입력하세요.");
     navigate("/heroines");
   }
@@ -147,6 +166,7 @@ export function HeroineStartPage() {
   function selectHeroine(heroine: HeroineDraft): void {
     setDraft(cloneDraft(heroine));
     setSelectedHeroineId(heroine.id);
+    setPortraitPreviewUri("");
     setStatus(`${heroine.name} 기본 정보를 편집할 수 있습니다.`);
     navigate(`/heroines/${encodeURIComponent(heroine.id)}`);
   }
@@ -173,6 +193,62 @@ export function HeroineStartPage() {
       navigate(`/heroines/${encodeURIComponent(savedHeroine.id)}`);
     } catch (error) {
       setStatus(`히로인 저장 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshCodexStatus(): Promise<void> {
+    setStatus("Codex 연결 상태 확인 중");
+    const nextSession = await refreshSession();
+    setStatus(nextSession.connected ? "Codex 연결 상태 확인 완료" : nextSession.error || "Codex 연결 필요");
+  }
+
+  async function generateDefaultPortrait(): Promise<void> {
+    if (!profileComplete) {
+      setStatus(saveBlockedReason);
+      return;
+    }
+    if (!imageGenerationAvailable) {
+      setStatus("생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.");
+      return;
+    }
+    setBusy(true);
+    setStatus("기본 포트레이트 생성 중");
+    try {
+      const result = await postAuthedJson<ImageGenerationResult>("/api/generation/images", {
+        projectDirectory: projectDirectory || undefined,
+        kind: "portrait",
+        heroine: draft
+      });
+      if (result.ok === false) {
+        setStatus(`기본 포트레이트 생성 실패: ${result.error || "다시 시도해 주세요."}`);
+        return;
+      }
+      const generatedAssetId = result.asset?.id
+        || result.job?.outputAssetId
+        || draft.defaultPortraitAssetId
+        || `asset-${draft.id}-portrait`;
+      const nextDraft: HeroineDraft = {
+        ...draft,
+        defaultPortraitAssetId: generatedAssetId,
+        portraitAssetIds: uniqueStrings([generatedAssetId, ...(draft.portraitAssetIds || [])])
+      };
+      const saveResult = await postAuthedJson<HeroineLibraryResult>("/api/heroines/save", {
+        projectDirectory: result.projectDirectory || projectDirectory || undefined,
+        heroine: nextDraft
+      });
+      if (saveResult.ok === false) {
+        setDraft(nextDraft);
+        setStatus(`기본 포트레이트 생성 후 저장 실패: ${saveResult.error || "히로인 저장을 다시 실행해 주세요."}`);
+        return;
+      }
+      setPortraitPreviewUri(result.image?.dataUrl || result.image?.uri || result.asset?.uri || "");
+      applyHeroineList(saveResult, nextDraft.id);
+      setStatus("기본 포트레이트 생성 완료: 히로인 기본 포트레이트로 저장했습니다.");
+      navigate(`/heroines/${encodeURIComponent(nextDraft.id)}`);
+    } catch (error) {
+      setStatus(`기본 포트레이트 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -289,6 +365,10 @@ export function HeroineStartPage() {
         <article className="page-panel">
           <div className="page-panel-icon"><ImagePlus size={18} /></div>
           <h2>기본 포트레이트</h2>
+          <dl className="summary-list">
+            <div><dt>Codex 연결</dt><dd>{codexConnectionText}</dd></div>
+            <div><dt>imageGeneration</dt><dd>{imageGenerationText}</dd></div>
+          </dl>
           <label className="field-row">
             <span>기본 포트레이트 에셋</span>
             <input
@@ -301,6 +381,19 @@ export function HeroineStartPage() {
           <p className="page-muted">
             기본 포트레이트 에셋 ID를 저장하면 프로젝트 생성 시 기본 포트레이트로 연결됩니다.
           </p>
+          {portraitPreviewUri ? (
+            <div className="preview-area">
+              <img alt={`${draft.name || "히로인"} 기본 포트레이트`} src={portraitPreviewUri} />
+            </div>
+          ) : null}
+          <div className="panel-actions">
+            <Button disabled={busy} icon={<RefreshCw size={16} />} onClick={() => void refreshCodexStatus()}>
+              상태 갱신
+            </Button>
+            <Button disabled={!canGeneratePortrait} icon={<ImagePlus size={16} />} onClick={() => void generateDefaultPortrait()} variant="primary">
+              기본 포트레이트 생성
+            </Button>
+          </div>
         </article>
 
         <article className="page-panel">
