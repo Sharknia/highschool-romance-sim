@@ -37,6 +37,11 @@ interface CliInput {
   heroine?: unknown;
   heroineId?: string;
   sourceHeroineId?: string;
+  expectedHeroineRevision?: unknown;
+  confirmName?: string;
+  confirmId?: string;
+  draft?: unknown;
+  requestId?: string;
   newId?: string;
   tags?: string[] | string;
   request?: unknown;
@@ -112,9 +117,13 @@ function printCapabilities(): void {
       "create-project-from-heroine",
       "open-project",
       "list-heroines",
+      "get-heroine",
+      "create-heroine",
+      "update-heroine",
       "save-heroine",
       "clone-heroine",
       "delete-heroine",
+      "generate-heroine-portrait",
       "save-character",
       "save-scene",
       "insert-scene",
@@ -182,6 +191,21 @@ async function run(): Promise<void> {
     return;
   }
 
+  if (command === "get-heroine") {
+    writeJson(await useCases.getHeroine(input));
+    return;
+  }
+
+  if (command === "create-heroine") {
+    writeJson(await useCases.createHeroine(input));
+    return;
+  }
+
+  if (command === "update-heroine") {
+    writeJson(await useCases.updateHeroine(input));
+    return;
+  }
+
   if (command === "save-heroine") {
     writeJson(await useCases.saveHeroine(input));
     return;
@@ -194,6 +218,11 @@ async function run(): Promise<void> {
 
   if (command === "delete-heroine") {
     writeJson(await useCases.deleteHeroine(input));
+    return;
+  }
+
+  if (command === "generate-heroine-portrait") {
+    writeJson(await useCases.generateHeroinePortrait(input));
     return;
   }
 
