@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AuthGate } from "./auth/AuthGate";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import { LoadingScreen } from "./components/ui";
@@ -27,6 +27,11 @@ function RootRedirect() {
     : <Navigate to="/login" replace />;
 }
 
+function ProjectOverviewRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <Navigate to={`/projects/${projectId}/overview`} replace />;
+}
+
 export function App() {
   return (
     <AuthProvider>
@@ -38,7 +43,8 @@ export function App() {
             <Route element={<WorkspaceLayout />}>
               <Route path="/projects" element={<ProjectStartPage />} />
               <Route path="/projects/new" element={<ProjectNewPage />} />
-              <Route path="/projects/:projectId" element={<ProjectStartPage />} />
+              <Route path="/projects/:projectId" element={<ProjectOverviewRedirect />} />
+              <Route path="/projects/:projectId/overview" element={<ProjectStartPage />} />
               <Route path="/projects/:projectId/:tab" element={<ProjectStartPage />} />
               <Route path="/heroines" element={<HeroineListPage />} />
               <Route path="/heroines/new" element={<HeroineCreatePage />} />

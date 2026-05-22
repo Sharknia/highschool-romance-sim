@@ -294,7 +294,8 @@ try {
   assert.equal(staleApproval.body.action, "approveEvent");
   assert.equal(staleApproval.body.code, "PATCH_STALE");
   assert.equal(staleApproval.body.retryable, false);
-  assert.equal(staleApproval.body.workflowSummary.previewState, "stale");
+  assert.equal(staleApproval.body.workflowSummary.previewState, "blocked");
+  assert.equal(staleApproval.body.workflowSummary.primaryAction, "goToBackground");
 
   const apiRoute = apiProject.body.project.routes[0];
   const apiAfterSceneId = apiProject.body.project.scenes[0].id;

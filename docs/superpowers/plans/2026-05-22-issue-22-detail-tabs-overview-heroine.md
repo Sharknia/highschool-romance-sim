@@ -17,7 +17,7 @@
 - Modify: `apps/web/src/client/components/ui/index.ts`
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 
-- [ ] **Step 1: Write failing source assertions**
+- [x] **Step 1: Write failing source assertions**
 
 In `tests/vn-maker-alpha-shell.test.mjs`, add:
 
@@ -50,7 +50,7 @@ Also assert the cancellation and active-state details:
 ].forEach((text) => assert.match(tabListSource, new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")), `TabList 구현에 ${text}가 있어야 합니다.`));
 ```
 
-- [ ] **Step 2: Run shell test to verify RED**
+- [x] **Step 2: Run shell test to verify RED**
 
 Run:
 
@@ -60,7 +60,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: FAIL because `TabList.tsx` does not exist.
 
-- [ ] **Step 3: Implement `TabList`**
+- [x] **Step 3: Implement `TabList`**
 
 Create `TabList.tsx`. `onBeforeNavigate` is an unsaved-change confirmation hook; returning `false` cancels mouse click and keyboard navigation:
 
@@ -136,7 +136,7 @@ export function TabList({ ariaLabel, items, onBeforeNavigate }: TabListProps) {
 }
 ```
 
-- [ ] **Step 4: Export the component**
+- [x] **Step 4: Export the component**
 
 Add:
 
@@ -146,7 +146,7 @@ export { TabList } from "./TabList";
 
 to `apps/web/src/client/components/ui/index.ts`.
 
-- [ ] **Step 5: Run shell test to verify GREEN**
+- [x] **Step 5: Run shell test to verify GREEN**
 
 Run:
 
@@ -156,6 +156,10 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: PASS for TabList contract.
 
+Verification:
+- RED: `npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs` failed with `중앙 TabList 컴포넌트가 있어야 합니다.`
+- GREEN: `npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs` passed after adding `TabList` and exporting it.
+
 ### Task 2: Project Tab IA Migration
 
 **Files:**
@@ -163,7 +167,7 @@ Expected: PASS for TabList contract.
 - Modify: `apps/web/src/client/pages/projects/ProjectDetailView.tsx`
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 
-- [ ] **Step 1: Write failing IA assertions**
+- [x] **Step 1: Write failing IA assertions**
 
 Update tab assertions in `tests/vn-maker-alpha-shell.test.mjs`:
 
@@ -185,7 +189,7 @@ assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:project
 
 The route `/projects/:projectId` must land on the overview tab. It must not keep a blank tab or silently render a legacy `event`/`assets` tab.
 
-- [ ] **Step 2: Run shell test to verify RED**
+- [x] **Step 2: Run shell test to verify RED**
 
 Run:
 
@@ -195,7 +199,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: FAIL because current tabs are `event/assets` and local `project-tab-list`.
 
-- [ ] **Step 3: Update tab definitions**
+- [x] **Step 3: Update tab definitions**
 
 Change `detailTabs`:
 
@@ -212,7 +216,7 @@ export const detailTabs = [
 
 Keep `normalizeTab()` defaulting to `overview`.
 
-- [ ] **Step 4: Replace local navigation**
+- [x] **Step 4: Replace local navigation**
 
 In `ProjectDetailView.tsx`, import `TabList` and replace the local `<nav className="project-tab-list">` block with:
 
@@ -234,7 +238,7 @@ If there is no unsaved draft state yet, define `const hasUnsavedProjectDraft = f
 
 In `apps/web/src/client/App.tsx`, make `/projects/:projectId` redirect to `/projects/:projectId/overview` or pass `overview` explicitly so direct project links always open the overview tab.
 
-- [ ] **Step 5: Run shell test to verify GREEN**
+- [x] **Step 5: Run shell test to verify GREEN**
 
 Run:
 
@@ -244,6 +248,10 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: PASS for route IA migration.
 
+Verification:
+- RED: `npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs` failed with `background 탭 정의가 있어야 합니다.`
+- GREEN: `npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs` passed after replacing visible `event/assets` tabs with `background/studio`, using `TabList`, and adding `/projects/:projectId` overview redirect.
+
 ### Task 3: Overview Tab State Summary
 
 **Files:**
@@ -252,7 +260,7 @@ Expected: PASS for route IA migration.
 - Modify: `tests/vn-maker-use-cases.test.mjs`
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 
-- [ ] **Step 1: Write failing workflow summary assertions**
+- [x] **Step 1: Write failing workflow summary assertions**
 
 In `tests/vn-maker-use-cases.test.mjs`, after assigning heroine snapshot, assert new step IDs:
 
@@ -277,7 +285,7 @@ In `tests/vn-maker-alpha-shell.test.mjs`, assert overview text:
 ].forEach((text) => assert.match(projectDetailViewSource, new RegExp(text), `개요 탭에 ${text} 표시가 있어야 합니다.`));
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -287,7 +295,7 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-m
 
 Expected: FAIL because workflow still uses `event/assets`.
 
-- [ ] **Step 3: Update workflow summary**
+- [x] **Step 3: Update workflow summary**
 
 In `packages/use-cases/src/index.ts`, change `MakerWorkflowStep.id` to:
 
@@ -304,7 +312,7 @@ const incompleteImageJobs = project?.generationJobs?.filter((job) => ["backgroun
 
 Use `background` as the next action after heroine selection and before preview/export.
 
-- [ ] **Step 4: Update overview UI**
+- [x] **Step 4: Update overview UI**
 
 In `ProjectDetailView.tsx`, update overview cards to include storage path, current state, sentence summary, blockers, and actions to `heroine`, `background`, `studio`, `preview`, or `export` based on `summary.primaryAction`.
 
@@ -317,7 +325,7 @@ Remove or reroute old visible strings and routes:
 
 Direct links to `/projects/:projectId/event` or `/projects/:projectId/assets` should normalize to `overview` or `studio` through `normalizeTab()` so legacy URLs do not render removed visible tabs.
 
-- [ ] **Step 5: Run tests to verify GREEN**
+- [x] **Step 5: Run tests to verify GREEN**
 
 Run:
 
@@ -327,6 +335,10 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-m
 
 Expected: PASS.
 
+Verification:
+- RED: `npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-alpha-shell.test.mjs` failed because workflow steps still returned `event/assets`.
+- GREEN: `npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-alpha-shell.test.mjs` passed after changing workflow steps/actions to `background/studio` and adding overview storage/current-state/blocker/action copy.
+
 ### Task 4: Heroine Snapshot Tab Contract
 
 **Files:**
@@ -334,7 +346,7 @@ Expected: PASS.
 - Modify: `tests/vn-maker-use-cases.test.mjs`
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 
-- [ ] **Step 1: Write failing heroine tab assertions**
+- [x] **Step 1: Write failing heroine tab assertions**
 
 Add source assertions:
 
@@ -361,7 +373,7 @@ assert.equal(openedAssignedSnapshot.project.characters[0].displayName, heroine.n
 assert.notEqual(openedAssignedSnapshot.project.characters[0].displayName, changedSourceHeroine.name);
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -371,7 +383,7 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-m
 
 Expected: source test fails until UI explains original vs snapshot.
 
-- [ ] **Step 3: Update heroine tab UI**
+- [x] **Step 3: Update heroine tab UI**
 
 In the `activeTab === "heroine"` block:
 - show a concrete selection UI for the currently assigned project heroine snapshot and the linked library heroine;
@@ -383,7 +395,7 @@ In the `activeTab === "heroine"` block:
 - show last modified data from project metadata if available; otherwise show `마지막 수정 시각 정보 없음`;
 - route original editing to `/heroines/:heroineId/edit`.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -393,6 +405,10 @@ npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-m
 
 Expected: PASS.
 
+Verification:
+- RED: `npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-alpha-shell.test.mjs` failed because heroine tab source did not include `라이브러리 원본`.
+- GREEN: `npm run build:maker && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-alpha-shell.test.mjs` passed after adding source/snapshot fields, difference summary, and snapshot immutability assertions.
+
 ### Task 5: Shell Density And Browser Happy Path
 
 **Files:**
@@ -400,7 +416,7 @@ Expected: PASS.
 - Modify: `apps/web/src/client/styles.css`
 - Modify: `tests/vn-maker-alpha-shell.test.mjs`
 
-- [ ] **Step 1: Add density/alignment assertions**
+- [x] **Step 1: Add density/alignment assertions**
 
 In `tests/vn-maker-alpha-shell.test.mjs`, add source assertions that tie the project shell to existing heroine/detail density rather than only recording a note:
 
@@ -431,7 +447,7 @@ assert.match(projectDetailViewSource, /variant="primary"|variant=\{"primary"\}/,
 assert.match(projectDetailViewSource, /<Button/, "Project detail actions must use the shared Button component.");
 ```
 
-- [ ] **Step 2: Run shell test**
+- [x] **Step 2: Run shell test**
 
 Run:
 
@@ -441,7 +457,7 @@ npm run build:maker && node tests/vn-maker-alpha-shell.test.mjs
 
 Expected: PASS after shared classes and alignment are present.
 
-- [ ] **Step 3: Create QA note file**
+- [x] **Step 3: Create QA note file**
 
 Create `docs/qa/issue-22-detail-tabs.md`:
 
@@ -462,7 +478,7 @@ Create `docs/qa/issue-22-detail-tabs.md`:
 - Status badges use existing detail/status classes rather than one-off styles.
 ```
 
-- [ ] **Step 4: Run browser happy path before the #22 commit**
+- [x] **Step 4: Run browser happy path before the #22 commit**
 
 Start the local app for this issue:
 
@@ -471,6 +487,15 @@ VN_MAKER_ALPHA_SANDBOX=1 npm run dev -w @vn-maker/web
 ```
 
 At `390x844`, `768x1024`, and `1440x900`, record the happy path in `docs/qa/issue-22-detail-tabs.md`: open project detail, confirm `/projects/:projectId` lands on overview, refresh/directly open `/projects/:projectId/overview`, arrow-key through tabs, open heroine tab, verify project snapshot fields, and return to overview. Record console errors and any tab/header overlap.
+
+Verification:
+- Created QA heroine/project through the running alpha sandbox API: `issue-22-qa-20260522191716`.
+- Browser QA ran at `390x900`, `768x900`, and `1440x950` with Chromium CDP.
+- `/projects/:projectId` redirected to `/projects/:projectId/overview`, the detail panel appeared before the recent-project list, heroine tab fields rendered, ArrowRight moved from heroine to background, and overview return worked.
+- Route-first screenshots recorded in `/tmp/vn-maker-issue22-qa/route-first-overview-*.png`.
+- Detail screenshots recorded in `/tmp/vn-maker-issue22-qa/detail-overview-*.png` and `/tmp/vn-maker-issue22-qa/detail-heroine-*.png`.
+- Follow-up review fixes verified user-facing heroine labels, shared `.tab-list` responsive grid styles, and background tab copy/actions for `배경 화면 및 CG 작업`.
+- Console errors, runtime page errors, and non-favicon HTTP errors: none.
 
 ### Task 6: Commit and Push Issue 22
 

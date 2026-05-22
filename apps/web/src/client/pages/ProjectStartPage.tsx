@@ -404,8 +404,8 @@ export function ProjectStartPage() {
       setLastRestoredProjectId(null);
       return;
     }
-    if (!tab || normalizeTab(tab) !== tab) {
-      navigate(`/projects/${projectId}/overview`, { replace: true });
+    if (tab && normalizeTab(tab) !== tab) {
+      navigate(`/projects/${projectId}/${normalizeTab(tab)}`, { replace: true });
       return;
     }
     if (lastRestoredProjectId === projectId) {
@@ -418,6 +418,20 @@ export function ProjectStartPage() {
   const reconnectTarget = reconnectProjectId
     ? recentProjects.find((entry) => entry.projectId === reconnectProjectId) || null
     : null;
+  const detailView = projectId || currentProject ? (
+    <ProjectDetailView
+      activeTab={activeTab}
+      currentProject={currentProject}
+      onProjectResult={(result) => {
+        applyProjectResult(result);
+        setStatus(projectResultStatus(result));
+      }}
+      projectId={projectId}
+      projectDirectory={shellState.projectDirectory}
+      shellProjectTitle={shellState.projectTitle}
+      workflowSummary={workflowSummary}
+    />
+  ) : null;
 
   return (
     <section className="app-page" aria-labelledby="projectsTitle">
@@ -443,6 +457,8 @@ export function ProjectStartPage() {
           </Button>
         ) : null}
       </StatusBanner>
+
+      {projectId ? detailView : null}
 
       <RecentProjectList
         busy={busy}
@@ -499,20 +515,7 @@ export function ProjectStartPage() {
         </article>
       </section>
 
-      {projectId || currentProject ? (
-        <ProjectDetailView
-          activeTab={activeTab}
-          currentProject={currentProject}
-          onProjectResult={(result) => {
-            applyProjectResult(result);
-            setStatus(projectResultStatus(result));
-          }}
-          projectId={projectId}
-          projectDirectory={shellState.projectDirectory}
-          shellProjectTitle={shellState.projectTitle}
-          workflowSummary={workflowSummary}
-        />
-      ) : null}
+      {!projectId ? detailView : null}
 
       {deleteTarget ? (
         <DeleteConfirmDialog

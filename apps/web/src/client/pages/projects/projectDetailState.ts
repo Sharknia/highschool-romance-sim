@@ -37,8 +37,8 @@ function exportStateFrom(value: unknown, blocked: boolean, hasProject: boolean):
   return hasProject ? "ready" : "empty";
 }
 
-function projectHasIncompleteCg(project?: ProjectData | null): boolean {
-  return Boolean(project?.generationJobs?.some((job) => job.kind === "cg" && job.status !== "completed"));
+function projectHasIncompleteVisualImage(project?: ProjectData | null): boolean {
+  return Boolean(project?.generationJobs?.some((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed"));
 }
 
 function exportBlockedReason(input: PreviewExportResetInput): string | null {
@@ -46,7 +46,7 @@ function exportBlockedReason(input: PreviewExportResetInput): string | null {
   if (typeof generationState === "string" && blockingGenerationStates.has(generationState)) {
     return "완료되지 않은 이미지 작업이 있어 내보내기가 차단되었습니다.";
   }
-  if (projectHasIncompleteCg(input.project)) {
+  if (projectHasIncompleteVisualImage(input.project)) {
     return "완료되지 않은 이미지 작업이 있어 내보내기가 차단되었습니다.";
   }
   return input.workflowSummary?.blockingIssues?.[0] || null;

@@ -167,13 +167,13 @@ export type MakerPreviewState = "empty" | "blocked" | "stale" | "running" | "rea
 export type MakerExportState = "empty" | "blocked" | "ready" | "running" | "completed" | "failed";
 
 export interface MakerWorkflowStep {
-  id: "project" | "heroine" | "event" | "assets" | "preview" | "export";
+  id: "project" | "heroine" | "background" | "studio" | "preview" | "export";
   label: string;
   state: "done" | "current" | "blocked" | "waiting";
 }
 
 export interface MakerWorkflowSummary {
-  primaryAction: MakerActionId | "goToHeroine" | "goToEvent" | "goToAssets" | "goToPreview" | "goToExport";
+  primaryAction: MakerActionId | "goToHeroine" | "goToBackground" | "goToStudio" | "goToPreview" | "goToExport";
   primaryLabel: string;
   blockingIssues: string[];
   validationState: MakerValidationState;
@@ -397,7 +397,7 @@ function validationStateForWorkflow(validation?: { ok?: boolean; issues?: Valida
 }
 
 function generationStateForWorkflow(project?: VnMakerProject): MakerGenerationState {
-  const jobs = project?.generationJobs.filter((job) => job.kind === "cg") || [];
+  const jobs = project?.generationJobs.filter((job) => job.kind === "background" || job.kind === "cg") || [];
   if (jobs.length === 0) {
     return "empty";
   }
@@ -425,13 +425,17 @@ function isBlockingGenerationState(state: MakerGenerationState): boolean {
 function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boolean; issues?: ValidationIssue[] }): MakerWorkflowSummary {
   const hasProject = Boolean(project);
   const hasHeroine = Boolean(project?.characters.length);
+  const hasBackground = Boolean(project?.assets.some((asset) => asset.kind === "background"));
   const hasEvent = Boolean(project && project.scenes.length > 1);
+  const incompleteImageJobs = project?.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed") || [];
   const generationState = generationStateForWorkflow(project);
   const validationState = validationStateForWorkflow(validation);
   const blockingIssues = [
     hasProject && !hasHeroine ? "히로인 1명을 먼저 선택해야 합니다." : "",
+    hasHeroine && !hasBackground ? "배경 화면 생성이 필요합니다." : "",
+    hasHeroine && hasBackground && !hasEvent ? "제작 탭에서 이벤트와 씬을 준비해야 합니다." : "",
     validationState === "error" ? "문제 확인 결과를 먼저 해결해야 합니다." : "",
-    isBlockingGenerationState(generationState)
+    incompleteImageJobs.length > 0 || isBlockingGenerationState(generationState)
       ? "완료되지 않은 이미지 작업이 있습니다."
       : ""
   ].filter(Boolean);
@@ -439,19 +443,19 @@ function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boo
     ? "createProject"
     : !hasHeroine
       ? "goToHeroine"
+      : !hasBackground || incompleteImageJobs.length > 0 || isBlockingGenerationState(generationState)
+        ? "goToBackground"
       : !hasEvent
-        ? "goToEvent"
-        : isBlockingGenerationState(generationState)
-          ? "goToAssets"
-          : "goToPreview";
+        ? "goToStudio"
+        : "goToPreview";
   const primaryLabel = primaryAction === "createProject"
     ? "새 프로젝트 만들기"
     : primaryAction === "goToHeroine"
       ? "히로인 스냅샷으로 이동"
-      : primaryAction === "goToEvent"
-        ? "제작/이벤트로 이동"
-        : primaryAction === "goToAssets"
-          ? "이미지 작업으로 이동"
+      : primaryAction === "goToBackground"
+        ? "배경 화면 생성으로 이동"
+        : primaryAction === "goToStudio"
+          ? "제작으로 이동"
           : "프리뷰 확인";
 
   return {
@@ -460,22 +464,30 @@ function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boo
     blockingIssues,
     validationState,
     generationState,
-    previewState: !hasHeroine || !hasEvent ? "blocked" : "stale",
+    previewState: !hasHeroine || !hasBackground || !hasEvent || incompleteImageJobs.length > 0 || isBlockingGenerationState(generationState) ? "blocked" : "stale",
     exportState: blockingIssues.length > 0 ? "blocked" : "ready",
     steps: [
       { id: "project", label: "프로젝트 생성", state: hasProject ? "done" : "current" },
       { id: "heroine", label: "히로인 선택", state: hasHeroine ? "done" : hasProject ? "current" : "blocked" },
-      { id: "event", label: "이벤트 작성", state: hasEvent ? "done" : hasHeroine ? "current" : "blocked" },
       {
-        id: "assets",
-        label: "이미지 만들기",
-        state: generationState === "completed" || generationState === "empty"
+        id: "background",
+        label: "배경 화면 생성",
+        state: hasBackground && !isBlockingGenerationState(generationState)
           ? "done"
-          : hasEvent
+          : hasHeroine
             ? "current"
             : "blocked"
       },
-      { id: "preview", label: "프리뷰", state: hasHeroine && hasEvent ? "current" : "blocked" },
+      {
+        id: "studio",
+        label: "제작",
+        state: hasEvent
+          ? "done"
+          : hasHeroine && hasBackground
+            ? "current"
+            : "blocked"
+      },
+      { id: "preview", label: "프리뷰", state: hasHeroine && hasBackground && hasEvent ? "current" : "blocked" },
       { id: "export", label: "내보내기", state: blockingIssues.length === 0 ? "waiting" : "blocked" }
     ]
   };
@@ -2364,12 +2376,12 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             issues: validation.issues
           }), { projectDirectory: store.paths.projectDirectory, project, validation });
         }
-        const incompleteCgJobs = project.generationJobs.filter((job) => job.kind === "cg" && job.status !== "completed");
-        if (incompleteCgJobs.length > 0) {
+        const incompleteImageJobs = project.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed");
+        if (incompleteImageJobs.length > 0) {
           throw attachProjectFailureContext(new ExportBlockedError({
             projectId: project.id,
             projectDirectory: store.paths.projectDirectory,
-            message: `완료되지 않은 이미지 작업이 있습니다: ${incompleteCgJobs.map((job) => job.id).join(", ")}`
+            message: `완료되지 않은 이미지 작업이 있습니다: ${incompleteImageJobs.map((job) => job.id).join(", ")}`
           }), { projectDirectory: store.paths.projectDirectory, project, validation });
         }
         const result = await store.exportWebPlayer(typeof record.outputDirectory === "string" ? record.outputDirectory : undefined);

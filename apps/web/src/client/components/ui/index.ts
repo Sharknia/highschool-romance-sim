@@ -5,3 +5,4 @@ export { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 export { LoadingScreen } from "./LoadingScreen";
 export { Panel } from "./Panel";
 export { StatusBanner } from "./StatusBanner";
+export { TabList } from "./TabList";

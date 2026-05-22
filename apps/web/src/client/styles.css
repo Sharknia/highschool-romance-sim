@@ -565,6 +565,14 @@ a {
   font-size: 1.05rem;
 }
 
+.page-header > .page-primary-action {
+  flex: 0 1 320px;
+}
+
+.page-header > .state-chip {
+  align-self: flex-start;
+}
+
 .stepper {
   display: grid;
   gap: 8px;
@@ -979,7 +987,8 @@ a {
 
 .content-list,
 .recent-project-list,
-.project-tab-list {
+.project-tab-list,
+.tab-list {
   min-width: 0;
   display: grid;
   gap: 10px;
@@ -1241,15 +1250,18 @@ a {
   color: #ffd7d2;
 }
 
-.project-tab-list {
+.project-tab-list,
+.tab-list {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
-.project-tab {
+.project-tab,
+.tab-list-item {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   border: 1px solid #3a3730;
   border-radius: 8px;
   padding: 8px 10px;
@@ -1260,10 +1272,19 @@ a {
 }
 
 .project-tab.active,
-.project-tab:hover {
+.project-tab:hover,
+.tab-list-item.active,
+.tab-list-item:hover,
+.tab-list-item:focus-visible {
   border-color: #5eead4;
+  outline: none;
   color: #fbf7ef;
   background: #102621;
+}
+
+.tab-list-item small {
+  color: #bfb6a8;
+  font-size: 0.76rem;
 }
 
 .detail-summary {
@@ -1999,7 +2020,8 @@ pre {
     justify-content: flex-start;
   }
 
-  .project-tab-list {
+  .project-tab-list,
+  .tab-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -2095,7 +2117,8 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .project-tab-list {
+  .project-tab-list,
+  .tab-list {
     grid-template-columns: 1fr 1fr;
   }
 

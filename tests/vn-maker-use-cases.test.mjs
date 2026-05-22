@@ -451,6 +451,10 @@ const plannedBackground = await useCases.createGenerationJob({
 });
 assert.equal(plannedBackground.ok, true);
 assert.equal(plannedBackground.job.kind, "background");
+const blockedExportWithPlannedBackground = await useCases.exportProject({ projectDirectory }).catch((error) => error);
+assert.equal(blockedExportWithPlannedBackground.code, "EXPORT_BLOCKED");
+assert.match(blockedExportWithPlannedBackground.message, /job-usecase-background/);
+assert.equal(blockedExportWithPlannedBackground.workflowSummary.primaryAction, "goToBackground");
 
 const generatedBackground = await useCases.generateImage({
   projectDirectory,
@@ -618,6 +622,14 @@ assert.equal(assignedSnapshot.project.characters[0].sourceHeroineName, heroine.n
 assert.equal(typeof assignedSnapshot.project.characters[0].sourceSnapshotCreatedAt, "string");
 assert.equal(assignedSnapshot.project.routes.length, 1);
 assert.equal(assignedSnapshot.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), false);
+assert.equal(assignedSnapshot.workflowSummary.blockingIssues.includes("배경 화면 생성이 필요합니다."), true);
+assert.equal(assignedSnapshot.workflowSummary.previewState, "blocked");
+assert.equal(assignedSnapshot.workflowSummary.exportState, "blocked");
+assert.deepEqual(
+  assignedSnapshot.workflowSummary.steps.map((step) => step.id),
+  ["project", "heroine", "background", "studio", "preview", "export"]
+);
+assert.equal(assignedSnapshot.workflowSummary.primaryAction, "goToBackground");
 const changedSourceHeroine = {
   ...heroine,
   name: "수정된 하루",
@@ -628,7 +640,9 @@ await useCases.saveHeroine({
   heroine: changedSourceHeroine
 });
 const openedAssignedSnapshot = await useCases.openProject({ projectDirectory: blankProjectDirectory });
+assert.equal(openedAssignedSnapshot.project.characters[0].sourceHeroineId, heroine.id);
 assert.equal(openedAssignedSnapshot.project.characters[0].displayName, heroine.name);
+assert.notEqual(openedAssignedSnapshot.project.characters[0].displayName, changedSourceHeroine.name);
 assert.equal(openedAssignedSnapshot.project.characters[0].personality, heroine.personality);
 await assert.rejects(
   () => useCases.assignHeroineSnapshot({
@@ -854,7 +868,7 @@ const blockedExportWithRunningCg = await useCases.exportProject({ projectDirecto
 assert.equal(blockedExportWithRunningCg.code, "EXPORT_BLOCKED");
 assert.equal(blockedExportWithRunningCg.workflowSummary.generationState, "running");
 assert.equal(blockedExportWithRunningCg.workflowSummary.exportState, "blocked");
-assert.equal(blockedExportWithRunningCg.workflowSummary.primaryAction, "goToAssets");
+assert.equal(blockedExportWithRunningCg.workflowSummary.primaryAction, "goToBackground");
 const plannedStore = await projectStoreModule.openProjectStore(projectDirectory);
 try {
   const project = plannedStore.requireProject();

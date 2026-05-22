@@ -2,9 +2,9 @@ import type { ApiResult } from "../../api/types";
 
 export const detailTabs = [
   { id: "overview", label: "개요" },
-  { id: "heroine", label: "히로인 스냅샷" },
-  { id: "event", label: "제작/이벤트" },
-  { id: "assets", label: "에셋/생성" },
+  { id: "heroine", label: "히로인" },
+  { id: "background", label: "배경 화면 생성" },
+  { id: "studio", label: "제작" },
   { id: "preview", label: "프리뷰" },
   { id: "export", label: "내보내기" }
 ] as const;
@@ -40,6 +40,11 @@ export interface ProjectData {
   characters?: Array<{
     id?: string;
     displayName?: string;
+    profile?: string;
+    description?: string;
+    personality?: string;
+    speechStyle?: string;
+    appearance?: string;
     sourceHeroineId?: string;
     sourceHeroineName?: string;
     sourceSnapshotCreatedAt?: string;
@@ -183,6 +188,7 @@ export interface ProjectApiResult extends ApiResult {
   diff?: ProjectPatchDescription;
   errors?: string[];
   issues?: ProjectIssue[];
+  job?: ProjectGenerationJob;
   jobs?: ProjectGenerationJob[];
   patchHistoryEntry?: ProjectPatchHistoryEntry;
   plan?: ProjectEventPlan;
@@ -204,5 +210,11 @@ export interface ProjectApiResult extends ApiResult {
 }
 
 export function normalizeTab(value?: string): ProjectTabId {
+  if (value === "event") {
+    return "studio";
+  }
+  if (value === "assets") {
+    return "background";
+  }
   return detailTabs.some((tab) => tab.id === value) ? value as ProjectTabId : "overview";
 }
