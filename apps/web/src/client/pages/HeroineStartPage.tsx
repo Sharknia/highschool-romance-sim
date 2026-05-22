@@ -112,11 +112,11 @@ export function HeroineStartPage() {
     : "생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.";
   const canGeneratePortrait = profileComplete && imageGenerationAvailable && !busy;
 
-  function applyHeroineList(result: HeroineLibraryResult, preferredHeroineId?: string): void {
+  const applyHeroineList = useCallback((result: HeroineLibraryResult, preferredHeroineId?: string): void => {
     const nextHeroines = Array.isArray(result.heroines) ? result.heroines : [];
     const nextSelected = preferredHeroineId
       ? nextHeroines.find((heroine) => heroine.id === preferredHeroineId) || null
-      : nextHeroines.find((heroine) => heroine.id === selectedHeroineId) || nextHeroines[0] || null;
+      : nextHeroines[0] || null;
     setProjectDirectory(typeof result.projectDirectory === "string" ? result.projectDirectory : "");
     setHeroines(nextHeroines);
     setListState(nextHeroines.length > 0 ? "ready" : "empty");
@@ -124,7 +124,7 @@ export function HeroineStartPage() {
     setDraft(nextSelected ? cloneDraft(nextSelected) : createNewDraft());
     setPortraitPreviewUri("");
     setStatus(nextHeroines.length > 0 ? "히로인을 선택하거나 새로 만드세요." : "아직 히로인이 없습니다.");
-  }
+  }, []);
 
   const loadHeroineLibrary = useCallback(async (preferredHeroineId?: string): Promise<void> => {
     setListState("loading");
@@ -141,7 +141,7 @@ export function HeroineStartPage() {
       setListState("error");
       setStatus(`히로인 목록을 불러오지 못했습니다. ${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [postAuthedJson]);
+  }, [applyHeroineList, postAuthedJson]);
 
   useEffect(() => {
     void loadHeroineLibrary(heroineId);
@@ -243,8 +243,8 @@ export function HeroineStartPage() {
         setStatus(`기본 포트레이트 생성 후 저장 실패: ${saveResult.error || "히로인 저장을 다시 실행해 주세요."}`);
         return;
       }
-      setPortraitPreviewUri(result.image?.dataUrl || result.image?.uri || result.asset?.uri || "");
       applyHeroineList(saveResult, nextDraft.id);
+      setPortraitPreviewUri(result.image?.dataUrl || result.image?.uri || result.asset?.uri || "");
       setStatus("기본 포트레이트 생성 완료: 히로인 기본 포트레이트로 저장했습니다.");
       navigate(`/heroines/${encodeURIComponent(nextDraft.id)}`);
     } catch (error) {
@@ -367,7 +367,7 @@ export function HeroineStartPage() {
           <h2>기본 포트레이트</h2>
           <dl className="summary-list">
             <div><dt>Codex 연결</dt><dd>{codexConnectionText}</dd></div>
-            <div><dt>imageGeneration</dt><dd>{imageGenerationText}</dd></div>
+            <div><dt>생성 기능</dt><dd>{imageGenerationText}</dd></div>
           </dl>
           <label className="field-row">
             <span>기본 포트레이트 에셋</span>
