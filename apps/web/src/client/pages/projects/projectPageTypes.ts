@@ -15,9 +15,31 @@ export interface ProjectData {
   id?: string;
   title?: string;
   premise?: string;
-  characters?: unknown[];
-  routes?: unknown[];
-  scenes?: unknown[];
+  characters?: Array<{
+    id?: string;
+    displayName?: string;
+    sourceHeroineId?: string;
+    sourceHeroineName?: string;
+    sourceSnapshotCreatedAt?: string;
+  }>;
+  routes?: Array<{ id?: string; title?: string; entrySceneId?: string; heroineId?: string }>;
+  scenes?: Array<{ id?: string; label?: string }>;
+  generationJobs?: Array<{ status?: string; kind?: string }>;
+}
+
+export interface ProjectWorkflowSummary {
+  primaryAction?: string;
+  primaryLabel?: string;
+  blockingIssues?: string[];
+  validationState?: string;
+  generationState?: string;
+  previewState?: string;
+  exportState?: string;
+  steps?: Array<{
+    id: string;
+    label: string;
+    state: "done" | "current" | "blocked" | "waiting";
+  }>;
 }
 
 export interface RecentProject {
@@ -48,7 +70,7 @@ export interface ProjectApiResult extends ApiResult {
   removedProject?: RecentProject;
   expectedProjectId?: string;
   actualProjectId?: string;
-  workflowSummary?: unknown;
+  workflowSummary?: ProjectWorkflowSummary;
 }
 
 export function normalizeTab(value?: string): ProjectTabId {

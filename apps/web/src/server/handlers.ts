@@ -241,6 +241,10 @@ class ApiServices {
     return this.useCases.createProjectFromHeroine(body);
   }
 
+  assignHeroineSnapshot(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.assignHeroineSnapshot(body);
+  }
+
   openProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.openProject(body);
   }
@@ -363,6 +367,10 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/heroines/clone", (context) => jsonBodyRoute(context, (body) => services.cloneHeroine(body)));
   app.post("/api/heroines/delete", (context) => jsonBodyRoute(context, (body) => services.deleteHeroine(body)));
   app.post("/api/projects/from-heroine", (context) => jsonBodyRoute(context, (body) => services.createProjectFromHeroine(body)));
+  app.post("/api/projects/:projectId/heroine", (context) => jsonBodyRoute(context, (body) => services.assignHeroineSnapshot({
+    ...asRecord(body),
+    projectId: context.req.param("projectId")
+  })));
   app.post("/api/project/characters", (context) => jsonBodyRoute(context, (body) => services.saveCharacter(body)));
   app.post("/api/project/scenes", (context) => jsonBodyRoute(context, (body) => services.saveScene(body)));
   app.post("/api/project/scenes/insert", (context) => jsonBodyRoute(context, (body) => services.insertManualScene(body)));

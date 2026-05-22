@@ -111,6 +111,7 @@ function printCapabilities(): void {
       "create-starter",
       "create-project",
       "create-project-from-heroine",
+      "assign-heroine-snapshot",
       "open-project",
       "reconnect-project",
       "list-recent-projects",
@@ -174,6 +175,11 @@ async function run(): Promise<void> {
 
   if (command === "create-project-from-heroine") {
     writeJson(await useCases.createProjectFromHeroine(input));
+    return;
+  }
+
+  if (command === "assign-heroine-snapshot") {
+    writeJson(await useCases.assignHeroineSnapshot(input));
     return;
   }
 

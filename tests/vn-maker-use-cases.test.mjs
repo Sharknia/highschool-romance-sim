@@ -87,6 +87,7 @@ const heroine = core.createHeroineProfile({
 });
 
 const emptyLibraryDirectory = join(tempRoot, "EmptyHeroineLibrary.vnmaker");
+const blankProjectDirectory = join(tempRoot, "BlankProject.vnmaker");
 const emptyLibrary = await useCases.listHeroines({ projectDirectory: emptyLibraryDirectory });
 assert.equal(emptyLibrary.ok, true);
 assert.deepEqual(emptyLibrary.heroines, []);
@@ -240,6 +241,65 @@ await assert.rejects(
     assert.equal(failure.retryable, false);
     assert.equal(failure.projectId, created.project.id);
     assert.equal(failure.projectDirectory, projectDirectory);
+    return true;
+  }
+);
+
+const blankProject = await useCases.createProject({
+  projectDirectory: blankProjectDirectory,
+  project: {
+    version: "vn-maker/v1",
+    id: "blank-alpha",
+    title: "Blank Alpha",
+    premise: "히로인 없이 시작하는 빈 프로젝트",
+    characters: [],
+    routes: [],
+    scenes: [],
+    assets: [],
+    generationJobs: [],
+    settings: {
+      defaultRouteId: "",
+      outputFileName: "index.html",
+      language: "ko"
+    }
+  }
+});
+assert.equal(blankProject.ok, true);
+assert.equal(blankProject.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), true);
+const assignedSnapshot = await useCases.assignHeroineSnapshot({
+  projectDirectory: blankProjectDirectory,
+  heroine
+});
+assert.equal(assignedSnapshot.ok, true);
+assert.equal(assignedSnapshot.action, "assignHeroineSnapshot");
+assert.equal(assignedSnapshot.project.characters.length, 1);
+assert.equal(assignedSnapshot.project.characters[0].sourceHeroineId, heroine.id);
+assert.equal(assignedSnapshot.project.characters[0].sourceHeroineName, heroine.name);
+assert.equal(typeof assignedSnapshot.project.characters[0].sourceSnapshotCreatedAt, "string");
+assert.equal(assignedSnapshot.project.routes.length, 1);
+assert.equal(assignedSnapshot.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), false);
+const changedSourceHeroine = {
+  ...heroine,
+  name: "수정된 하루",
+  personality: "원본이 바뀌어도 스냅샷은 유지된다."
+};
+await useCases.saveHeroine({
+  projectDirectory: blankProjectDirectory,
+  heroine: changedSourceHeroine
+});
+const openedAssignedSnapshot = await useCases.openProject({ projectDirectory: blankProjectDirectory });
+assert.equal(openedAssignedSnapshot.project.characters[0].displayName, heroine.name);
+assert.equal(openedAssignedSnapshot.project.characters[0].personality, heroine.personality);
+await assert.rejects(
+  () => useCases.assignHeroineSnapshot({
+    projectDirectory: blankProjectDirectory,
+    heroine: changedSourceHeroine
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "assignHeroineSnapshot");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.code, "HEROINE_REPLACE_BLOCKED");
+    assert.equal(failure.retryable, false);
     return true;
   }
 );

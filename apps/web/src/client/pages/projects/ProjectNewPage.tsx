@@ -131,6 +131,24 @@ export function ProjectNewPage() {
         projectId: projectId.trim(),
         title: title.trim(),
         premise: premise.trim() || `${title.trim()} 프로젝트`,
+        project: mode === "blank"
+          ? {
+              version: "vn-maker/v1",
+              id: projectId.trim(),
+              title: title.trim(),
+              premise: premise.trim() || `${title.trim()} 프로젝트`,
+              characters: [],
+              routes: [],
+              scenes: [],
+              assets: [],
+              generationJobs: [],
+              settings: {
+                defaultRouteId: "",
+                outputFileName: "index.html",
+                language: "ko"
+              }
+            }
+          : undefined,
         starter: {
           id: projectId.trim(),
           title: title.trim(),

@@ -266,6 +266,19 @@ export class ProjectIdConflictError extends Error {
   }
 }
 
+export class HeroineReplaceBlockedError extends Error {
+  readonly code = "HEROINE_REPLACE_BLOCKED";
+  readonly projectId: string;
+  readonly projectDirectory: string;
+
+  constructor(input: { projectId: string; projectDirectory: string }) {
+    super("이미 이벤트나 이미지 작업이 있는 프로젝트에서는 히로인을 교체할 수 없습니다. 새 프로젝트를 만들어 주세요.");
+    this.name = "HeroineReplaceBlockedError";
+    this.projectId = input.projectId;
+    this.projectDirectory = input.projectDirectory;
+  }
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
@@ -531,6 +544,11 @@ function optionalStarter(input: unknown): CreateStarterProjectInput | undefined 
 function requiredHeroine(input: unknown): HeroineProfile {
   const record = asRecord(input);
   return createHeroineProfile(requireParsed(parseHeroineProfileInput(record.heroine), "heroine"));
+}
+
+function optionalHeroine(input: unknown): HeroineProfile | undefined {
+  const record = asRecord(input);
+  return record.heroine ? requiredHeroine(input) : undefined;
 }
 
 function requiredCharacter(input: unknown): VnMakerCharacter {
@@ -903,6 +921,20 @@ async function assertProjectCreationTargetAvailable(projectDirectory: string, ca
   });
 }
 
+function assertCanAssignHeroineSnapshot(project: VnMakerProject, projectDirectory: string): void {
+  const hasExistingProductionState = project.characters.length > 0
+    || project.routes.length > 0
+    || project.scenes.length > 0
+    || project.generationJobs.length > 0
+    || project.assets.some((asset) => asset.kind === "cg");
+  if (hasExistingProductionState) {
+    throw new HeroineReplaceBlockedError({
+      projectId: project.id,
+      projectDirectory
+    });
+  }
+}
+
 async function ensureProjectStore(input: unknown, fallbackDirectory: string): Promise<ProjectStore> {
   const projectDirectory = projectDirectoryFrom(input, fallbackDirectory);
   const store = await openProjectStore(projectDirectory);
@@ -1144,6 +1176,37 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           project,
           validation
         }, { project, validation });
+      } finally {
+        store.close();
+      }
+    },
+
+    async assignHeroineSnapshot(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const heroine = optionalHeroine(input)
+          || store.listHeroines().find((item) => item.id === record.heroineId);
+        if (!heroine) {
+          throw new InputValidationError("heroine 입력이 필요합니다.", [{ severity: "error", path: "heroineId", message: "히로인 라이브러리에서 찾을 수 없습니다." }]);
+        }
+        assertCanAssignHeroineSnapshot(project, store.paths.projectDirectory);
+        const nextProject = createProjectFromHeroine({
+          id: project.id,
+          title: project.title,
+          premise: project.premise,
+          heroine
+        });
+        const savedProject = store.saveProject(nextProject);
+        store.recordHeroineReuse(heroine.id, savedProject);
+        const validation = store.validateAndStore();
+        return withActionState("assignHeroineSnapshot", {
+          projectDirectory: store.paths.projectDirectory,
+          heroine,
+          project: savedProject,
+          validation
+        }, { project: savedProject, validation });
       } finally {
         store.close();
       }

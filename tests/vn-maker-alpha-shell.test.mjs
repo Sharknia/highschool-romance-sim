@@ -79,6 +79,7 @@ const projectNewPageSource = readText(projectNewPagePath);
   "/api/projects/recent/remove",
   "/api/projects/recent/restore",
   "/api/projects/reconnect",
+  "workflowSummary",
   "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
   "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
   "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.",
@@ -90,6 +91,27 @@ const projectNewPageSource = readText(projectNewPagePath);
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(`${projectStartSource}\n${recentProjectListSource}\n${projectDetailViewSource}`, pattern, `프로젝트 페이지 소스에 '${requiredText}' 문구 또는 API 호출이 있어야 합니다.`);
 });
+[
+  "/api/heroines/list",
+  "/api/projects/${",
+  "/heroine",
+  "히로인 1명을 먼저 선택해야 합니다.",
+  "선택한 히로인 배정",
+  "제작/이벤트로 이동",
+  "sourceHeroineId",
+  "sourceSnapshotCreatedAt",
+  "완료된 단계",
+  "남은 단계",
+  "blockingIssues",
+  "validationState",
+  "generationState",
+  "previewState",
+  "exportState"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView에 '${requiredText}' 문구 또는 상태 표시가 있어야 합니다.`);
+});
+assert.doesNotMatch(projectDetailViewSource, /후속 이슈에서 편집 흐름을 연결합니다/, "히로인 탭은 placeholder가 아니라 실제 배정 흐름이어야 합니다.");
 [
   "/api/projects",
   "/api/projects/from-heroine",

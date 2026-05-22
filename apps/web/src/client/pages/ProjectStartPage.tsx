@@ -6,7 +6,7 @@ import { Button, StatusBanner } from "../components/ui";
 import { useWorkspaceShell } from "../components/WorkspaceLayout";
 import { ProjectDetailView } from "./projects/ProjectDetailView";
 import { RecentProjectList } from "./projects/RecentProjectList";
-import { normalizeTab, type ProjectApiResult, type ProjectData, type RecentProject } from "./projects/projectPageTypes";
+import { normalizeTab, type ProjectApiResult, type ProjectData, type ProjectWorkflowSummary, type RecentProject } from "./projects/projectPageTypes";
 
 function validationStatusFrom(result: ProjectApiResult): string {
   if (result.validation?.ok === true) {
@@ -56,6 +56,7 @@ export function ProjectStartPage() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentMeta, setRecentMeta] = useState({ count: 0, missingCount: 0, loadedAt: "", sort: "lastOpenedAtDesc" });
   const [currentProject, setCurrentProject] = useState<ProjectData | null>(null);
+  const [workflowSummary, setWorkflowSummary] = useState<ProjectWorkflowSummary | null>(null);
   const [reconnectProjectId, setReconnectProjectId] = useState<string | null>(null);
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
   const [removedProject, setRemovedProject] = useState<RecentProject | null>(null);
@@ -80,6 +81,7 @@ export function ProjectStartPage() {
     const nextProject = result.project || null;
     const nextDirectory = typeof result.projectDirectory === "string" ? result.projectDirectory : fallbackDirectory;
     setCurrentProject(nextProject);
+    setWorkflowSummary(result.workflowSummary || null);
     setProjectDirectoryInput(nextDirectory);
     setShellState({
       projectDirectory: nextDirectory,
@@ -274,8 +276,14 @@ export function ProjectStartPage() {
         <ProjectDetailView
           activeTab={activeTab}
           currentProject={currentProject}
+          onProjectResult={(result) => {
+            applyProjectResult(result);
+            setStatus("히로인 스냅샷 배정 완료");
+          }}
           projectId={projectId}
+          projectDirectory={shellState.projectDirectory}
           shellProjectTitle={shellState.projectTitle}
+          workflowSummary={workflowSummary}
         />
       ) : null}
     </section>

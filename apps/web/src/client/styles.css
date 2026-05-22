@@ -1154,6 +1154,34 @@ a {
   overflow-wrap: anywhere;
 }
 
+.detail-tab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.detail-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  padding: 12px;
+  background: #191814;
+}
+
+.detail-card h3 {
+  margin: 0;
+  color: #fbf7ef;
+  font-size: 0.98rem;
+}
+
+.compact-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .project-new-grid {
   align-items: start;
 }
