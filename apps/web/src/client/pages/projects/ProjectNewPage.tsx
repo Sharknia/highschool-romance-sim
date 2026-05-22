@@ -58,9 +58,11 @@ export function ProjectNewPage() {
   const [busy, setBusy] = useState(false);
   const [heroines, setHeroines] = useState<HeroineDraft[]>([]);
   const [selectedHeroineId, setSelectedHeroineId] = useState("");
+  const [heroineSourceProjectDirectory, setHeroineSourceProjectDirectory] = useState("");
   const [lastFailureCode, setLastFailureCode] = useState<string | null>(null);
 
-  const dirty = Boolean(title.trim() || premise.trim() || projectDirectory.trim() || projectId !== "new-project" || mode !== "blank" || selectedHeroineId);
+  const heroineSelectionDirty = mode === "heroine" && selectedHeroineId;
+  const dirty = Boolean(title.trim() || premise.trim() || projectDirectory.trim() || projectId !== "new-project" || mode !== "blank" || heroineSelectionDirty);
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || null;
   const folderPreview = projectDirectory.trim()
     ? projectDirectory.trim()
@@ -80,6 +82,7 @@ export function ProjectNewPage() {
       }
       const nextHeroines = Array.isArray(result.heroines) ? result.heroines : [];
       setHeroines(nextHeroines);
+      setHeroineSourceProjectDirectory(result.projectDirectory || "");
       if (nextHeroines[0]) {
         setSelectedHeroineId(nextHeroines[0].id);
       }
@@ -131,30 +134,13 @@ export function ProjectNewPage() {
         projectId: projectId.trim(),
         title: title.trim(),
         premise: premise.trim() || `${title.trim()} 프로젝트`,
-        project: mode === "blank"
-          ? {
-              version: "vn-maker/v1",
-              id: projectId.trim(),
-              title: title.trim(),
-              premise: premise.trim() || `${title.trim()} 프로젝트`,
-              characters: [],
-              routes: [],
-              scenes: [],
-              assets: [],
-              generationJobs: [],
-              settings: {
-                defaultRouteId: "",
-                outputFileName: "index.html",
-                language: "ko"
-              }
-            }
-          : undefined,
         starter: {
           id: projectId.trim(),
           title: title.trim(),
           premise: premise.trim() || `${title.trim()} 프로젝트`
         },
-        heroine: mode === "heroine" ? selectedHeroine : undefined
+        heroineId: mode === "heroine" ? selectedHeroine?.id : undefined,
+        sourceProjectDirectory: mode === "heroine" ? heroineSourceProjectDirectory || undefined : undefined
       };
       const result = await postAuthedJson<ProjectApiResult>(mode === "heroine" ? "/api/projects/from-heroine" : "/api/projects", body);
       if (result.ok === false) {

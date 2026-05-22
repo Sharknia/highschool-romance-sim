@@ -18,6 +18,7 @@ import {
   type ProjectTabId,
   type ProjectWorkflowSummary
 } from "./projectPageTypes";
+import { createPreviewExportResetState } from "./projectDetailState";
 
 interface ProjectDetailViewProps {
   activeTab: ProjectTabId;
@@ -282,19 +283,28 @@ export function ProjectDetailView({
     }
   }, [activeTab, assignedHeroine, eventState]);
 
+  function resetPreviewAndExportState(input: { previewStatus?: string; project?: ProjectData | null; workflowSummary?: ProjectWorkflowSummary | null } = {}): void {
+    const nextState = createPreviewExportResetState({
+      project: input.project ?? currentProject,
+      workflowSummary: input.workflowSummary ?? workflowSummary,
+      previewStatus: input.previewStatus
+    });
+    setPreviewRuntime(null);
+    setPreviewSceneId("");
+    setPreviewIssues([]);
+    setPreviewState(nextState.previewState);
+    setPreviewStatus(nextState.previewStatus);
+    setExportResult(null);
+    setSmokeResult(null);
+    setExportState(nextState.exportState);
+    setExportStatus(nextState.exportStatus);
+  }
+
   useEffect(() => {
     setAssetJobs([]);
     setAssetErrors([]);
     setAssetStatus("이벤트 승인 후 CG 작업을 확인합니다.");
-    setPreviewRuntime(null);
-    setPreviewSceneId("");
-    setPreviewIssues([]);
-    setPreviewState(currentProject ? "stale" : "empty");
-    setPreviewStatus(currentProject ? "프로젝트 변경 후 프리뷰가 아직 생성되지 않았습니다." : "프리뷰 생성 전입니다.");
-    setExportResult(null);
-    setSmokeResult(null);
-    setExportState(currentProject ? "ready" : "empty");
-    setExportStatus(currentProject ? "내보내기를 실행할 수 있습니다." : "내보내기 전입니다.");
+    resetPreviewAndExportState();
   }, [currentProject?.id]);
 
   useEffect(() => {
@@ -321,6 +331,11 @@ export function ProjectDetailView({
         return;
       }
       onProjectResult(result);
+      resetPreviewAndExportState({
+        previewStatus: "히로인 변경으로 프리뷰와 내보내기를 다시 확인해야 합니다.",
+        project: result.project,
+        workflowSummary: result.workflowSummary
+      });
       setHeroineStatus("히로인 스냅샷이 프로젝트에 배정되었습니다.");
       navigate(`/projects/${currentProject.id}/event`);
     } catch (error) {
@@ -406,6 +421,11 @@ export function ProjectDetailView({
         return;
       }
       onProjectResult(result);
+      resetPreviewAndExportState({
+        previewStatus: "프로젝트 이벤트가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
+        project: result.project,
+        workflowSummary: result.workflowSummary
+      });
       setPendingPatch(null);
       setEventIssues(result.validation?.issues || []);
       setEventPrompt("");
@@ -480,6 +500,11 @@ export function ProjectDetailView({
       setAssetErrors(result.errors || result.issues?.map(issueText) || []);
       if (result.project) {
         onProjectResult(result);
+        resetPreviewAndExportState({
+          previewStatus: "CG 결과가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
+          project: result.project,
+          workflowSummary: result.workflowSummary
+        });
       }
       if (result.ok === false) {
         applyAssetFailure(result, "일부 CG 작업이 실패했습니다.");
@@ -495,23 +520,32 @@ export function ProjectDetailView({
     }
   }
 
-  function validationMessages(result: ProjectApiResult): string[] {
-    return result.issues?.map(issueText)
-      || result.validation?.issues?.map(issueText)
-      || result.runtime?.validation?.issues?.map(issueText)
+  function validationIssues(result: ProjectApiResult): ProjectIssue[] {
+    return result.issues
+      || result.validation?.issues
+      || result.runtime?.validation?.issues
       || [];
+  }
+
+  function hasBlockingPreviewErrors(issues: ProjectIssue[]): boolean {
+    return issues.some((issue) => issue.severity === "error");
+  }
+
+  function validationMessages(result: ProjectApiResult): string[] {
+    return validationIssues(result).map(issueText);
   }
 
   async function validateBeforePreview(): Promise<boolean> {
     const result = await postAuthedJson<ProjectApiResult>("/api/project/validate", { projectDirectory });
-    const issues = validationMessages(result);
-    if (result.ok === false || issues.some(Boolean)) {
+    const issues = validationIssues(result);
+    const messages = issues.map(issueText);
+    if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       setPreviewState("failed");
-      setPreviewIssues(issues);
+      setPreviewIssues(messages);
       setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
       return false;
     }
-    setPreviewIssues([]);
+    setPreviewIssues(messages);
     return true;
   }
 

@@ -42,6 +42,7 @@ import {
   openProjectStore,
   projectWorkspaceExists,
   RecentProjectIndexStore,
+  resolveProjectWorkspacePaths,
   smokeTestWebExport,
   type RecentProjectIndexEntry,
   type RecentProjectValidationState,
@@ -370,6 +371,10 @@ function generationStateForWorkflow(project?: VnMakerProject): MakerGenerationSt
   return "planned";
 }
 
+function isBlockingGenerationState(state: MakerGenerationState): boolean {
+  return state === "planned" || state === "running" || state === "failed" || state === "partialFailed";
+}
+
 function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boolean; issues?: ValidationIssue[] }): MakerWorkflowSummary {
   const hasProject = Boolean(project);
   const hasHeroine = Boolean(project?.characters.length);
@@ -379,7 +384,7 @@ function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boo
   const blockingIssues = [
     hasProject && !hasHeroine ? "히로인 1명을 먼저 선택해야 합니다." : "",
     validationState === "error" ? "문제 확인 결과를 먼저 해결해야 합니다." : "",
-    generationState === "planned" || generationState === "failed" || generationState === "partialFailed"
+    isBlockingGenerationState(generationState)
       ? "완료되지 않은 이미지 작업이 있습니다."
       : ""
   ].filter(Boolean);
@@ -389,7 +394,7 @@ function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boo
       ? "goToHeroine"
       : !hasEvent
         ? "goToEvent"
-        : generationState === "planned" || generationState === "failed" || generationState === "partialFailed"
+        : isBlockingGenerationState(generationState)
           ? "goToAssets"
           : "goToPreview";
   const primaryLabel = primaryAction === "createProject"
@@ -427,6 +432,22 @@ function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boo
       { id: "export", label: "내보내기", state: blockingIssues.length === 0 ? "waiting" : "blocked" }
     ]
   };
+}
+
+function attachProjectFailureContext(
+  error: unknown,
+  input: { projectDirectory: string; project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] } }
+): unknown {
+  if (!error || typeof error !== "object") {
+    return error;
+  }
+  const target = error as JsonRecord;
+  target.projectDirectory = input.projectDirectory;
+  if (input.project) {
+    target.projectId = input.project.id;
+    target.workflowSummary = createWorkflowSummary(input.project, input.validation);
+  }
+  return error;
 }
 
 function withActionState<T extends JsonRecord>(
@@ -504,6 +525,9 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     : Array.isArray(errorRecord.issues)
       ? errorRecord.issues as ValidationIssue[]
       : undefined;
+  const workflowSummary = errorRecord.workflowSummary && typeof errorRecord.workflowSummary === "object"
+    ? errorRecord.workflowSummary as MakerWorkflowSummary
+    : undefined;
   return {
     ok: false,
     action,
@@ -515,6 +539,7 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
     expectedProjectId,
     actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
+    workflowSummary,
     issues,
     retryable: retryableFailureCode(code)
   };
@@ -529,6 +554,13 @@ function projectDirectoryFrom(input: unknown, fallback: string): string {
   return typeof record.projectDirectory === "string" && record.projectDirectory.trim()
     ? record.projectDirectory
     : fallback;
+}
+
+function sourceProjectDirectoryFrom(input: unknown, fallback: string): string {
+  const record = asRecord(input);
+  return typeof record.sourceProjectDirectory === "string" && record.sourceProjectDirectory.trim()
+    ? record.sourceProjectDirectory
+    : projectDirectoryFrom(input, fallback);
 }
 
 function optionalProjectId(input: unknown): string | undefined {
@@ -569,6 +601,41 @@ function requiredHeroine(input: unknown): HeroineProfile {
 function optionalHeroine(input: unknown): HeroineProfile | undefined {
   const record = asRecord(input);
   return record.heroine ? requiredHeroine(input) : undefined;
+}
+
+async function heroineFromLibrary(input: unknown, fallbackDirectory: string): Promise<HeroineProfile | undefined> {
+  const record = asRecord(input);
+  if (typeof record.heroineId !== "string" || !record.heroineId.trim()) {
+    return undefined;
+  }
+  const sourceDirectory = sourceProjectDirectoryFrom(input, fallbackDirectory);
+  const store = await openProjectStore(sourceDirectory);
+  try {
+    return store.listHeroines().find((item) => item.id === record.heroineId);
+  } finally {
+    store.close();
+  }
+}
+
+async function recordSourceHeroineReuse(
+  input: unknown,
+  project: VnMakerProject,
+  options: { fallbackDirectory: string; targetProjectDirectory: string }
+): Promise<void> {
+  const record = asRecord(input);
+  if (record.heroine || typeof record.heroineId !== "string" || !record.heroineId.trim()) {
+    return;
+  }
+  const sourceDirectory = resolveProjectWorkspacePaths(sourceProjectDirectoryFrom(input, options.fallbackDirectory)).projectDirectory;
+  if (sourceDirectory === options.targetProjectDirectory) {
+    return;
+  }
+  const store = await openProjectStore(sourceDirectory);
+  try {
+    store.recordHeroineReuse(record.heroineId, project, options.targetProjectDirectory);
+  } finally {
+    store.close();
+  }
 }
 
 function requiredCharacter(input: unknown): VnMakerCharacter {
@@ -1162,30 +1229,34 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
       assertProjectIdCanBeCreated(input);
-      const existingStore = await ensureProjectStore(input, defaultProjectDirectory);
       const heroine = record.heroine
         ? requiredHeroine(input)
-        : existingStore.listHeroines().find((item) => item.id === record.heroineId);
-      existingStore.close();
+        : await heroineFromLibrary(input, defaultProjectDirectory);
       if (!heroine) {
         throw new InputValidationError("heroine 입력이 필요합니다.", [{ severity: "error", path: "heroineId", message: "히로인 라이브러리에서 찾을 수 없습니다." }]);
       }
+      const project = createProjectFromHeroine({
+        id: typeof record.projectId === "string" ? record.projectId : undefined,
+        title: typeof record.title === "string" ? record.title : undefined,
+        premise: typeof record.premise === "string" ? record.premise : undefined,
+        heroine
+      });
+      await assertProjectCreationTargetAvailable(projectDirectory, project);
       const store = await createProjectWorkspace({
         projectDirectory,
-        project: createProjectFromHeroine({
-          id: typeof record.projectId === "string" ? record.projectId : undefined,
-          title: typeof record.title === "string" ? record.title : undefined,
-          premise: typeof record.premise === "string" ? record.premise : undefined,
-          heroine
-        })
+        project
       });
       try {
         store.saveHeroine(heroine);
-        const project = store.requireProject();
-        store.recordHeroineReuse(heroine.id, project);
+        const savedProject = store.requireProject();
+        store.recordHeroineReuse(heroine.id, savedProject);
         const validation = store.validateAndStore();
+        await recordSourceHeroineReuse(input, savedProject, {
+          fallbackDirectory: defaultProjectDirectory,
+          targetProjectDirectory: store.paths.projectDirectory
+        });
         await recordRecentProject(recentProjects, {
-          project,
+          project: savedProject,
           projectDirectory: store.paths.projectDirectory,
           validation
         });
@@ -1193,9 +1264,9 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           heroine,
-          project,
+          project: savedProject,
           validation
-        }, { project, validation });
+        }, { project: savedProject, validation });
       } finally {
         store.close();
       }
@@ -1667,6 +1738,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           project: result.project,
           validation: result.validation
         });
+      } catch (error) {
+        throw attachProjectFailureContext(error, {
+          projectDirectory: store.paths.projectDirectory,
+          project: store.requireProject()
+        });
       } finally {
         store.close();
       }
@@ -1697,20 +1773,20 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.requireProject();
         const validation = store.validateAndStore();
         if (!validation.ok) {
-          throw new ExportBlockedError({
+          throw attachProjectFailureContext(new ExportBlockedError({
             projectId: project.id,
             projectDirectory: store.paths.projectDirectory,
             message: `검증 실패 프로젝트는 export할 수 없습니다: ${validation.issues.map((issue) => issue.message).join(", ")}`,
             issues: validation.issues
-          });
+          }), { projectDirectory: store.paths.projectDirectory, project, validation });
         }
         const incompleteCgJobs = project.generationJobs.filter((job) => job.kind === "cg" && job.status !== "completed");
         if (incompleteCgJobs.length > 0) {
-          throw new ExportBlockedError({
+          throw attachProjectFailureContext(new ExportBlockedError({
             projectId: project.id,
             projectDirectory: store.paths.projectDirectory,
             message: `완료되지 않은 이미지 작업이 있습니다: ${incompleteCgJobs.map((job) => job.id).join(", ")}`
-          });
+          }), { projectDirectory: store.paths.projectDirectory, project, validation });
         }
         const result = await store.exportWebPlayer(typeof record.outputDirectory === "string" ? record.outputDirectory : undefined);
         return withActionState("exportProject", { projectDirectory: store.paths.projectDirectory, ...result }, {

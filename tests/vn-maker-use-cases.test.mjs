@@ -135,6 +135,28 @@ assert.equal(created.ok, true);
 assert.equal(created.projectDirectory, projectDirectory);
 assert.equal(created.project.characters.length, 1);
 
+await assert.rejects(
+  () => useCases.createProjectFromHeroine({
+    projectDirectory,
+    projectId: "second-project",
+    heroine,
+    title: "Second Project",
+    premise: "기존 히로인 기반 프로젝트를 덮어쓰면 안 된다."
+  }),
+  (error) => {
+    const failure = useCasesModule.projectActionFailureFromError(error, "createProjectFromHeroine");
+    assert.equal(failure.ok, false);
+    assert.equal(failure.action, "createProjectFromHeroine");
+    assert.equal(failure.code, "PROJECT_ID_MISMATCH");
+    assert.equal(failure.retryable, false);
+    assert.equal(failure.projectId, created.project.id);
+    assert.equal(failure.projectDirectory, projectDirectory);
+    return true;
+  }
+);
+const openedAfterBlockedHeroineCreate = await useCases.openProject({ projectDirectory });
+assert.equal(openedAfterBlockedHeroineCreate.project.id, created.project.id);
+
 const generatedPortrait = await useCases.generateImage({
   projectDirectory,
   kind: "portrait",
@@ -500,6 +522,31 @@ assert.equal(Boolean(plannedJob), true);
 const blockedExportWithPlannedCg = await useCases.exportProject({ projectDirectory }).catch((error) => error);
 assert.equal(blockedExportWithPlannedCg.code, "EXPORT_BLOCKED");
 assert.match(blockedExportWithPlannedCg.message, /완료되지 않은 이미지 작업/);
+const runningStore = await projectStoreModule.openProjectStore(projectDirectory);
+try {
+  const project = runningStore.requireProject();
+  runningStore.saveProject({
+    ...project,
+    generationJobs: project.generationJobs.map((job) => job.id === plannedJob.id ? { ...job, status: "running" } : job)
+  });
+} finally {
+  runningStore.close();
+}
+const blockedExportWithRunningCg = await useCases.exportProject({ projectDirectory }).catch((error) => error);
+assert.equal(blockedExportWithRunningCg.code, "EXPORT_BLOCKED");
+assert.equal(blockedExportWithRunningCg.workflowSummary.generationState, "running");
+assert.equal(blockedExportWithRunningCg.workflowSummary.exportState, "blocked");
+assert.equal(blockedExportWithRunningCg.workflowSummary.primaryAction, "goToAssets");
+const plannedStore = await projectStoreModule.openProjectStore(projectDirectory);
+try {
+  const project = plannedStore.requireProject();
+  plannedStore.saveProject({
+    ...project,
+    generationJobs: project.generationJobs.map((job) => job.id === plannedJob.id ? { ...job, status: "planned" } : job)
+  });
+} finally {
+  plannedStore.close();
+}
 const generated = await useCases.generateImage({
   projectDirectory,
   jobId: plannedJob.id

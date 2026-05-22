@@ -14,6 +14,7 @@ import {
   InputValidationError,
   projectActionFailureFromError,
   type EventTextGenerationAdapter,
+  type MakerActionId,
   type ProjectImageGenerationAdapter,
   type ProjectImageGenerationInput,
   type ProjectImageGenerationResult
@@ -136,10 +137,10 @@ function statusForError(error: unknown): number {
   return 500;
 }
 
-function errorBody(error: unknown): Record<string, unknown> {
+function errorBody(error: unknown, action?: MakerActionId): Record<string, unknown> {
   const errorRecord = asRecord(error);
   return {
-    ...projectActionFailureFromError(error),
+    ...projectActionFailureFromError(error, action),
     recentProject: errorRecord.recentProject && typeof errorRecord.recentProject === "object" ? errorRecord.recentProject : undefined
   };
 }
@@ -159,20 +160,21 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   });
 }
 
-async function jsonRoute(operation: () => Promise<Record<string, unknown>> | Record<string, unknown>): Promise<Response> {
+async function jsonRoute(operation: () => Promise<Record<string, unknown>> | Record<string, unknown>, action?: MakerActionId): Promise<Response> {
   try {
     return jsonResponse(await operation());
   } catch (error) {
-    return jsonResponse(errorBody(error), statusForError(error));
+    return jsonResponse(errorBody(error, action), statusForError(error));
   }
 }
 
 async function jsonBodyRoute(
   context: Context,
-  operation: (body: unknown) => Promise<Record<string, unknown>> | Record<string, unknown>
+  operation: (body: unknown) => Promise<Record<string, unknown>> | Record<string, unknown>,
+  action?: MakerActionId
 ): Promise<Response> {
   const body = await readRequestJson(context);
-  return jsonRoute(() => operation(body));
+  return jsonRoute(() => operation(body), action);
 }
 
 class ApiServices {
@@ -354,23 +356,23 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/codex/login", (context) => jsonBodyRoute(context, (body) => services.startLogin(body)));
   app.post("/api/codex/logout", () => jsonRoute(() => services.logout()));
 
-  app.post("/api/projects", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
-  app.post("/api/projects/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
-  app.post("/api/projects/reconnect", (context) => jsonBodyRoute(context, (body) => services.reconnectRecentProject(body)));
-  app.post("/api/projects/recent/list", () => jsonRoute(() => services.listRecentProjects()));
-  app.post("/api/projects/recent/remove", (context) => jsonBodyRoute(context, (body) => services.removeRecentProject(body)));
-  app.post("/api/projects/recent/restore", (context) => jsonBodyRoute(context, (body) => services.restoreRecentProject(body)));
-  app.post("/api/project/starter", (context) => jsonBodyRoute(context, (body) => services.createProject(body)));
-  app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body)));
+  app.post("/api/projects", (context) => jsonBodyRoute(context, (body) => services.createProject(body), "createProject"));
+  app.post("/api/projects/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body), "openProject"));
+  app.post("/api/projects/reconnect", (context) => jsonBodyRoute(context, (body) => services.reconnectRecentProject(body), "reconnectRecentProject"));
+  app.post("/api/projects/recent/list", () => jsonRoute(() => services.listRecentProjects(), "listRecentProjects"));
+  app.post("/api/projects/recent/remove", (context) => jsonBodyRoute(context, (body) => services.removeRecentProject(body), "removeRecentProject"));
+  app.post("/api/projects/recent/restore", (context) => jsonBodyRoute(context, (body) => services.restoreRecentProject(body), "restoreRecentProject"));
+  app.post("/api/project/starter", (context) => jsonBodyRoute(context, (body) => services.createProject(body), "createProject"));
+  app.post("/api/project/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body), "openProject"));
   app.post("/api/heroines/list", (context) => jsonBodyRoute(context, (body) => services.listHeroines(body)));
   app.post("/api/heroines/save", (context) => jsonBodyRoute(context, (body) => services.saveHeroine(body)));
   app.post("/api/heroines/clone", (context) => jsonBodyRoute(context, (body) => services.cloneHeroine(body)));
   app.post("/api/heroines/delete", (context) => jsonBodyRoute(context, (body) => services.deleteHeroine(body)));
-  app.post("/api/projects/from-heroine", (context) => jsonBodyRoute(context, (body) => services.createProjectFromHeroine(body)));
+  app.post("/api/projects/from-heroine", (context) => jsonBodyRoute(context, (body) => services.createProjectFromHeroine(body), "createProjectFromHeroine"));
   app.post("/api/projects/:projectId/heroine", (context) => jsonBodyRoute(context, (body) => services.assignHeroineSnapshot({
     ...asRecord(body),
     projectId: context.req.param("projectId")
-  })));
+  }), "assignHeroineSnapshot"));
   app.post("/api/project/characters", (context) => jsonBodyRoute(context, (body) => services.saveCharacter(body)));
   app.post("/api/project/scenes", (context) => jsonBodyRoute(context, (body) => services.saveScene(body)));
   app.post("/api/project/scenes/insert", (context) => jsonBodyRoute(context, (body) => services.insertManualScene(body)));
@@ -379,16 +381,16 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body)));
   app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
   app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));
-  app.post("/api/project/preview", (context) => jsonBodyRoute(context, (body) => services.previewProject(body)));
-  app.post("/api/project/export", (context) => jsonBodyRoute(context, (body) => services.exportProject(body)));
-  app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body)));
-  app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body)));
+  app.post("/api/project/preview", (context) => jsonBodyRoute(context, (body) => services.previewProject(body), "previewProject"));
+  app.post("/api/project/export", (context) => jsonBodyRoute(context, (body) => services.exportProject(body), "exportProject"));
+  app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body), "expandEvent"));
+  app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body), "approveEvent"));
   app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));
   app.post("/api/events/undo", (context) => jsonBodyRoute(context, (body) => services.undoPatch(body)));
 
   app.post("/api/generation/jobs", (context) => jsonBodyRoute(context, (body) => services.createGenerationJob(body)));
-  app.post("/api/generation/jobs/list", (context) => jsonBodyRoute(context, (body) => services.listGenerationJobs(body)));
-  app.post("/api/generation/jobs/run", (context) => jsonBodyRoute(context, (body) => services.runGenerationJobs(body)));
+  app.post("/api/generation/jobs/list", (context) => jsonBodyRoute(context, (body) => services.listGenerationJobs(body), "listGenerationJobs"));
+  app.post("/api/generation/jobs/run", (context) => jsonBodyRoute(context, (body) => services.runGenerationJobs(body), "runGenerationJobs"));
   app.post("/api/generation/default-emotions", (context) => jsonBodyRoute(context, (body) => services.planDefaultEmotionAssets(body)));
   app.post("/api/generation/expression-tags", (context) => jsonBodyRoute(context, (body) => services.planExpressionAssets(body)));
   app.post("/api/generation/images", (context) => jsonBodyRoute(context, (body) => services.generateImage(body)));

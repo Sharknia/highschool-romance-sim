@@ -20,10 +20,11 @@ import {
   type VnMakerProject,
   type VnMakerScene
 } from "@vn-maker/engine-core";
-import { createVnMakerUseCases, projectActionFailureFromError } from "@vn-maker/use-cases";
+import { createVnMakerUseCases, projectActionFailureFromError, type MakerActionId } from "@vn-maker/use-cases";
 
 interface CliInput {
   projectDirectory?: string;
+  sourceProjectDirectory?: string;
   project?: VnMakerProject;
   outputPath?: string;
   character?: VnMakerCharacter;
@@ -151,6 +152,26 @@ function printCapabilities(): void {
     purpose: "Codex/AI가 VN Maker Core를 안정적으로 호출하기 위한 기계용 인터페이스",
     sandbox: sandboxEnabled ? { enabled: true, provenance: ALPHA_SANDBOX_PROVENANCE } : { enabled: false }
   });
+}
+
+function actionForCommand(command: string): MakerActionId | undefined {
+  const actions: Partial<Record<string, MakerActionId>> = {
+    "create-project": "createProject",
+    "create-project-from-heroine": "createProjectFromHeroine",
+    "assign-heroine-snapshot": "assignHeroineSnapshot",
+    "open-project": "openProject",
+    "reconnect-project": "reconnectRecentProject",
+    "list-recent-projects": "listRecentProjects",
+    "remove-recent-project": "removeRecentProject",
+    "restore-recent-project": "restoreRecentProject",
+    "expand-event": "expandEvent",
+    "approve-event": "approveEvent",
+    "preview": "previewProject",
+    "export-web": "exportProject",
+    "list-generation-jobs": "listGenerationJobs",
+    "run-generation-jobs": "runGenerationJobs"
+  };
+  return actions[command];
 }
 
 async function run(): Promise<void> {
@@ -406,7 +427,7 @@ async function run(): Promise<void> {
 }
 
 run().catch((error: unknown) => {
-  writeJson(projectActionFailureFromError(error));
+  writeJson(projectActionFailureFromError(error, actionForCommand(process.argv[2] || "inspect")));
   process.exitCode = 1;
 }).finally(() => {
   sharedCodexAppServerClient.close();

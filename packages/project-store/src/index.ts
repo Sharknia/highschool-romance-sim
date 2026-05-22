@@ -100,6 +100,17 @@ export interface ProjectValidationResult {
   issues: ValidationIssue[];
 }
 
+export class PatchStaleError extends Error {
+  readonly code = "PATCH_STALE";
+  readonly issues: ValidationIssue[];
+
+  constructor(issues: ValidationIssue[]) {
+    super(`패치 검증 실패: ${issues.map((issue) => issue.message).join(", ")}`);
+    this.name = "PatchStaleError";
+    this.issues = issues;
+  }
+}
+
 export interface ApplyEventExpansionResult {
   project: VnMakerProject;
   validation: ProjectValidationResult;
@@ -1050,7 +1061,7 @@ ON CONFLICT(id) DO UPDATE SET
     return heroine;
   }
 
-  recordHeroineReuse(heroineId: string, project: VnMakerProject): HeroineProfile | null {
+  recordHeroineReuse(heroineId: string, project: VnMakerProject, projectDirectory = this.paths.projectDirectory): HeroineProfile | null {
     const heroine = this.listHeroines().find((item) => item.id === heroineId);
     if (!heroine) {
       return null;
@@ -1059,7 +1070,7 @@ ON CONFLICT(id) DO UPDATE SET
     const record: HeroineReuseRecord = {
       projectId: project.id,
       projectTitle: project.title,
-      projectDirectory: this.paths.projectDirectory,
+      projectDirectory,
       snapshotCharacterId: snapshot?.id || heroineId,
       snapshotCreatedAt: snapshot?.sourceSnapshotCreatedAt || new Date().toISOString()
     };
@@ -1313,6 +1324,9 @@ VALUES (
         diff: patchValidation.diff,
         beforeProject: project
       });
+      if (patchValidation.issues.some((issue) => issue.path === "request.baseProjectHash")) {
+        throw new PatchStaleError(patchValidation.issues);
+      }
       throw new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`);
     }
 
