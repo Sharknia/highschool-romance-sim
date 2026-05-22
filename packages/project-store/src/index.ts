@@ -615,22 +615,17 @@ function applyGenerationPolicy(project: VnMakerProject, input: StoreGenerationRe
 
   const outputAssetId = input.asset.id;
   const outputJobId = input.job.id;
-  const replacedGeneratedAssetIds = new Set(nextProject.assets
-    .filter((asset) => asset.kind === "background" && asset.source === "generated" && asset.id !== outputAssetId)
+  const replacedBackgroundAssetIds = new Set(nextProject.assets
+    .filter((asset) => asset.kind === "background" && asset.id !== outputAssetId)
     .map((asset) => asset.id));
 
   nextProject.assets = nextProject.assets.filter((asset) => {
-    return !(asset.kind === "background" && asset.source === "generated" && asset.id !== outputAssetId);
+    return !(asset.kind === "background" && asset.id !== outputAssetId);
   });
-  nextProject.generationJobs = nextProject.generationJobs.filter((job) => {
-    return job.kind !== "background"
-      || job.id === outputJobId
-      || !job.outputAssetId
-      || !replacedGeneratedAssetIds.has(job.outputAssetId);
-  });
+  nextProject.generationJobs = nextProject.generationJobs.filter((job) => job.kind !== "background" || job.id === outputJobId);
 
   nextProject.scenes = nextProject.scenes.map((scene) => {
-    if (scene.backgroundAssetId && replacedGeneratedAssetIds.has(scene.backgroundAssetId)) {
+    if (scene.backgroundAssetId && replacedBackgroundAssetIds.has(scene.backgroundAssetId)) {
       return { ...scene, backgroundAssetId: outputAssetId };
     }
     return scene;

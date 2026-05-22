@@ -117,7 +117,7 @@ function statusForError(error: unknown): number {
   if (errorRecord.code === "RECENT_PROJECT_INDEX_MISS" || errorRecord.code === "PROJECT_DIRECTORY_MISSING" || errorRecord.code === "PROJECT_NOT_FOUND") {
     return 404;
   }
-  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "EXPORT_BLOCKED" || errorRecord.code === "JOB_ALREADY_RUNNING") {
+  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "PREVIEW_BLOCKED" || errorRecord.code === "EXPORT_BLOCKED" || errorRecord.code === "JOB_ALREADY_RUNNING") {
     return 409;
   }
   if (errorRecord.code === "OAUTH_REQUIRED") {
@@ -173,7 +173,7 @@ function statusForBody(body: unknown): number {
   if (record.ok !== false || typeof record.code !== "string") {
     return 200;
   }
-  if (record.code.startsWith("PROJECT_") || record.code === "EXPORT_BLOCKED" || record.code === "PATCH_STALE" || record.code === "JOB_ALREADY_RUNNING") {
+  if (record.code.startsWith("PROJECT_") || record.code === "PREVIEW_BLOCKED" || record.code === "EXPORT_BLOCKED" || record.code === "PATCH_STALE" || record.code === "JOB_ALREADY_RUNNING") {
     return statusForError({ code: record.code, message: record.message });
   }
   if (isHeroineActionFailure(body)) {

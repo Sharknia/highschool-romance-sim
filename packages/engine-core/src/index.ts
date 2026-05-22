@@ -1129,6 +1129,28 @@ export function createEventExpansionRequest(
   };
 }
 
+export function createBlankProject(input: CreateStarterProjectInput = {}): VnMakerProject {
+  const title = input.title || "새 미연시 프로젝트";
+  const id = input.id || normalizeId(title);
+
+  return {
+    version: "vn-maker/v1",
+    id,
+    title,
+    premise: input.premise || "",
+    characters: [],
+    routes: [],
+    scenes: [],
+    assets: [],
+    generationJobs: [],
+    settings: {
+      defaultRouteId: "",
+      outputFileName: "index.html",
+      language: "ko"
+    }
+  };
+}
+
 export function createStarterProject(input: CreateStarterProjectInput = {}): VnMakerProject {
   const title = input.title || "새 미연시 프로젝트";
   const id = input.id || normalizeId(title);

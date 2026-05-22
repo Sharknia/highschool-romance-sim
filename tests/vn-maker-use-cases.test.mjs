@@ -90,6 +90,8 @@ const heroine = core.createHeroineProfile({
 
 const emptyLibraryDirectory = join(tempRoot, "EmptyHeroineLibrary.vnmaker");
 const blankProjectDirectory = join(tempRoot, "BlankProject.vnmaker");
+const blankStarterProjectDirectory = join(tempRoot, "BlankStarterProject.vnmaker");
+const starterBackgroundProjectDirectory = join(tempRoot, "StarterBackgroundProject.vnmaker");
 const emptyLibrary = await useCases.listHeroines({ projectDirectory: emptyLibraryDirectory });
 assert.equal(emptyLibrary.ok, true);
 assert.deepEqual(emptyLibrary.heroines, []);
@@ -479,19 +481,11 @@ assert.equal(
   true,
   "직접 생성된 배경은 프로젝트 장면 backgroundAssetId에 연결되어야 합니다."
 );
-
-const backgroundRun = await useCases.runGenerationJobs({
-  projectDirectory,
-  jobIds: ["job-usecase-background"],
-  replaceCompleted: true
-});
-assert.equal(backgroundRun.ok, true);
-assert.equal(backgroundRun.assets[0].kind, "background");
-assert.equal(backgroundRun.backgroundPolicy.limit, 1);
-const projectAfterBackground = backgroundRun.project;
+assert.equal(generatedBackground.project.generationJobs.some((job) => job.id === "job-usecase-background"), false);
+const projectAfterBackground = generatedBackground.project;
 assert.equal(projectAfterBackground.assets.filter((asset) => asset.kind === "background").length, 1);
 assert.equal(
-  projectAfterBackground.scenes.some((scene) => scene.backgroundAssetId === "asset-usecase-background"),
+  projectAfterBackground.scenes.some((scene) => scene.backgroundAssetId === "asset-direct-background"),
   true,
   "생성된 배경은 프로젝트 장면 backgroundAssetId에 연결되어야 합니다."
 );
@@ -513,8 +507,11 @@ const secondBackground = await useCases.createGenerationJob({
 });
 assert.equal(secondBackground.ok, true);
 assert.equal(secondBackground.backgroundPolicy.limit, 1);
-assert.equal(secondBackground.backgroundPolicy.existingAssetId, "asset-usecase-background");
+assert.equal(secondBackground.backgroundPolicy.existingAssetId, "asset-direct-background");
 assert.equal(secondBackground.backgroundPolicy.replacesExisting, true);
+const secondBackgroundJobs = secondBackground.project.generationJobs.filter((job) => job.kind === "background");
+assert.equal(secondBackgroundJobs.length, 1);
+assert.equal(secondBackgroundJobs[0].id, "job-usecase-background-second");
 const secondBackgroundRun = await useCases.runGenerationJobs({
   projectDirectory,
   jobIds: ["job-usecase-background-second"],
@@ -648,6 +645,31 @@ await assert.rejects(
   }
 );
 
+const starterBackgroundProject = await useCases.createProject({
+  projectDirectory: starterBackgroundProjectDirectory,
+  starter: {
+    id: "starter-background-policy",
+    title: "Starter Background Policy",
+    premise: "starter placeholder 배경도 단일 배경 정책으로 교체되어야 한다."
+  }
+});
+assert.equal(starterBackgroundProject.ok, true);
+assert.equal(starterBackgroundProject.project.assets.filter((asset) => asset.kind === "background").length, 1);
+const starterBackgroundGenerated = await useCases.generateImage({
+  projectDirectory: starterBackgroundProjectDirectory,
+  kind: "background",
+  targetId: starterBackgroundProject.project.id,
+  prompt: "replacement classroom background",
+  outputAssetId: "asset-starter-background-replacement"
+});
+assert.equal(starterBackgroundGenerated.ok, true);
+assert.equal(starterBackgroundGenerated.project.assets.filter((asset) => asset.kind === "background").length, 1);
+assert.equal(starterBackgroundGenerated.project.assets.some((asset) => asset.id === "asset-classroom-bg"), false);
+assert.equal(
+  starterBackgroundGenerated.project.scenes.every((scene) => scene.backgroundAssetId === "asset-starter-background-replacement"),
+  true
+);
+
 const blankProject = await useCases.createProject({
   projectDirectory: blankProjectDirectory,
   project: {
@@ -670,7 +692,9 @@ const blankProject = await useCases.createProject({
 assert.equal(blankProject.ok, true);
 assert.equal(blankProject.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), true);
 const previewBeforeReady = await useCases.previewProject({ projectDirectory: blankProjectDirectory });
-assert.equal(previewBeforeReady.ok, true);
+assert.equal(previewBeforeReady.ok, false);
+assert.equal(previewBeforeReady.code, "PREVIEW_BLOCKED");
+assert.equal(previewBeforeReady.runtime, undefined);
 assert.equal(previewBeforeReady.previewReadiness.state, "blocked");
 assert.equal(previewBeforeReady.previewReadiness.availableState, "blocked");
 assert.equal(previewBeforeReady.previewReadiness.canRun, false);
@@ -678,6 +702,25 @@ assert.equal(previewBeforeReady.previewReadiness.missingItems.some((item) => ite
 assert.equal(previewBeforeReady.previewReadiness.missingItems.some((item) => item.tab === "background"), true);
 assert.equal(previewBeforeReady.previewReadiness.nextActions.some((action) => action.tab === "heroine" && action.label.includes("해결 탭으로 이동")), true);
 assert.equal(previewBeforeReady.previewReadiness.retryable, false);
+
+const blankStarterProject = await useCases.createProject({
+  projectDirectory: blankStarterProjectDirectory,
+  blank: true,
+  starter: {
+    id: "blank-starter-alpha",
+    title: "Blank Starter Alpha",
+    premise: "UI의 빈 프로젝트 모드가 starter sample을 만들지 않아야 한다."
+  }
+});
+assert.equal(blankStarterProject.ok, true);
+assert.equal(blankStarterProject.project.id, "blank-starter-alpha");
+assert.equal(blankStarterProject.project.characters.length, 0);
+assert.equal(blankStarterProject.project.routes.length, 0);
+assert.equal(blankStarterProject.project.scenes.length, 0);
+assert.equal(blankStarterProject.project.assets.length, 0);
+assert.equal(blankStarterProject.project.generationJobs.length, 0);
+assert.equal(blankStarterProject.workflowSummary.blockingIssues.includes("히로인 1명을 먼저 선택해야 합니다."), true);
+
 const assignedSnapshot = await useCases.assignHeroineSnapshot({
   projectDirectory: blankProjectDirectory,
   heroine
@@ -778,10 +821,10 @@ const invalidPreview = await useCases.previewProject({
   projectDirectory: manualProjectDirectory,
   startSceneId: manualOpening
 });
-assert.equal(invalidPreview.ok, true);
-assert.equal(invalidPreview.runtime.validation.ok, false);
+assert.equal(invalidPreview.ok, false);
+assert.equal(invalidPreview.code, "PREVIEW_BLOCKED");
+assert.equal(invalidPreview.runtime, undefined);
 assert.equal(invalidPreview.validation.ok, false);
-assert.equal(invalidPreview.routeGraphAnalysis.uncoveredTerminalSceneIds.includes(manualOpening), true);
 assert.equal(invalidPreview.previewReadiness.state, "blocked");
 assert.equal(invalidPreview.previewReadiness.failureCause.includes("문제 확인 결과"), true);
 assert.equal(invalidPreview.previewReadiness.blockingIssues.length > 0, true);

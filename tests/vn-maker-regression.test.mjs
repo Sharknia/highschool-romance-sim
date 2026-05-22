@@ -1312,6 +1312,21 @@ assert.equal(generatedCg.body.asset.id, plannedCgJob.outputAssetId);
 assert.equal(generatedCg.body.job.status, "completed");
 assert.equal(existsSync(join(alphaDirectory, "assets", "generated", `${plannedCgJob.outputAssetId}.png`)), true);
 
+const generatedAlphaBackground = await mockApi({
+  method: "POST",
+  path: "/api/generation/images",
+  body: {
+    projectDirectory: alphaDirectory,
+    kind: "background",
+    targetId: approvedProject.id,
+    outputAssetId: "asset-alpha-background",
+    prompt: "library event background",
+    style: "soft visual novel background"
+  }
+});
+assert.equal(generatedAlphaBackground.status, 200);
+assert.equal(generatedAlphaBackground.body.asset.kind, "background");
+
 const apiPreview = await mockApi({
   method: "POST",
   path: "/api/project/preview",

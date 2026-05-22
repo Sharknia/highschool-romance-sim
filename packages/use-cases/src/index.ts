@@ -6,6 +6,7 @@ import {
   analyzeRouteGraph,
   buildProjectHtml,
   createAssetManifest,
+  createBlankProject,
   createDeterministicEventExpansionPlan,
   createEventExpansionRequest,
   createHeroineProfile,
@@ -259,6 +260,7 @@ export type ProjectActionFailureCode =
   | "HEROINE_REPLACE_BLOCKED"
   | "PATCH_STALE"
   | "JOB_ALREADY_RUNNING"
+  | "PREVIEW_BLOCKED"
   | "EXPORT_BLOCKED"
   | "OAUTH_REQUIRED"
   | "SERVER_ERROR";
@@ -814,6 +816,7 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
     || code === "HEROINE_REPLACE_BLOCKED"
     || code === "PATCH_STALE"
     || code === "JOB_ALREADY_RUNNING"
+    || code === "PREVIEW_BLOCKED"
     || code === "EXPORT_BLOCKED"
     || code === "OAUTH_REQUIRED"
   ) {
@@ -1875,7 +1878,9 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async createProject(input: unknown) {
       const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
       assertProjectIdCanBeCreated(input);
-      const project = optionalProject(input) || createStarterProject(optionalStarter(input));
+      const record = asRecord(input);
+      const project = optionalProject(input)
+        || (record.blank === true ? createBlankProject(optionalStarter(input)) : createStarterProject(optionalStarter(input)));
       await assertProjectCreationTargetAvailable(projectDirectory, project);
       const store = await createProjectWorkspace({
         projectDirectory,
@@ -2622,6 +2627,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const project = store.requireProject();
+        const validation = store.validateAndStore();
+        const initialReadiness = previewReadinessFor(project, validation);
+        if (!initialReadiness.canRun) {
+          return withActionState("previewProject", {
+            ok: false,
+            code: "PREVIEW_BLOCKED",
+            message: initialReadiness.failureCause,
+            error: initialReadiness.failureCause,
+            projectDirectory: store.paths.projectDirectory,
+            validation,
+            previewReadiness: initialReadiness
+          }, { project, validation });
+        }
         let runtime;
         let routeGraphAnalysis;
         try {
@@ -2645,6 +2663,17 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           }, { project, validation });
         }
         const previewReadiness = previewReadinessFor(project, runtime.validation);
+        if (!previewReadiness.canRun) {
+          return withActionState("previewProject", {
+            ok: false,
+            code: "PREVIEW_BLOCKED",
+            message: previewReadiness.failureCause,
+            error: previewReadiness.failureCause,
+            projectDirectory: store.paths.projectDirectory,
+            validation: runtime.validation,
+            previewReadiness
+          }, { project, validation: runtime.validation });
+        }
         return withActionState("previewProject", {
           projectDirectory: store.paths.projectDirectory,
           runtime,
@@ -2717,6 +2746,9 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const job = createImageGenerationJob(generationJobInput(input));
         const project = store.requireProject();
         const policy = job.kind === "background" ? backgroundPolicy(project) : undefined;
+        if (job.kind === "background") {
+          project.generationJobs = project.generationJobs.filter((item) => item.kind !== "background" || item.id === job.id);
+        }
         const index = project.generationJobs.findIndex((item) => item.id === job.id);
         if (index >= 0) {
           project.generationJobs[index] = job;

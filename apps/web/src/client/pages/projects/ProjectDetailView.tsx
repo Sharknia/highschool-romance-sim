@@ -355,6 +355,7 @@ export function ProjectDetailView({
   const hasBackgroundJob = backgroundJobs.length > 0;
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
   const currentPreviewReadiness = previewReadiness || fallbackPreviewReadiness(currentProject, summary);
+  const previewRunBlocked = currentPreviewReadiness.canRun === false;
   const currentExportPlan = exportPlan || fallbackExportPlan(currentProject, summary);
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
@@ -834,6 +835,8 @@ export function ProjectDetailView({
     const messages = issues.map(issueText);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       setPreviewState("failed");
+      setPreviewRuntime(null);
+      setPreviewSceneId("");
       setPreviewIssues(messages);
       setPreviewReadiness({
         ...currentPreviewReadiness,
@@ -865,11 +868,14 @@ export function ProjectDetailView({
         startSceneId
       });
       if (result.ok === false) {
-        setPreviewState("failed");
+        const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false;
+        setPreviewState(blocked ? "blocked" : "failed");
+        setPreviewRuntime(null);
+        setPreviewSceneId("");
         setPreviewReadiness(result.previewReadiness || {
           ...currentPreviewReadiness,
-          state: "failed",
-          availableState: "failed",
+          state: blocked ? "blocked" : "failed",
+          availableState: blocked ? "blocked" : "failed",
           failureCause: result.message || result.error || "프리뷰 생성에 실패했습니다.",
           retryable: result.retryable
         });
@@ -881,12 +887,16 @@ export function ProjectDetailView({
       setPreviewRuntime(nextRuntime);
       setPreviewSceneId(startSceneId || nextRuntime?.startSceneId || "");
       setPreviewIssues(validationMessages(result));
-      setPreviewReadiness(result.previewReadiness || null);
-      setPreviewState(result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
-      setPreviewStatus(result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
+      const nextReadiness = result.previewReadiness || null;
+      const blocked = nextReadiness?.canRun === false;
+      setPreviewReadiness(nextReadiness);
+      setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
+      setPreviewStatus(blocked ? nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");
+      setPreviewRuntime(null);
+      setPreviewSceneId("");
       setPreviewReadiness({
         ...currentPreviewReadiness,
         state: "failed",
@@ -1235,10 +1245,10 @@ export function ProjectDetailView({
                 </select>
               </label>
               <div className="button-row">
-                <Button disabled={previewBusy || !currentProject} icon={<Play size={16} />} onClick={() => void runPreview()} variant="primary">
+                <Button disabled={previewBusy || !currentProject || previewRunBlocked} icon={<Play size={16} />} onClick={() => void runPreview()} variant="primary">
                   처음부터 플레이
                 </Button>
-                <Button disabled={previewBusy || !currentProject} icon={<Play size={16} />} onClick={() => void runPreview(previewSceneId || currentProject?.scenes?.[0]?.id)}>
+                <Button disabled={previewBusy || !currentProject || previewRunBlocked} icon={<Play size={16} />} onClick={() => void runPreview(previewSceneId || currentProject?.scenes?.[0]?.id)}>
                   현재 씬
                 </Button>
                 <Button disabled={previewBusy || !currentProject} icon={<CheckCircle2 size={16} />} onClick={() => void validateBeforePreview()}>

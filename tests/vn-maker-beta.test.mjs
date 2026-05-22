@@ -118,6 +118,15 @@ assert.equal(reusedHeroine.reuseHistory.length, 1);
 assert.equal(reusedHeroine.reuseHistory[0].projectId, "하루-beta");
 assert.equal(reusedHeroine.reuseHistory[0].projectDirectory, fromLibraryProjectDirectory);
 const activeProjectDirectory = fromLibraryProjectDirectory;
+const betaBackground = await useCases.generateImage({
+  projectDirectory: activeProjectDirectory,
+  kind: "background",
+  targetId: fromLibrary.project.id,
+  prompt: "festival classroom background",
+  outputAssetId: "asset-beta-background"
+});
+assert.equal(betaBackground.ok, true);
+assert.equal(betaBackground.asset.kind, "background");
 
 const defaults = await useCases.planDefaultEmotionAssets({
   projectDirectory: activeProjectDirectory,
