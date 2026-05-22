@@ -7,12 +7,13 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const isWindows = process.platform === "win32";
 const npmCommand = isWindows ? "npm.cmd" : "npm";
 const viteCommand = isWindows ? "vite.cmd" : "vite";
+const repoRoot = resolve(appRoot, "../..");
 const children = new Set();
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
-      cwd: appRoot,
+      cwd: options.cwd || appRoot,
       env: { ...process.env, ...options.env },
       stdio: options.stdio || "inherit"
     });
@@ -34,7 +35,7 @@ function run(command, args, options = {}) {
 
 function start(command, args, options = {}) {
   const child = spawn(command, args, {
-    cwd: appRoot,
+    cwd: options.cwd || appRoot,
     env: { ...process.env, ...options.env },
     stdio: options.stdio || "inherit"
   });
@@ -67,6 +68,7 @@ process.on("SIGTERM", () => shutdown(0));
 
 const devServerConfig = resolveWebDevServerConfig(process.env);
 
+await run(npmCommand, ["run", "build:web-deps"], { cwd: repoRoot });
 await run(npmCommand, ["run", "build:server"]);
 start(process.execPath, ["dist/server/server.js"], {
   env: {
