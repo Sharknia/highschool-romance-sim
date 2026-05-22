@@ -33,6 +33,8 @@ export function App() {
           <Route element={<AuthGate />}>
             <Route element={<WorkspaceLayout />}>
               <Route path="/projects" element={<ProjectStartPage />} />
+              <Route path="/projects/:projectId" element={<ProjectStartPage />} />
+              <Route path="/projects/:projectId/:tab" element={<ProjectStartPage />} />
               <Route path="/heroines" element={<HeroineStartPage />} />
               <Route path="/settings" element={<SettingsStartPage />} />
               <Route path="*" element={<NotFoundPage />} />

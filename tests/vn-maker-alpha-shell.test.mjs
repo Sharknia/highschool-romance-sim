@@ -19,6 +19,9 @@ assert.match(
 ["/projects", "/heroines", "/settings"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 인증 앱 라우트가 있어야 합니다.`);
 });
+["/projects/:projectId", "/projects/:projectId/:tab"].forEach((path) => {
+  assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 프로젝트 상세 deep link 라우트가 있어야 합니다.`);
+});
 assert.doesNotMatch(
   appSource,
   /<Route path="\/" element={<WorkspacePage \/?>} \/>/,
@@ -54,6 +57,19 @@ assert.match(notFoundSource, /to="\/projects"/, "인증 후 Not Found 복귀 링
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");
+["overview", "heroine", "event", "assets", "preview", "export"].forEach((tab) => {
+  assert.match(projectStartSource, new RegExp(tab), `ProjectStartPage는 ${tab} 상세 탭 deep link를 다뤄야 합니다.`);
+});
+[
+  "/api/projects/recent/list",
+  "/api/projects/recent/remove",
+  "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
+  "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
+  "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.",
+  "목록에서만 제거"
+].forEach((requiredText) => {
+  assert.match(projectStartSource, new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `ProjectStartPage에 '${requiredText}' 문구 또는 API 호출이 있어야 합니다.`);
+});
 
 const heroineStartSource = readText("apps/web/src/client/pages/HeroineStartPage.tsx");
 const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
