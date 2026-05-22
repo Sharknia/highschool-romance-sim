@@ -60,6 +60,14 @@ export interface CreateHeroineProfileInput {
   reuseHistory?: HeroineReuseRecord[];
 }
 
+export const DEFAULT_HEROINE_PORTRAIT_STYLE = "soft, polished romance visual novel sprite, full-body standing pose, transparent background";
+
+export function createHeroinePortraitPrompt(heroine: Pick<HeroineProfile, "name" | "appearance">): string {
+  const name = heroine.name.trim();
+  const appearance = heroine.appearance.trim() || "visual novel heroine";
+  return `${name}, ${appearance}, full-body standing visual novel heroine character sprite, head-to-toe framing, transparent background, clean anime style, teen safe`;
+}
+
 export interface VnMakerCharacter {
   id: string;
   displayName: string;
@@ -1075,8 +1083,8 @@ export function createProjectFromHeroine(input: CreateProjectFromHeroineInput): 
         id: `job-${input.heroine.id}-portrait`,
         kind: "portrait",
         targetId: input.heroine.id,
-        prompt: `${input.heroine.name}, ${input.heroine.appearance}, clean visual novel heroine portrait`,
-        style: "soft, polished, romance visual novel",
+        prompt: createHeroinePortraitPrompt(input.heroine),
+        style: DEFAULT_HEROINE_PORTRAIT_STYLE,
         outputAssetId: portraitAssetId
       })
     ],
@@ -1192,8 +1200,8 @@ export function createStarterProject(input: CreateStarterProjectInput = {}): VnM
         id: "job-haru-portrait",
         kind: "portrait",
         targetId: "haru",
-        prompt: "high school visual novel heroine, clean anime portrait, transparent background",
-        style: "soft, polished, romance visual novel",
+        prompt: createHeroinePortraitPrompt({ name: "하루", appearance: "교복 차림의 고등학생 히로인" }),
+        style: DEFAULT_HEROINE_PORTRAIT_STYLE,
         outputAssetId: "asset-haru-portrait"
       })
     ],
