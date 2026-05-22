@@ -22,6 +22,7 @@ assert.match(
 ["/projects/:projectId", "/projects/:projectId/:tab"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 프로젝트 상세 deep link 라우트가 있어야 합니다.`);
 });
+assert.match(appSource, /<Route path="\/heroines\/:heroineId"/, "`/heroines/:heroineId` 히로인 상세 라우트가 있어야 합니다.");
 assert.doesNotMatch(
   appSource,
   /<Route path="\/" element={<WorkspacePage \/?>} \/>/,
@@ -81,7 +82,27 @@ const projectDetailViewSource = readText(projectDetailViewPath);
 const heroineStartSource = readText("apps/web/src/client/pages/HeroineStartPage.tsx");
 const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
 assert.doesNotMatch(heroineStartSource, /setShellState/, "HeroineStartPage는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
-assert.doesNotMatch(heroineStartSource, /postAuthedJson|\/api\/heroines\//, "HeroineStartPage는 SA-101 히로인 저장 API 범위를 선점하면 안 됩니다.");
+assert.match(heroineStartSource, /\/api\/heroines\/list/, "HeroineStartPage는 히로인 목록 API를 호출해야 합니다.");
+assert.match(heroineStartSource, /\/api\/heroines\/save/, "HeroineStartPage는 히로인 저장 API를 호출해야 합니다.");
+assert.match(heroineStartSource, /\/api\/heroines\/delete/, "HeroineStartPage는 히로인 삭제 API를 호출해야 합니다.");
+[
+  "아직 히로인이 없습니다.",
+  "히로인 목록을 불러오는 중입니다.",
+  "히로인 목록을 불러오지 못했습니다.",
+  "히로인을 선택하거나 새로 만드세요.",
+  "필수값을 모두 입력해야 저장할 수 있습니다.",
+  "히로인 ID",
+  "말투",
+  "외형 설명"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(heroineStartSource, pattern, `HeroineStartPage에 '${requiredText}' 문구가 있어야 합니다.`);
+});
+assert.doesNotMatch(
+  heroineStartSource,
+  /히로인 검색|태그 필터|히로인 정렬|복제|기본 감정|추가 태그/,
+  "Alpha 히로인 화면은 Beta 기능을 전면 노출하면 안 됩니다."
+);
 assert.doesNotMatch(settingsStartSource, /setShellState/, "SettingsStartPage는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
 assert.doesNotMatch(settingsStartSource, /describeSession|session\?|logout\(/, "SettingsStartPage는 SA-108의 Codex 상세/로그아웃 범위를 선점하면 안 됩니다.");
 assert.doesNotMatch(settingsStartSource, /생성 기본값|soft visual novel|Codex imageGeneration/, "SettingsStartPage는 SA-108의 생성 기본값 범위를 선점하면 안 됩니다.");
