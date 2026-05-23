@@ -11,6 +11,7 @@ import { sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSessi
 import { resolveProjectWorkspacePaths } from "@vn-maker/project-store";
 import {
   createVnMakerUseCases,
+  createProjectJsonParseFailureError,
   heroineFailureStatus,
   InputValidationError,
   isHeroineActionFailure,
@@ -157,7 +158,7 @@ async function readRequestJson(context: { req: { json(): Promise<unknown> } }): 
   try {
     return await context.req.json();
   } catch {
-    return undefined;
+    throw createProjectJsonParseFailureError();
   }
 }
 
@@ -196,8 +197,7 @@ async function jsonBodyRoute(
   operation: (body: unknown) => Promise<unknown> | unknown,
   action?: MakerActionId
 ): Promise<Response> {
-  const body = await readRequestJson(context);
-  return jsonRoute(() => operation(body), action);
+  return jsonRoute(async () => operation(await readRequestJson(context)), action);
 }
 
 class ApiServices {

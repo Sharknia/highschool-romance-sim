@@ -410,6 +410,12 @@ export class InputValidationError extends Error {
   }
 }
 
+export function createProjectJsonParseFailureError(): InputValidationError {
+  return new InputValidationError("JSON 입력을 해석하지 못했습니다.", [
+    { severity: "error", path: "$", message: "요청 본문은 유효한 JSON이어야 합니다." }
+  ]);
+}
+
 export class RecentProjectIndexMissError extends Error {
   readonly code = "RECENT_PROJECT_INDEX_MISS";
   readonly projectId: string;

@@ -20,7 +20,7 @@ import {
   type VnMakerProject,
   type VnMakerScene
 } from "@vn-maker/engine-core";
-import { createVnMakerUseCases, projectActionFailureFromError, type MakerActionId } from "@vn-maker/use-cases";
+import { createProjectJsonParseFailureError, createVnMakerUseCases, projectActionFailureFromError, type MakerActionId } from "@vn-maker/use-cases";
 
 interface CliInput {
   projectDirectory?: string;
@@ -77,7 +77,14 @@ function readStdin(): string {
 
 function parseInput(): CliInput {
   const raw = readStdin();
-  return raw ? JSON.parse(raw) as CliInput : {};
+  if (!raw) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw) as CliInput;
+  } catch {
+    throw createProjectJsonParseFailureError();
+  }
 }
 
 function writeJson(value: unknown): void {
