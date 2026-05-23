@@ -226,6 +226,9 @@ assert.doesNotMatch(projectStartSource, /confirmationTitle:\s*confirmationTitle\
 assert.doesNotMatch(projectStartSource, /aria-label="보조 프로젝트 작업"/, "/projects 루트는 저장 위치/현재 상태 보조 패널을 기본 렌더링하면 안 됩니다.");
 assert.doesNotMatch(projectStartSource, /!\s*projectId\s*\?\s*detailView/, "/projects 루트는 선택되지 않은 상세 view를 하단에 다시 렌더링하면 안 됩니다.");
 assert.match(projectStartSource, /reconnectTarget\s*\?\s*\(/, "프로젝트 재연결 입력은 missing 항목을 선택했을 때만 조건부로 보여야 합니다.");
+assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<header className="page-hero"/, "목록용 hero와 새 프로젝트 CTA는 /projects 루트에서만 렌더링해야 합니다.");
+assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<RecentProjectList/, "프로젝트 목록은 /projects 루트에서만 렌더링해야 합니다.");
+assert.match(projectStartSource, /\{projectId \? detailView : null\}\s*\{projectStatusBanner\}/, "상세 route에서는 상세 shell이 상태 배너보다 먼저 렌더링되어야 합니다.");
 [
   "프로젝트 목록을 불러오는 중입니다.",
   "아직 최근 프로젝트가 없습니다.",

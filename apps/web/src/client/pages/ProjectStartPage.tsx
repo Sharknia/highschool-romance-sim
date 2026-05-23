@@ -443,56 +443,62 @@ export function ProjectStartPage() {
       workflowSummary={workflowSummary}
     />
   ) : null;
+  const projectStatusBanner = (
+    <StatusBanner tone={statusTone(status)}>
+      <span className="page-status">{status}</span>
+      {deleteError && deleteErrorSource === "recent" ? (
+        <span className="page-status">{deleteError}</span>
+      ) : null}
+      {removedProject ? (
+        <Button disabled={busy} onClick={() => void restoreRecentProject()} variant="ghost">
+          되돌리기
+        </Button>
+      ) : null}
+    </StatusBanner>
+  );
 
   return (
     <section className="app-page" aria-labelledby="projectsTitle">
-      <header className="page-hero">
-        <div>
-          <p className="eyebrow">Projects</p>
-          <h1 id="projectsTitle">프로젝트 관리</h1>
-          <p>최근 프로젝트를 열고 Alpha 제작 루프의 상세 탭으로 바로 진입합니다.</p>
-        </div>
-        <div className="page-primary-action">
-          <span>새 제작 프로젝트가 필요하면 생성 흐름으로 이동합니다.</span>
-          <Button disabled={busy} icon={<Plus size={18} />} onClick={() => navigate("/projects/new")} variant="primary">
-            새 프로젝트 만들기
-          </Button>
-        </div>
-      </header>
-
-      <StatusBanner tone={statusTone(status)}>
-        <span className="page-status">{status}</span>
-        {deleteError && deleteErrorSource === "recent" ? (
-          <span className="page-status">{deleteError}</span>
-        ) : null}
-        {removedProject ? (
-          <Button disabled={busy} onClick={() => void restoreRecentProject()} variant="ghost">
-            되돌리기
-          </Button>
-        ) : null}
-      </StatusBanner>
+      {!projectId ? (
+        <header className="page-hero">
+          <div>
+            <p className="eyebrow">Projects</p>
+            <h1 id="projectsTitle">프로젝트 관리</h1>
+            <p>최근 프로젝트를 열고 Alpha 제작 루프의 상세 탭으로 바로 진입합니다.</p>
+          </div>
+          <div className="page-primary-action">
+            <span>새 제작 프로젝트가 필요하면 생성 흐름으로 이동합니다.</span>
+            <Button disabled={busy} icon={<Plus size={18} />} onClick={() => navigate("/projects/new")} variant="primary">
+              새 프로젝트 만들기
+            </Button>
+          </div>
+        </header>
+      ) : null}
 
       {projectId ? detailView : null}
+      {projectStatusBanner}
 
-      <RecentProjectList
-        busy={busy}
-        errorText={projectListError}
-        listState={projectListState}
-        loadedAt={recentMeta.loadedAt}
-        missingCount={recentMeta.missingCount}
-        onOpen={(entry) => void openProject("최근 프로젝트 상세보기", { projectId: entry.projectId })}
-        onPrepareDelete={(entry, trigger) => prepareProjectDelete(entry, trigger)}
-        onPrepareReconnect={(entry) => {
-          setReconnectProjectId(entry.projectId);
-          setProjectDirectoryInput(entry.missing ? "" : entry.projectDirectory);
-          setStatus("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
-        }}
-        onRefresh={() => void loadRecentProjects()}
-        recentProjects={recentProjects}
-        totalCount={recentMeta.count}
-      />
+      {!projectId ? (
+        <RecentProjectList
+          busy={busy}
+          errorText={projectListError}
+          listState={projectListState}
+          loadedAt={recentMeta.loadedAt}
+          missingCount={recentMeta.missingCount}
+          onOpen={(entry) => void openProject("최근 프로젝트 상세보기", { projectId: entry.projectId })}
+          onPrepareDelete={(entry, trigger) => prepareProjectDelete(entry, trigger)}
+          onPrepareReconnect={(entry) => {
+            setReconnectProjectId(entry.projectId);
+            setProjectDirectoryInput(entry.missing ? "" : entry.projectDirectory);
+            setStatus("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
+          }}
+          onRefresh={() => void loadRecentProjects()}
+          recentProjects={recentProjects}
+          totalCount={recentMeta.count}
+        />
+      ) : null}
 
-      {reconnectTarget ? (
+      {!projectId && reconnectTarget ? (
         <section className="page-panel-grid" aria-label="프로젝트 재연결">
           <article className="page-panel">
             <h2>프로젝트 재연결</h2>
