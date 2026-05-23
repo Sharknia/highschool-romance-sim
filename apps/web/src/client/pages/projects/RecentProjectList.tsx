@@ -206,9 +206,11 @@ export function RecentProjectList({
               <Button aria-label={`${entry.title} 상세보기 버튼`} disabled={busy} icon={<Eye size={16} />} onClick={() => openFromCard(entry)} variant="primary">
                 상세보기
               </Button>
-              <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)} variant={entry.missing ? "primary" : "secondary"}>
-                재연결
-              </Button>
+              {entry.missing ? (
+                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)} variant="primary">
+                  재연결
+                </Button>
+              ) : null}
               <button
                 aria-label={`${entry.title} 삭제`}
                 className="icon-button icon-button-danger"
