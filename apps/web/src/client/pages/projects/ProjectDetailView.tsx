@@ -39,36 +39,55 @@ type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "pa
 type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
 type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
 
-function fallbackWorkflowSummary(project: ProjectData | null): ProjectWorkflowSummary {
-  const hasProject = Boolean(project);
-  const hasHeroine = Boolean(project?.characters?.length);
-  const hasBackground = Boolean(project?.assets?.some((asset) => asset.kind === "background"));
-  const hasEvent = Boolean((project?.scenes?.length || 0) > 1);
-  const incompleteImageJobs = project?.generationJobs?.filter((job) => isVisualImageJob(job) && job.status !== "completed") || [];
-  const blockingIssues = [
-    hasProject && !hasHeroine ? "히로인 1명을 먼저 선택해야 합니다." : "",
-    hasHeroine && !hasBackground ? "배경 화면 생성이 필요합니다." : "",
-    incompleteImageJobs.length > 0 ? "완료되지 않은 이미지 작업이 있습니다." : "",
-    hasHeroine && hasBackground && !hasEvent ? "제작 탭에서 이벤트와 씬을 준비해야 합니다." : ""
-  ].filter(Boolean);
-  return {
-    primaryAction: !hasHeroine ? "goToHeroine" : !hasBackground || incompleteImageJobs.length > 0 ? "goToBackground" : !hasEvent ? "goToStudio" : "goToPreview",
-    primaryLabel: !hasHeroine ? "히로인 스냅샷으로 이동" : !hasBackground || incompleteImageJobs.length > 0 ? "배경 화면 생성으로 이동" : !hasEvent ? "제작으로 이동" : "프리뷰 확인",
-    blockingIssues,
-    validationState: "unknown",
-    generationState: project?.generationJobs?.some(isVisualImageJob) ? "planned" : "empty",
-    previewState: !hasHeroine || !hasBackground || !hasEvent || incompleteImageJobs.length > 0 ? "blocked" : "stale",
-    exportState: blockingIssues.length > 0 ? "blocked" : "ready",
-    steps: [
-      { id: "project", label: "프로젝트 생성", state: hasProject ? "done" : "current" },
-      { id: "heroine", label: "히로인 선택", state: hasHeroine ? "done" : hasProject ? "current" : "blocked" },
-      { id: "background", label: "배경 화면 생성", state: hasBackground ? "done" : hasHeroine ? "current" : "blocked" },
-      { id: "studio", label: "제작", state: hasEvent ? "done" : hasHeroine && hasBackground ? "current" : "blocked" },
-      { id: "preview", label: "프리뷰", state: hasHeroine && hasBackground && hasEvent ? "current" : "blocked" },
-      { id: "export", label: "내보내기", state: blockingIssues.length > 0 ? "blocked" : "waiting" }
-    ]
-  };
-}
+const emptyWorkflowSummary: ProjectWorkflowSummary = {
+  primaryAction: "goToHeroine",
+  primaryLabel: "프로젝트 상태 DTO를 기다리는 중입니다.",
+  blockingIssues: [],
+  validationState: "unknown",
+  generationState: "empty",
+  previewState: "empty",
+  exportState: "empty",
+  steps: []
+};
+
+const emptyPreviewReadiness: ProjectPreviewReadiness = {
+  state: "blocked",
+  availableState: "empty",
+  canRun: false,
+  requiredData: {
+    heroine: "missing",
+    background: "missing",
+    event: "missing",
+    validation: "unknown",
+    generationJobs: "unknown"
+  },
+  missingItems: [],
+  blockingIssues: [],
+  nextActions: [],
+  failureCause: "프로젝트 상태 DTO를 기다리는 중입니다.",
+  retryable: false,
+  nextAction: "프로젝트를 먼저 열어 주세요."
+};
+
+const emptyExportPlan: ProjectExportPlan = {
+  state: "blocked",
+  canExport: false,
+  target: "localDesktopWebApp",
+  githubPagesTarget: false,
+  validationSummary: {
+    ok: false,
+    issueCount: 0,
+    errors: [],
+    warnings: []
+  },
+  includedData: [],
+  includedAssets: [],
+  blockers: [],
+  warnings: [],
+  failureCause: "프로젝트 상태 DTO를 기다리는 중입니다.",
+  retryable: false,
+  nextAction: "프로젝트를 먼저 열어 주세요."
+};
 
 function stateLabel(value?: string): string {
   if (!value) {
@@ -184,6 +203,14 @@ function previewStateLabel(value: PreviewState): string {
   return "준비됨";
 }
 
+function previewReadinessStateLabel(value?: string): string {
+  if (value === "prepared") return "준비됨";
+  if (value === "running") return "생성 중";
+  if (value === "failed") return "실패";
+  if (value === "blocked") return "차단";
+  return value || "확인 전";
+}
+
 function exportStateLabel(value: ExportState): string {
   if (value === "empty") return "내보내기 없음";
   if (value === "blocked") return "차단";
@@ -201,66 +228,12 @@ function tabFromAction(action?: string): ProjectTabId {
   return "preview";
 }
 
-function fallbackPreviewReadiness(project: ProjectData | null, summary: ProjectWorkflowSummary): ProjectPreviewReadiness {
-  const hasHeroine = Boolean(project?.characters?.length);
-  const hasBackground = Boolean(project?.assets?.some((asset) => asset.kind === "background"));
-  const hasEventScenes = Boolean((project?.scenes?.length || 0) > 1);
-  const canRun = Boolean(project && summary.previewState !== "blocked" && summary.previewState !== "failed");
-  const missingItems = [
-    !hasHeroine ? { id: "heroine", label: "히로인 1명", tab: "heroine" } : null,
-    !hasBackground ? { id: "background", label: "배경 화면", tab: "background" } : null,
-    !hasEventScenes ? { id: "studio", label: "제작 씬", tab: "studio" } : null
-  ].filter(Boolean) as NonNullable<ProjectPreviewReadiness["missingItems"]>;
-
-  return {
-    state: canRun ? "prepared" : "blocked",
-    availableState: summary.previewState || "blocked",
-    canRun,
-    requiredData: {
-      heroine: hasHeroine ? "ready" : "missing",
-      background: hasBackground ? "ready" : "missing",
-      scenes: hasEventScenes ? "ready" : "missing",
-      validation: summary.validationState === "error" ? "invalid" : "ready",
-      generationJobs: summary.generationState === "failed" || summary.generationState === "partialFailed" ? "failed" : summary.generationState === "planned" || summary.generationState === "running" ? "pending" : "ready"
-    },
-    missingItems,
-    blockingIssues: summary.blockingIssues || [],
-    nextActions: missingItems.map((item) => ({
-      tab: item.tab,
-      label: `해결 탭으로 이동: ${item.label}`
-    })),
-    failureCause: (summary.blockingIssues || []).join(" ") || "프리뷰 실행 전 준비 상태를 확인합니다.",
-    retryable: false,
-    nextAction: missingItems[0] ? `해결 탭으로 이동: ${missingItems[0].label}` : "프리뷰를 실행하세요."
-  };
-}
-
-function fallbackExportPlan(project: ProjectData | null, summary: ProjectWorkflowSummary): ProjectExportPlan {
-  const blockers = (summary.blockingIssues || []).map((message) => ({
-    kind: message.includes("이미지") || message.includes("배경") ? "generationJob" : "validation",
-    message,
-    tab: message.includes("이미지") || message.includes("배경") ? "background" : "studio"
-  }));
-  const blocked = blockers.length > 0 || summary.exportState === "blocked";
-  return {
-    state: blocked ? "blocked" : "ready",
-    canExport: !blocked && Boolean(project),
-    target: "localDesktopWebApp",
-    githubPagesTarget: false,
-    validationSummary: {
-      ok: summary.validationState !== "error",
-      issueCount: blockers.length,
-      errors: blockers.map((blocker) => ({ severity: "error", path: String(blocker.tab), message: blocker.message })),
-      warnings: []
-    },
-    includedData: ["project", "runtime", "assetManifest"],
-    includedAssets: project?.assets || [],
-    blockers,
-    warnings: [],
-    failureCause: blockers.map((blocker) => blocker.message).join(" ") || "내보내기 전 검증 요약을 확인합니다.",
-    retryable: false,
-    nextAction: blockers[0] ? "차단 항목을 해결한 뒤 다시 실행하세요." : "내보내기를 실행할 수 있습니다."
-  };
+function primaryActionDisplayLabel(tab: ProjectTabId): string {
+  if (tab === "heroine") return "히로인 스냅샷으로 이동";
+  if (tab === "background") return "배경 화면 생성으로 이동";
+  if (tab === "studio") return "제작으로 이동";
+  if (tab === "export") return "내보내기로 이동";
+  return "프리뷰 확인";
 }
 
 function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): ProjectRuntimeScene | null {
@@ -318,7 +291,7 @@ export function ProjectDetailView({
   const routeProjectLoaded = !projectId || loadedProject?.id === projectId;
   const currentProject = routeProjectLoaded ? loadedProject : null;
   const currentWorkflowSummary = routeProjectLoaded ? workflowSummary : null;
-  const summary = currentWorkflowSummary || fallbackWorkflowSummary(currentProject);
+  const summary = currentWorkflowSummary || emptyWorkflowSummary;
   const hasUnsavedProjectDraft = false;
   const assignedHeroine = currentProject?.characters?.[0] || null;
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || heroines[0] || null;
@@ -357,9 +330,9 @@ export function ProjectDetailView({
   const hasBackgroundAsset = Boolean(currentBackgroundAsset);
   const hasBackgroundJob = backgroundJobs.length > 0;
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
-  const currentPreviewReadiness = previewReadiness || fallbackPreviewReadiness(currentProject, summary);
+  const currentPreviewReadiness = previewReadiness || emptyPreviewReadiness;
   const previewRunBlocked = currentPreviewReadiness.canRun === false;
-  const currentExportPlan = exportPlan || fallbackExportPlan(currentProject, summary);
+  const currentExportPlan = exportPlan || emptyExportPlan;
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -377,7 +350,7 @@ export function ProjectDetailView({
         : summary.primaryAction === "goToExport"
           ? "export"
           : "preview";
-  const primaryActionLabel = summary.primaryLabel || (primaryActionTab === "background" ? "배경 화면 생성으로 이동" : "프리뷰 확인");
+  const primaryActionLabel = summary.primaryLabel || primaryActionDisplayLabel(primaryActionTab);
   const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
   const suggestedBackgroundJobId = currentProject?.id ? `job-background-${currentProject.id}` : "job-background";
   const suggestedBackgroundAssetId = currentProject?.id ? `asset-background-${currentProject.id}` : "asset-background";
@@ -1227,6 +1200,7 @@ export function ProjectDetailView({
               </div>
               <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. availableState: {currentPreviewReadiness.availableState || "unknown"}</p>
               <dl className="summary-list">
+                <div><dt>previewReadiness</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
                 <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${name}: ${value}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>

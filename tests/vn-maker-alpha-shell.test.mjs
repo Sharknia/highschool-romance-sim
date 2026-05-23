@@ -306,6 +306,10 @@ assert.match(projectStartSource, /currentProject\?\.id\s*&&\s*currentProject\.id
 const legacyProjectTabClassPattern = new RegExp(`${["project", "tab"].join("-")}(?:-list)?`);
 assert.doesNotMatch(projectDetailViewSource, legacyProjectTabClassPattern, "ProjectDetailView는 로컬 프로젝트 탭 class를 렌더링하면 안 됩니다.");
 assert.match(projectDetailViewSource, /<TabList/, "ProjectDetailView는 중앙 TabList를 사용해야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /function fallbackWorkflowSummary|function fallbackPreviewReadiness|function fallbackExportPlan/, "ProjectDetailView는 workflow/readiness/export 도메인 상태를 fallback으로 재계산하면 안 됩니다.");
+assert.match(projectDetailViewSource, /emptyWorkflowSummary/, "ProjectDetailView는 DTO가 없을 때 표시 전용 workflow placeholder만 사용해야 합니다.");
+assert.match(projectDetailViewSource, /emptyPreviewReadiness/, "ProjectDetailView는 DTO가 없을 때 표시 전용 preview readiness placeholder만 사용해야 합니다.");
+assert.match(projectDetailViewSource, /emptyExportPlan/, "ProjectDetailView는 DTO가 없을 때 표시 전용 export plan placeholder만 사용해야 합니다.");
 assert.match(appSource, /Navigate/, "`/projects/:projectId`는 overview로 정규화되어야 합니다.");
 assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:projectId` 기본 라우트가 overview 링크 또는 리다이렉트를 제공해야 합니다.");
 [

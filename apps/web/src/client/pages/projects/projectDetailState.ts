@@ -16,53 +16,42 @@ export interface PreviewExportResetState {
   exportStatus: string;
 }
 
-const blockingGenerationStates = new Set(["planned", "failed", "partialFailed", "running"]);
 const previewStates = new Set(["empty", "blocked", "stale", "running", "ready", "failed"]);
 const exportStates = new Set(["empty", "blocked", "running", "ready", "completed", "failed"]);
 
-function previewStateFrom(value: unknown, hasProject: boolean): PreviewResetState {
+function previewStateFrom(value: unknown): PreviewResetState {
   if (typeof value === "string" && previewStates.has(value)) {
     return value as PreviewResetState;
   }
-  return hasProject ? "stale" : "empty";
+  return "empty";
 }
 
-function exportStateFrom(value: unknown, blocked: boolean, hasProject: boolean): ExportResetState {
+function exportStateFrom(value: unknown, blocked: boolean): ExportResetState {
   if (blocked) {
     return "blocked";
   }
   if (typeof value === "string" && exportStates.has(value)) {
     return value as ExportResetState;
   }
-  return hasProject ? "ready" : "empty";
-}
-
-function projectHasIncompleteVisualImage(project?: ProjectData | null): boolean {
-  return Boolean(project?.generationJobs?.some((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed"));
+  return "empty";
 }
 
 function exportBlockedReason(input: PreviewExportResetInput): string | null {
-  const generationState = input.workflowSummary?.generationState;
-  if (typeof generationState === "string" && blockingGenerationStates.has(generationState)) {
-    return "완료되지 않은 이미지 작업이 있어 내보내기가 차단되었습니다.";
-  }
-  if (projectHasIncompleteVisualImage(input.project)) {
-    return "완료되지 않은 이미지 작업이 있어 내보내기가 차단되었습니다.";
-  }
   return input.workflowSummary?.blockingIssues?.[0] || null;
 }
 
 export function createPreviewExportResetState(input: PreviewExportResetInput): PreviewExportResetState {
   const hasProject = Boolean(input.project);
+  const hasWorkflowSummary = Boolean(input.workflowSummary);
   const blockedReason = hasProject ? exportBlockedReason(input) : null;
   const exportBlocked = Boolean(blockedReason || input.workflowSummary?.exportState === "blocked");
-  const previewState = previewStateFrom(input.workflowSummary?.previewState, hasProject);
-  const exportState = exportStateFrom(input.workflowSummary?.exportState, exportBlocked, hasProject);
+  const previewState = previewStateFrom(input.workflowSummary?.previewState);
+  const exportState = exportStateFrom(input.workflowSummary?.exportState, exportBlocked);
   return {
     previewState,
     previewStatus: input.previewStatus || (hasProject ? "프로젝트 변경 후 프리뷰가 아직 생성되지 않았습니다." : "프리뷰 생성 전입니다."),
     exportState,
-    exportStatus: !hasProject
+    exportStatus: !hasProject || !hasWorkflowSummary
       ? "내보내기 전입니다."
       : exportBlocked
         ? blockedReason || "내보내기 전에 차단 항목을 해결해야 합니다."
