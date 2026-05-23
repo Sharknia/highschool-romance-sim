@@ -11,6 +11,7 @@ function readText(path) {
 
 const appSource = readText("apps/web/src/client/App.tsx");
 const apiClientSource = readText("apps/web/src/client/api/client.ts");
+const issue27QaSource = readText("docs/qa/issue-27-alpha-project-management.md");
 
 [
   "EMPTY_RESPONSE",
@@ -23,6 +24,8 @@ const apiClientSource = readText("apps/web/src/client/api/client.ts");
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(apiClientSource, pattern, `프론트 API 클라이언트는 빈 응답/nonJSON/5xx/네트워크 실패를 안전하게 표시해야 합니다: ${requiredText}`);
 });
+assert.match(issue27QaSource, /#44 project-management audit/, "issue-27 QA 문서는 #44 감사 이후 과거 pass 기록이 현재 완료 기준이 아님을 명시해야 합니다.");
+assert.doesNotMatch(issue27QaSource, /\| `\/projects` opens on a project list using central list UI \| `RecentProjectList`, `ContentList`, screenshots \| pass \|/, "issue-27 QA 문서는 RecentProjectList 중심 /projects 구조를 현재 pass로 고정하면 안 됩니다.");
 
 assert.match(
   appSource,
@@ -155,11 +158,12 @@ const recentProjectListPath = "apps/web/src/client/pages/projects/RecentProjectL
 const projectDetailViewPath = "apps/web/src/client/pages/projects/ProjectDetailView.tsx";
 const projectNewPagePath = "apps/web/src/client/pages/projects/ProjectNewPage.tsx";
 const projectApiPath = "apps/web/src/client/pages/projects/projectApi.ts";
-assert.ok(existsSync(join(root, recentProjectListPath)), "최근 프로젝트 목록은 별도 RecentProjectList 컴포넌트로 분리해야 합니다.");
 assert.ok(existsSync(join(root, projectDetailViewPath)), "프로젝트 상세 탭은 별도 ProjectDetailView 컴포넌트로 분리해야 합니다.");
 assert.ok(existsSync(join(root, projectNewPagePath)), "새 프로젝트 생성 화면은 별도 ProjectNewPage 컴포넌트로 분리해야 합니다.");
 assert.ok(existsSync(join(root, projectApiPath)), "프로젝트 목록 API wrapper는 projectApi.ts로 분리해야 합니다.");
-const recentProjectListSource = readText(recentProjectListPath);
+const recentProjectListSource = existsSync(join(root, recentProjectListPath))
+  ? readText(recentProjectListPath)
+  : projectStartSource;
 const projectDetailViewSource = readText(projectDetailViewPath);
 const projectPageTypesSource = readText("apps/web/src/client/pages/projects/projectPageTypes.ts");
 const projectNewPageSource = readText(projectNewPagePath);
@@ -187,7 +191,7 @@ const studioEndCandidate = studioStart >= 0 ? projectDetailViewSource.indexOf('a
 const studioBranch = studioStart >= 0 && studioEndCandidate > studioStart
   ? projectDetailViewSource.slice(studioStart, studioEndCandidate)
   : "";
-assert.match(recentProjectListSource, /ContentList/, "RecentProjectList는 중앙 ContentList 패턴을 사용해야 합니다.");
+assert.match(`${projectStartSource}\n${recentProjectListSource}`, /ContentList/, "프로젝트 목록 화면은 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(
   projectStartSource.includes('type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";'),
   "ProjectStartPage는 프로젝트 목록 상태 union 타입을 가져야 합니다."
