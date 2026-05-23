@@ -226,7 +226,8 @@ export function ProjectStartPage() {
     setReconnectProjectId(nextReconnectId);
     setStatus(`${label} 실패: ${message}`);
     if (projectId) {
-      navigate("/projects", { replace: true });
+      setCurrentProject(null);
+      setWorkflowSummary(null);
     }
   }
 
@@ -451,7 +452,13 @@ export function ProjectStartPage() {
   }, [projectId, tab, lastRestoredProjectId, currentProject?.id]);
 
   const reconnectTarget = reconnectProjectId
-    ? recentProjects.find((entry) => entry.projectId === reconnectProjectId) || null
+    ? recentProjects.find((entry) => entry.projectId === reconnectProjectId) || {
+      projectId: reconnectProjectId,
+      projectDirectory: projectDirectoryInput,
+      title: reconnectProjectId,
+      lastOpenedAt: "",
+      missing: true
+    }
     : null;
   const detailView = projectId || currentProject ? (
     <ProjectDetailView
@@ -522,7 +529,7 @@ export function ProjectStartPage() {
         />
       ) : null}
 
-      {!projectId && reconnectTarget ? (
+      {reconnectTarget ? (
         <section className="page-panel-grid" aria-label="프로젝트 재연결">
           <article className="page-panel">
             <h2>프로젝트 재연결</h2>

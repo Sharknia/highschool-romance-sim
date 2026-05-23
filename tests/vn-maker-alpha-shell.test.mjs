@@ -280,6 +280,9 @@ assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<header className="page
 assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<RecentProjectList/, "프로젝트 목록은 /projects 루트에서만 렌더링해야 합니다.");
 assert.match(projectStartSource, /\{projectId \? detailView : null\}\s*\{projectStatusBanner\}/, "상세 route에서는 상세 shell이 상태 배너보다 먼저 렌더링되어야 합니다.");
 assert.match(projectStartSource, /currentProject\?\.id\s*&&\s*currentProject\.id !== projectId[\s\S]*setCurrentProject\(null\)/, "route projectId가 바뀌면 이전 currentProject를 stale 상태로 비워야 합니다.");
+assert.doesNotMatch(projectStartSource, /if\s*\(projectId\)\s*\{\s*navigate\("\/projects",\s*\{\s*replace:\s*true\s*\}\);\s*\}/, "상세 deep link 복원 실패는 /projects로 밀어내지 말고 상세 shell을 유지해야 합니다.");
+assert.match(projectStartSource, /const reconnectTarget = reconnectProjectId[\s\S]*missing: true/, "최근 index에 없는 상세 deep link 실패도 route projectId 기반 재연결 대상을 만들어야 합니다.");
+assert.doesNotMatch(projectStartSource, /!\s*projectId\s*&&\s*reconnectTarget/, "재연결 패널은 상세 route 실패 상태에서도 보여야 합니다.");
 [
   "프로젝트 목록을 불러오는 중입니다.",
   "아직 최근 프로젝트가 없습니다.",
