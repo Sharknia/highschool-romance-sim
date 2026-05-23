@@ -987,7 +987,6 @@ a {
 
 .content-list,
 .recent-project-list,
-.project-tab-list,
 .tab-list {
   min-width: 0;
   display: grid;
@@ -1250,12 +1249,10 @@ a {
   color: #ffd7d2;
 }
 
-.project-tab-list,
 .tab-list {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
-.project-tab,
 .tab-list-item {
   min-height: 38px;
   display: inline-flex;
@@ -1271,8 +1268,6 @@ a {
   overflow-wrap: anywhere;
 }
 
-.project-tab.active,
-.project-tab:hover,
 .tab-list-item.active,
 .tab-list-item:hover,
 .tab-list-item:focus-visible {
@@ -2029,7 +2024,6 @@ pre {
     justify-content: flex-start;
   }
 
-  .project-tab-list,
   .tab-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -2126,7 +2120,6 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .project-tab-list,
   .tab-list {
     grid-template-columns: 1fr 1fr;
   }

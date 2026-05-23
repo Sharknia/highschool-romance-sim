@@ -251,7 +251,8 @@ assert.doesNotMatch(projectStartSource, /confirmationTitle:\s*confirmationTitle\
 ["event", "assets"].forEach((legacyTab) => {
   assert.doesNotMatch(detailTabsBlock, new RegExp(`id: "${legacyTab}"`), `${legacyTab}는 Alpha visible IA 탭이면 안 됩니다.`);
 });
-assert.doesNotMatch(projectDetailViewSource, /project-tab-list/, "ProjectDetailView는 로컬 project-tab-list를 렌더링하면 안 됩니다.");
+const legacyProjectTabClassPattern = new RegExp(`${["project", "tab"].join("-")}(?:-list)?`);
+assert.doesNotMatch(projectDetailViewSource, legacyProjectTabClassPattern, "ProjectDetailView는 로컬 프로젝트 탭 class를 렌더링하면 안 됩니다.");
 assert.match(projectDetailViewSource, /<TabList/, "ProjectDetailView는 중앙 TabList를 사용해야 합니다.");
 assert.match(appSource, /Navigate/, "`/projects/:projectId`는 overview로 정규화되어야 합니다.");
 assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:projectId` 기본 라우트가 overview 링크 또는 리다이렉트를 제공해야 합니다.");
@@ -358,19 +359,20 @@ assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:project
 });
 assert.match(
   clientStylesSource,
-  /\.content-list,\s*\.recent-project-list,\s*\.project-tab-list,\s*\.tab-list\s*{[\s\S]*display: grid/,
-  "tab-list는 기존 탭/리스트 grid 기본 스타일을 공유해야 합니다."
+  /\.content-list,\s*\.recent-project-list,\s*\.tab-list\s*{[\s\S]*display: grid/,
+  "tab-list는 중앙 탭/리스트 grid 기본 스타일을 공유해야 합니다."
 );
 assert.match(
   clientStylesSource,
-  /\.project-tab-list,\s*\.tab-list\s*{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/,
-  "tab-list는 태블릿 폭에서 project-tab-list와 같은 3열 반응형을 가져야 합니다."
+  /\.tab-list\s*{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/,
+  "tab-list는 태블릿 폭에서 중앙 TabList 기준 3열 반응형을 가져야 합니다."
 );
 assert.match(
   clientStylesSource,
-  /\.project-tab-list,\s*\.tab-list\s*{[\s\S]*grid-template-columns: 1fr 1fr/,
-  "tab-list는 모바일 폭에서 project-tab-list와 같은 2열 반응형을 가져야 합니다."
+  /\.tab-list\s*{[\s\S]*grid-template-columns: 1fr 1fr/,
+  "tab-list는 모바일 폭에서 중앙 TabList 기준 2열 반응형을 가져야 합니다."
 );
+assert.doesNotMatch(clientStylesSource, legacyProjectTabClassPattern, "스타일 소스에 레거시 프로젝트 탭 class가 남으면 안 됩니다.");
 const heroineDetailSource = readText("apps/web/src/client/pages/heroines/HeroineDetailPage.tsx");
 assert.match(heroineDetailSource, /detail-card|summary-list|state-chip/, "Project detail density should align with heroine detail patterns.");
 assert.match(projectDetailViewSource, /variant="primary"|variant=\{"primary"\}/, "Overview/detail primary action must use shared Button primary hierarchy.");
