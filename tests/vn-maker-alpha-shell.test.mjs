@@ -602,6 +602,11 @@ assert.doesNotMatch(heroineRouteSource, /API key|API 키/, "API key 흐름을 Co
 const sharedListSource = readText("apps/web/src/client/components/ui/ContentList.tsx");
 assert.match(heroineRouteSource, /ContentList/, "히로인 리스트는 공통 리스트 컴포넌트를 사용해야 합니다.");
 assert.match(sharedListSource, /content-list-item/, "공통 리스트 컴포넌트는 동일한 row UI class를 소유해야 합니다.");
+assert.match(sharedListSource, /role="list"/, "공통 리스트 루트는 목록 role을 직접 제공해야 합니다.");
+assert.match(sharedListSource, /role="listitem"/, "공통 리스트 항목은 listitem semantics를 유지해야 합니다.");
+assert.match(sharedListSource, /content-list-select/, "공통 리스트는 row 선택 control을 actions 영역과 분리해야 합니다.");
+assert.match(sharedListSource, /<button[\s\S]*type="button"[\s\S]*className=\{selectClassName\}/, "선택 가능한 row는 실제 button control을 사용해야 합니다.");
+assert.doesNotMatch(sharedListSource, /role=\{selectable \? "button" : "listitem"\}/, "선택 가능한 row가 listitem 대신 button role로 바뀌면 안 됩니다.");
 [
   "아직 히로인이 없습니다.",
   "히로인 목록을 불러오는 중입니다.",
