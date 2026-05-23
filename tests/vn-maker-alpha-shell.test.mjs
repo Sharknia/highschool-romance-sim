@@ -164,6 +164,7 @@ const projectDetailViewSource = readText(projectDetailViewPath);
 const projectPageTypesSource = readText("apps/web/src/client/pages/projects/projectPageTypes.ts");
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
+const useCasesSource = readText("packages/use-cases/src/index.ts");
 const clientStylesSource = readText("apps/web/src/client/styles.css");
 const detailTabsBlock = projectPageTypesSource.match(/export const detailTabs = \[[\s\S]*?\] as const;/)?.[0] || "";
 const visibleShellStart = projectDetailViewSource.indexOf("<TabList");
@@ -408,9 +409,6 @@ assert.match(projectDetailViewSource, /<Button/, "Project detail actions must us
   "/api/projects/recent/restore",
   "/api/projects/reconnect",
   "workflowSummary",
-  "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
-  "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
-  "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.",
   "목록에서만 제거",
   "되돌리기",
   "필터 결과",
@@ -419,6 +417,17 @@ assert.match(projectDetailViewSource, /<Button/, "Project detail actions must us
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(`${projectStartSource}\n${recentProjectListSource}\n${projectDetailViewSource}\n${projectApiSource}`, pattern, `프로젝트 페이지 소스에 '${requiredText}' 문구 또는 API 호출이 있어야 합니다.`);
 });
+[
+  "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
+  "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
+  "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다."
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(useCasesSource, pattern, `프로젝트 오류 메시지는 use-case/API DTO 계약에서 소유해야 합니다: '${requiredText}'`);
+  assert.doesNotMatch(projectApiSource, pattern, `projectApi.ts는 도메인 오류 메시지를 재정의하면 안 됩니다: '${requiredText}'`);
+});
+assert.match(useCasesSource, /nextAction:\s*string/, "프로젝트 실패 DTO는 다음 행동 문구를 use-case/API DTO 계약으로 제공해야 합니다.");
+assert.doesNotMatch(projectApiSource, /result\.code\s*===/, "projectApi.ts는 오류 code별 메시지를 분기하지 않고 DTO message/error를 표시해야 합니다.");
 [
   "/api/heroines/list",
   "/api/projects/${",

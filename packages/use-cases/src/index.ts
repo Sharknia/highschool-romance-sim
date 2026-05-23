@@ -253,6 +253,7 @@ export type ProjectActionFailureCode =
   | "PROJECT_ID_RESERVED"
   | "PROJECT_ID_CONFLICT"
   | "PROJECT_NOT_FOUND"
+  | "RECENT_PROJECT_INDEX_MISS"
   | "PROJECT_DIRECTORY_MISSING"
   | "PROJECT_ID_MISMATCH"
   | "PROJECT_REVISION_CONFLICT"
@@ -271,6 +272,7 @@ export interface ProjectActionFailureDto {
   code: ProjectActionFailureCode;
   message: string;
   error: string;
+  nextAction: string;
   requestId: string;
   projectId?: string;
   projectDirectory?: string;
@@ -281,6 +283,103 @@ export interface ProjectActionFailureDto {
   exportPlan?: ProjectExportPlanDto;
   issues?: ValidationIssue[];
   retryable: boolean;
+}
+
+export interface ProjectFailureContract {
+  code: ProjectActionFailureCode;
+  message: string;
+  nextAction: string;
+  retryable: boolean;
+}
+
+const projectFailureContracts: Record<ProjectActionFailureCode, Omit<ProjectFailureContract, "code">> = {
+  PROJECT_INPUT_INVALID: {
+    message: "입력 오류",
+    nextAction: "입력값을 확인한 뒤 다시 시도하세요.",
+    retryable: false
+  },
+  PROJECT_ID_RESERVED: {
+    message: "예약된 프로젝트 ID입니다.",
+    nextAction: "다른 프로젝트 ID를 입력하세요.",
+    retryable: false
+  },
+  PROJECT_ID_CONFLICT: {
+    message: "이미 존재하는 프로젝트 ID입니다.",
+    nextAction: "기존 프로젝트 열기, 다른 위치 선택, 생성 취소 중 하나를 선택하세요.",
+    retryable: false
+  },
+  PROJECT_NOT_FOUND: {
+    message: "프로젝트를 찾을 수 없습니다.",
+    nextAction: "프로젝트 저장 위치를 확인한 뒤 다시 시도하세요.",
+    retryable: false
+  },
+  RECENT_PROJECT_INDEX_MISS: {
+    message: "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
+    nextAction: "프로젝트 디렉터리를 다시 열어 주세요.",
+    retryable: false
+  },
+  PROJECT_DIRECTORY_MISSING: {
+    message: "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
+    nextAction: "새 위치를 입력해 다시 연결해 주세요.",
+    retryable: true
+  },
+  PROJECT_ID_MISMATCH: {
+    message: "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.",
+    nextAction: "올바른 프로젝트 저장 위치를 선택하세요.",
+    retryable: false
+  },
+  PROJECT_REVISION_CONFLICT: {
+    message: "프로젝트가 다른 곳에서 변경되었습니다.",
+    nextAction: "최신 프로젝트를 다시 불러온 뒤 시도하세요.",
+    retryable: false
+  },
+  HEROINE_REQUIRED: {
+    message: "히로인 1명을 먼저 선택해야 합니다.",
+    nextAction: "히로인 탭에서 스냅샷을 선택하세요.",
+    retryable: false
+  },
+  HEROINE_REPLACE_BLOCKED: {
+    message: "히로인 교체가 차단되었습니다.",
+    nextAction: "기존 스냅샷 상태를 확인한 뒤 다시 시도하세요.",
+    retryable: false
+  },
+  PATCH_STALE: {
+    message: "현재 프로젝트가 패치 적용 직후 상태와 달라 자동 적용을 중단했습니다.",
+    nextAction: "최신 프로젝트를 다시 불러온 뒤 시도하세요.",
+    retryable: false
+  },
+  JOB_ALREADY_RUNNING: {
+    message: "이미 실행 중인 생성 작업이 있습니다.",
+    nextAction: "현재 작업이 끝난 뒤 다시 시도하세요.",
+    retryable: false
+  },
+  PREVIEW_BLOCKED: {
+    message: "프리뷰를 실행할 수 없습니다.",
+    nextAction: "차단 항목을 해결한 뒤 다시 실행하세요.",
+    retryable: false
+  },
+  EXPORT_BLOCKED: {
+    message: "내보내기를 실행할 수 없습니다.",
+    nextAction: "차단 항목을 해결한 뒤 다시 실행하세요.",
+    retryable: false
+  },
+  OAUTH_REQUIRED: {
+    message: "Codex ChatGPT OAuth 로그인이 필요합니다.",
+    nextAction: "Codex에 로그인하세요.",
+    retryable: true
+  },
+  SERVER_ERROR: {
+    message: "서버 오류",
+    nextAction: "잠시 후 다시 시도하세요.",
+    retryable: true
+  }
+};
+
+export function projectFailureContractForCode(code: ProjectActionFailureCode): ProjectFailureContract {
+  return {
+    code,
+    ...projectFailureContracts[code]
+  };
 }
 
 export interface VnMakerUseCaseOptions {
@@ -316,7 +415,7 @@ export class RecentProjectIndexMissError extends Error {
   readonly projectId: string;
 
   constructor(projectId: string) {
-    super("최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+    super(projectFailureContractForCode("RECENT_PROJECT_INDEX_MISS").message);
     this.name = "RecentProjectIndexMissError";
     this.projectId = projectId;
   }
@@ -329,7 +428,7 @@ export class ProjectDirectoryMissingError extends Error {
   readonly recentProject: RecentProjectIndexEntry;
 
   constructor(entry: RecentProjectIndexEntry) {
-    super("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
+    super(projectFailureContractForCode("PROJECT_DIRECTORY_MISSING").message);
     this.name = "ProjectDirectoryMissingError";
     this.projectId = entry.projectId;
     this.projectDirectory = entry.projectDirectory;
@@ -344,7 +443,7 @@ export class ProjectIdMismatchError extends Error {
   readonly projectDirectory: string;
 
   constructor(input: { expectedProjectId: string; actualProjectId: string; projectDirectory: string }) {
-    super("프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다.");
+    super(projectFailureContractForCode("PROJECT_ID_MISMATCH").message);
     this.name = "ProjectIdMismatchError";
     this.expectedProjectId = input.expectedProjectId;
     this.actualProjectId = input.actualProjectId;
@@ -846,7 +945,7 @@ function backgroundPolicy(project: VnMakerProject): BackgroundPolicyDto {
 }
 
 function retryableFailureCode(code: ProjectActionFailureCode): boolean {
-  return code === "SERVER_ERROR" || code === "PROJECT_DIRECTORY_MISSING" || code === "OAUTH_REQUIRED";
+  return projectFailureContractForCode(code).retryable;
 }
 
 function failureCodeFromError(error: unknown): ProjectActionFailureCode {
@@ -855,14 +954,12 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
   }
   const errorRecord = asRecord(error);
   const code = typeof errorRecord.code === "string" ? errorRecord.code : "";
-  if (code === "RECENT_PROJECT_INDEX_MISS") {
-    return "PROJECT_NOT_FOUND";
-  }
   if (
     code === "PROJECT_INPUT_INVALID"
     || code === "PROJECT_ID_RESERVED"
     || code === "PROJECT_ID_CONFLICT"
     || code === "PROJECT_NOT_FOUND"
+    || code === "RECENT_PROJECT_INDEX_MISS"
     || code === "PROJECT_DIRECTORY_MISSING"
     || code === "PROJECT_ID_MISMATCH"
     || code === "PROJECT_REVISION_CONFLICT"
@@ -897,10 +994,25 @@ function imageGenerationFailureFromMessages(messages: string[]): Pick<ProjectAct
   };
 }
 
+function projectFailureMessageFromError(error: unknown, contract: ProjectFailureContract): string {
+  const errorRecord = asRecord(error);
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  if (typeof errorRecord.message === "string" && errorRecord.message.trim()) {
+    return errorRecord.message.trim();
+  }
+  if (typeof errorRecord.error === "string" && errorRecord.error.trim()) {
+    return errorRecord.error.trim();
+  }
+  return typeof error === "string" && error.trim() ? error.trim() : contract.message;
+}
+
 export function projectActionFailureFromError(error: unknown, action?: MakerActionId): ProjectActionFailureDto {
   const errorRecord = asRecord(error);
   const code = failureCodeFromError(error);
-  const message = error instanceof Error ? error.message : String(error);
+  const contract = projectFailureContractForCode(code);
+  const message = projectFailureMessageFromError(error, contract);
   const expectedProjectId = typeof errorRecord.expectedProjectId === "string" ? errorRecord.expectedProjectId : undefined;
   const issues = error instanceof InputValidationError
     ? error.issues
@@ -922,6 +1034,7 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     code,
     message,
     error: message,
+    nextAction: typeof errorRecord.nextAction === "string" && errorRecord.nextAction.trim() ? errorRecord.nextAction.trim() : contract.nextAction,
     requestId: createRequestId(),
     projectId: typeof errorRecord.projectId === "string" ? errorRecord.projectId : expectedProjectId,
     projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
@@ -931,7 +1044,7 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     previewReadiness,
     exportPlan,
     issues,
-    retryable: retryableFailureCode(code)
+    retryable: contract.retryable
   };
 }
 

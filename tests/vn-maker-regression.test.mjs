@@ -657,6 +657,16 @@ assert.equal(apiRecentRemoved.status, 200);
 assert.equal(apiRecentRemoved.body.projects.some((entry) => entry.projectId === "api-recent"), false);
 assert.equal(apiRecentRemoved.body.deletionPolicy.mode, "recentIndexOnly");
 assert.equal(existsSync(join(apiRecentDirectory, "project.sqlite")), true);
+const apiRecentMiss = await mockApi({
+  method: "POST",
+  path: "/api/projects/open",
+  body: { projectId: "api-recent" }
+});
+assert.equal(apiRecentMiss.status, 404);
+assert.equal(apiRecentMiss.body.ok, false);
+assert.equal(apiRecentMiss.body.code, "RECENT_PROJECT_INDEX_MISS");
+assert.equal(apiRecentMiss.body.message, "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+assert.equal(apiRecentMiss.body.nextAction, "프로젝트 디렉터리를 다시 열어 주세요.");
 
 const apiDeleteDirectory = join(tempRoot, "Issue20ApiDelete.vnmaker");
 const apiDeleteCreate = await mockApi({

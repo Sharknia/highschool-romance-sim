@@ -435,6 +435,18 @@ await assert.rejects(
 const openedAfterBlockedHeroineCreate = await useCases.openProject({ projectDirectory });
 assert.equal(openedAfterBlockedHeroineCreate.project.id, created.project.id);
 
+const recentMissFailure = useCasesModule.projectActionFailureFromError(
+  new useCasesModule.RecentProjectIndexMissError("missing-recent-contract"),
+  "openProject"
+);
+assert.equal(recentMissFailure.ok, false);
+assert.equal(recentMissFailure.action, "openProject");
+assert.equal(recentMissFailure.code, "RECENT_PROJECT_INDEX_MISS");
+assert.equal(recentMissFailure.message, "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+assert.equal(recentMissFailure.error, recentMissFailure.message);
+assert.equal(recentMissFailure.nextAction, "프로젝트 디렉터리를 다시 열어 주세요.");
+assert.equal(recentMissFailure.retryable, false);
+
 const generatedPortrait = await useCases.generateImage({
   projectDirectory,
   kind: "portrait",
