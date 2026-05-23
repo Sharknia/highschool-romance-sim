@@ -171,6 +171,16 @@ const visibleShellEnd = projectDetailViewSource.indexOf('activeTab === "preview"
 const visibleShellBlock = visibleShellStart >= 0 && visibleShellEnd > visibleShellStart
   ? projectDetailViewSource.slice(visibleShellStart, visibleShellEnd)
   : projectDetailViewSource;
+const detailHeaderStart = projectDetailViewSource.indexOf('className="section-header page-header"');
+const detailHeaderEnd = detailHeaderStart >= 0 ? projectDetailViewSource.indexOf("<TabList", detailHeaderStart) : -1;
+const detailHeaderBlock = detailHeaderStart >= 0 && detailHeaderEnd > detailHeaderStart
+  ? projectDetailViewSource.slice(detailHeaderStart, detailHeaderEnd)
+  : "";
+const overviewStart = projectDetailViewSource.indexOf('activeTab === "overview"');
+const overviewEnd = overviewStart >= 0 ? projectDetailViewSource.indexOf('activeTab === "heroine"', overviewStart) : -1;
+const overviewBranch = overviewStart >= 0 && overviewEnd > overviewStart
+  ? projectDetailViewSource.slice(overviewStart, overviewEnd)
+  : "";
 const studioStart = projectDetailViewSource.indexOf('data-testid="studio-under-construction"');
 const studioEndCandidate = studioStart >= 0 ? projectDetailViewSource.indexOf('activeTab === "background"', studioStart) : -1;
 const studioBranch = studioStart >= 0 && studioEndCandidate > studioStart
@@ -267,7 +277,14 @@ assert.match(appSource, /\/projects\/:projectId\/overview/, "`/projects/:project
 [
   "저장 위치",
   "현재 상태",
-  "상태 요약",
+  "상태 요약"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(detailHeaderBlock, pattern, `프로젝트 상세 공통 헤더에 '${requiredText}' 표시가 있어야 합니다.`);
+});
+assert.doesNotMatch(overviewBranch, /<h3>현재 상태<\/h3>/, "개요 탭은 공통 헤더의 현재 상태 카드를 중복 렌더링하면 안 됩니다.");
+assert.doesNotMatch(overviewBranch, /projectDirectory \|\| "저장 위치 미연결"/, "개요 탭은 저장 위치 상태 필드를 공통 헤더와 중복 렌더링하면 안 됩니다.");
+[
   "다음 행동",
   "해결해야 할 차단 항목",
   "배경 화면 생성으로 이동"

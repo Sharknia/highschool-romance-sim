@@ -967,16 +967,22 @@ export function ProjectDetailView({
           </Button>
         </div>
       </div>
-      {currentProject ? (
-        <dl className="summary-list detail-summary">
-          <div><dt>ID</dt><dd>{currentProject.id}</dd></div>
-          <div><dt>개요</dt><dd>{currentProject.premise || "개요 없음"}</dd></div>
-          <div><dt>히로인</dt><dd>{currentProject.characters?.length ?? 0}명</dd></div>
-          <div><dt>루트/씬</dt><dd>{currentProject.routes?.length ?? 0}개 / {currentProject.scenes?.length ?? 0}개</dd></div>
-        </dl>
-      ) : (
+      <dl className="summary-list detail-summary">
+        <div><dt>저장 위치</dt><dd>{projectDirectory || "저장 위치 미연결"}</dd></div>
+        <div><dt>현재 상태</dt><dd>{currentProject ? "프로젝트 열림" : "복원 중"}</dd></div>
+        <div><dt>상태 요약</dt><dd>{summary.primaryLabel || "프로젝트 제작 상태를 확인하세요."}</dd></div>
+        {currentProject ? (
+          <>
+            <div><dt>ID</dt><dd>{currentProject.id}</dd></div>
+            <div><dt>개요</dt><dd>{currentProject.premise || "개요 없음"}</dd></div>
+            <div><dt>히로인</dt><dd>{currentProject.characters?.length ?? 0}명</dd></div>
+            <div><dt>루트/씬</dt><dd>{currentProject.routes?.length ?? 0}개 / {currentProject.scenes?.length ?? 0}개</dd></div>
+          </>
+        ) : null}
+      </dl>
+      {!currentProject ? (
         <p className="page-muted">상세 URL의 프로젝트를 복원하는 중입니다.</p>
-      )}
+      ) : null}
       <TabList
         ariaLabel="프로젝트 상세 탭"
         items={detailTabs.map((item) => ({
@@ -1004,14 +1010,6 @@ export function ProjectDetailView({
                   {primaryActionLabel}
                 </Button>
               </div>
-            </section>
-            <section className="detail-card">
-              <h3>현재 상태</h3>
-              <dl className="summary-list">
-                <div><dt>저장 위치</dt><dd>{projectDirectory || "저장 위치 미연결"}</dd></div>
-                <div><dt>현재 상태</dt><dd>{currentProject ? "프로젝트 열림" : "복원 중"}</dd></div>
-                <div><dt>상태 요약</dt><dd>{summary.primaryLabel || "프로젝트 제작 상태를 확인하세요."}</dd></div>
-              </dl>
             </section>
             <section className="detail-card">
               <h3>해결해야 할 차단 항목</h3>
