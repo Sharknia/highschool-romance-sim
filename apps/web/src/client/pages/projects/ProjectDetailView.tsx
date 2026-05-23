@@ -272,7 +272,7 @@ function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): Project
 
 export function ProjectDetailView({
   activeTab,
-  currentProject,
+  currentProject: loadedProject,
   onProjectResult,
   projectDirectory,
   projectId,
@@ -315,7 +315,10 @@ export function ProjectDetailView({
   const [exportPlan, setExportPlan] = useState<ProjectExportPlan | null>(null);
   const [smokeResult, setSmokeResult] = useState<ProjectSmokeResult | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
-  const summary = workflowSummary || fallbackWorkflowSummary(currentProject);
+  const routeProjectLoaded = !projectId || loadedProject?.id === projectId;
+  const currentProject = routeProjectLoaded ? loadedProject : null;
+  const currentWorkflowSummary = routeProjectLoaded ? workflowSummary : null;
+  const summary = currentWorkflowSummary || fallbackWorkflowSummary(currentProject);
   const hasUnsavedProjectDraft = false;
   const assignedHeroine = currentProject?.characters?.[0] || null;
   const selectedHeroine = heroines.find((heroine) => heroine.id === selectedHeroineId) || heroines[0] || null;
@@ -364,7 +367,7 @@ export function ProjectDetailView({
       : eventState;
   const canExpandEvent = Boolean(assignedHeroine && currentRoute?.id && currentEventScene?.id && eventPrompt.trim() && !pendingPatch && !eventBusy);
   const canApproveEvent = Boolean(pendingPatch && pendingPatch.validation?.ok !== false && !eventBusy);
-  const detailProjectId = currentProject?.id || projectId;
+  const detailProjectId = projectId || currentProject?.id || "";
   const primaryActionTab: ProjectTabId = summary.primaryAction === "goToHeroine"
     ? "heroine"
     : summary.primaryAction === "goToBackground"
@@ -505,7 +508,7 @@ export function ProjectDetailView({
     setBusy(true);
     setHeroineStatus("히로인 스냅샷을 배정하는 중입니다.");
     try {
-      const result = await postAuthedJson<ProjectApiResult>(`/api/projects/${currentProject.id}/heroine`, {
+      const result = await postAuthedJson<ProjectApiResult>(`/api/projects/${detailProjectId}/heroine`, {
         projectDirectory,
         heroine: selectedHeroine
       });
@@ -520,7 +523,7 @@ export function ProjectDetailView({
         workflowSummary: result.workflowSummary
       });
       setHeroineStatus("히로인 스냅샷이 프로젝트에 배정되었습니다.");
-      navigate(`/projects/${currentProject.id}/studio`);
+      navigate(`/projects/${detailProjectId}/studio`);
     } catch (error) {
       setHeroineStatus(`히로인 스냅샷 배정 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -614,7 +617,7 @@ export function ProjectDetailView({
       setEventPrompt("");
       setEventState("ready");
       setEventStatus("제안 승인 완료. CG 작업이 있으면 배경 화면 생성 탭으로 이동합니다.");
-      navigate(`/projects/${result.project?.id || currentProject?.id || projectId}/${eventResultHasCg(result, pendingPatch.plan) ? "background" : "preview"}`);
+      navigate(`/projects/${result.project?.id || detailProjectId}/${eventResultHasCg(result, pendingPatch.plan) ? "background" : "preview"}`);
     } catch (error) {
       setEventState("patchInvalid");
       setEventStatus(`제안 승인 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -957,7 +960,7 @@ export function ProjectDetailView({
       <div className="section-header page-header">
         <div>
           <p className="eyebrow">Project Detail</p>
-          <h2 id="projectDetailTitle">{currentProject?.title || shellProjectTitle}</h2>
+          <h2 id="projectDetailTitle">{currentProject?.title || (projectId ? projectId : shellProjectTitle)}</h2>
         </div>
         <span className="state-chip">{activeTabLabel}</span>
         <div className="page-primary-action">
@@ -1073,7 +1076,7 @@ export function ProjectDetailView({
                     <div><dt>저장 상태</dt><dd>{currentProject ? "프로젝트에 저장됨" : "저장 상태 확인 필요"}</dd></div>
                     <div><dt>마지막 수정 시각</dt><dd>{sourceHeroine?.updatedAt || snapshotSavedAt}</dd></div>
                   </dl>
-                  <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/background`)} variant="primary">
+                  <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/background`)} variant="primary">
                     배경 화면 생성으로 이동
                   </Button>
                 </>
@@ -1134,7 +1137,7 @@ export function ProjectDetailView({
               <p className="page-muted">Alpha에서는 프로젝트당 배경 1개만 생성할 수 있습니다.</p>
               <dl className="summary-list">
                 <div><dt>제목</dt><dd>{currentProject?.title || shellProjectTitle}</dd></div>
-                <div><dt>프로젝트 ID</dt><dd>{currentProject?.id || projectId || "확인 필요"}</dd></div>
+                <div><dt>프로젝트 ID</dt><dd>{detailProjectId || "확인 필요"}</dd></div>
                 <div><dt>저장될 결과 위치</dt><dd>{backgroundOutputLocation}</dd></div>
                 <div><dt>기존 배경 교체</dt><dd>{backgroundReplaceText}</dd></div>
                 <div><dt>생성 경로</dt><dd>Codex app-server · ChatGPT managed OAuth · imageGeneration</dd></div>
@@ -1207,7 +1210,7 @@ export function ProjectDetailView({
                 <Button disabled={assetBusy || backgroundBusy || failedImageJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(failedImageJobIds, true)}>
                   실패 작업 재시도
                 </Button>
-                <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
+                <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
                   프리뷰로 이동
                 </Button>
               </div>
@@ -1321,7 +1324,7 @@ export function ProjectDetailView({
                 <Button disabled={exportBusy || !currentProject} icon={<CheckCircle2 size={16} />} onClick={() => void runExport()} variant="primary">
                   내보내기 실행
                 </Button>
-                <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
+                <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
                   다음 action: 프리뷰 확인
                 </Button>
               </div>

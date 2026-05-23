@@ -415,6 +415,10 @@ export function ProjectStartPage() {
       setLastRestoredProjectId(null);
       return;
     }
+    if (currentProject?.id && currentProject.id !== projectId) {
+      setCurrentProject(null);
+      setWorkflowSummary(null);
+    }
     if (tab && normalizeTab(tab) !== tab) {
       navigate(`/projects/${projectId}/${normalizeTab(tab)}`, { replace: true });
       return;
@@ -424,7 +428,7 @@ export function ProjectStartPage() {
     }
     setLastRestoredProjectId(projectId);
     void openProject("프로젝트 복원", { projectId }, false);
-  }, [projectId, tab, lastRestoredProjectId]);
+  }, [projectId, tab, lastRestoredProjectId, currentProject?.id]);
 
   const reconnectTarget = reconnectProjectId
     ? recentProjects.find((entry) => entry.projectId === reconnectProjectId) || null
