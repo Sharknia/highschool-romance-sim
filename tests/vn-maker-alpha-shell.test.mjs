@@ -12,6 +12,7 @@ function readText(path) {
 const appSource = readText("apps/web/src/client/App.tsx");
 const apiClientSource = readText("apps/web/src/client/api/client.ts");
 const issue27QaSource = readText("docs/qa/issue-27-alpha-project-management.md");
+const toolkitDocsSource = readText("docs/vn-maker-toolkit.md");
 
 [
   "EMPTY_RESPONSE",
@@ -26,6 +27,33 @@ const issue27QaSource = readText("docs/qa/issue-27-alpha-project-management.md")
 });
 assert.match(issue27QaSource, /#44 project-management audit/, "issue-27 QA 문서는 #44 감사 이후 과거 pass 기록이 현재 완료 기준이 아님을 명시해야 합니다.");
 assert.doesNotMatch(issue27QaSource, /\| `\/projects` opens on a project list using central list UI \| `RecentProjectList`, `ContentList`, screenshots \| pass \|/, "issue-27 QA 문서는 RecentProjectList 중심 /projects 구조를 현재 pass로 고정하면 안 됩니다.");
+[
+  "POST /api/projects",
+  "POST /api/projects/open",
+  "POST /api/projects/recent/list",
+  "POST /api/projects/recent/remove",
+  "POST /api/projects/delete",
+  "POST /api/projects/:projectId/heroine",
+  "POST /api/generation/jobs/list",
+  "POST /api/generation/jobs/run"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(toolkitDocsSource, pattern, `toolkit 문서는 현재 Web API route를 포함해야 합니다: ${requiredText}`);
+});
+[
+  "create-project",
+  "open-project",
+  "list-recent-projects",
+  "remove-recent-project",
+  "restore-recent-project",
+  "delete-project",
+  "run-generation-jobs"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(toolkitDocsSource, pattern, `toolkit 문서는 현재 CLI command를 포함해야 합니다: ${requiredText}`);
+});
+assert.match(toolkitDocsSource, /recent project index는 내부 저장소/, "toolkit 문서는 recent project index가 사용자-facing 핵심 목록이 아니라 내부 저장소임을 구분해야 합니다.");
+assert.doesNotMatch(toolkitDocsSource, /웹앱에서 프로젝트 파일 선택\/최근 작업 목록 UX 추가/, "이미 구현된 프로젝트 파일/최근 작업 UX를 다음 구현 우선순위로 남기면 안 됩니다.");
 
 assert.match(
   appSource,
