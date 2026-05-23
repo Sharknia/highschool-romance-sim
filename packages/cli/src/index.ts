@@ -130,9 +130,9 @@ function printCapabilities(): void {
       "assign-heroine-snapshot",
       "open-project",
       "reconnect-project",
-      "list-recent-projects",
-      "remove-recent-project",
-      "restore-recent-project",
+      "list-projects",
+      "remove-project",
+      "restore-project",
       "delete-project",
       "list-heroines",
       "get-heroine",
@@ -181,6 +181,9 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "assign-heroine-snapshot": "assignHeroineSnapshot",
     "open-project": "openProject",
     "reconnect-project": "reconnectRecentProject",
+    "list-projects": "listProjects",
+    "remove-project": "removeProject",
+    "restore-project": "restoreProject",
     "list-recent-projects": "listRecentProjects",
     "remove-recent-project": "removeRecentProject",
     "restore-recent-project": "restoreRecentProject",
@@ -232,6 +235,21 @@ async function run(): Promise<void> {
 
   if (command === "reconnect-project") {
     writeJson(await useCases.reconnectRecentProject(input));
+    return;
+  }
+
+  if (command === "list-projects") {
+    writeJson(await useCases.listProjects());
+    return;
+  }
+
+  if (command === "remove-project") {
+    writeJson(await useCases.removeProject(input));
+    return;
+  }
+
+  if (command === "restore-project") {
+    writeJson(await useCases.restoreProject(input));
     return;
   }
 

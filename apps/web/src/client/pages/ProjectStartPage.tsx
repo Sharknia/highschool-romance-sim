@@ -5,20 +5,20 @@ import { useAuth } from "../auth/AuthProvider";
 import { Button, DeleteConfirmDialog, StatusBanner } from "../components/ui";
 import { useWorkspaceShell } from "../components/WorkspaceLayout";
 import { ProjectDetailView } from "./projects/ProjectDetailView";
-import { RecentProjectList } from "./projects/RecentProjectList";
+import { ProjectList } from "./projects/RecentProjectList";
 import {
   deleteProjectFiles as deleteProjectFilesApi,
-  listRecentProjects as listRecentProjectsApi,
+  listProjects as listProjectsApi,
   openProject as openProjectApi,
   projectFailureText,
   reconnectProject as reconnectProjectApi,
-  removeRecentProject as removeRecentProjectApi,
-  restoreRecentProject as restoreRecentProjectApi
+  removeProject as removeProjectApi,
+  restoreProject as restoreProjectApi
 } from "./projects/projectApi";
 import { normalizeTab, type ProjectApiResult, type ProjectData, type ProjectWorkflowSummary, type RecentProject } from "./projects/projectPageTypes";
 
 type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";
-type DeleteDialogMode = "recent" | "files";
+type DeleteDialogMode = "list" | "files";
 type ProjectFailureLike = Pick<ProjectApiResult, "code" | "error" | "httpStatus" | "message" | "nextAction" | "userSummary">;
 
 export interface ProjectFailureViewModel {
@@ -148,37 +148,37 @@ export function ProjectStartPage() {
   const [busy, setBusy] = useState(false);
   const [projectListState, setProjectListState] = useState<ProjectListState>("loading");
   const [projectListError, setProjectListError] = useState("");
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [recentMeta, setRecentMeta] = useState({ count: 0, missingCount: 0, loadedAt: "", sort: "lastOpenedAtDesc" });
+  const [projects, setProjects] = useState<RecentProject[]>([]);
+  const [projectListMeta, setProjectListMeta] = useState({ count: 0, missingCount: 0, loadedAt: "", sort: "lastOpenedAtDesc" });
   const [currentProject, setCurrentProject] = useState<ProjectData | null>(null);
   const [workflowSummary, setWorkflowSummary] = useState<ProjectWorkflowSummary | null>(null);
   const [reconnectProjectId, setReconnectProjectId] = useState<string | null>(null);
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
   const [removedProject, setRemovedProject] = useState<RecentProject | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RecentProject | null>(null);
-  const [deleteDialogMode, setDeleteDialogMode] = useState<DeleteDialogMode>("recent");
+  const [deleteDialogMode, setDeleteDialogMode] = useState<DeleteDialogMode>("list");
   const [deleteError, setDeleteError] = useState("");
-  const [deleteErrorSource, setDeleteErrorSource] = useState<"files" | "recent" | null>(null);
+  const [deleteErrorSource, setDeleteErrorSource] = useState<"files" | "list" | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
 
-  function applyRecentProjectList(result: ProjectApiResult): RecentProject[] {
-    const projects = Array.isArray(result.projects) ? result.projects : [];
-    setRecentProjects(projects);
-    setRecentMeta((current) => ({
-      count: typeof result.count === "number" ? result.count : projects.length,
-      missingCount: typeof result.missingCount === "number" ? result.missingCount : projects.filter((entry) => entry.missing).length,
+  function applyProjectList(result: ProjectApiResult): RecentProject[] {
+    const nextProjects = Array.isArray(result.projects) ? result.projects : [];
+    setProjects(nextProjects);
+    setProjectListMeta((current) => ({
+      count: typeof result.count === "number" ? result.count : nextProjects.length,
+      missingCount: typeof result.missingCount === "number" ? result.missingCount : nextProjects.filter((entry) => entry.missing).length,
       loadedAt: typeof result.loadedAt === "string" ? result.loadedAt : current.loadedAt,
       sort: typeof result.sort === "string" ? result.sort : "lastOpenedAtDesc"
     }));
-    setProjectListState(projects.length > 0 ? "ready" : "empty");
+    setProjectListState(nextProjects.length > 0 ? "ready" : "empty");
     setProjectListError("");
-    return projects;
+    return nextProjects;
   }
 
-  async function refreshRecentProjects(): Promise<RecentProject[]> {
+  async function refreshProjects(): Promise<RecentProject[]> {
     setProjectListState("loading");
     setStatus("프로젝트 목록을 불러오는 중입니다.");
-    const result = await listRecentProjectsApi(postAuthedJson);
+    const result = await listProjectsApi(postAuthedJson);
     if (result.ok === false) {
       const viewModel = projectListErrorViewModel(result);
       setProjectListState("error");
@@ -186,14 +186,14 @@ export function ProjectStartPage() {
       setStatus(`${viewModel.title}: ${viewModel.message}`);
       return [];
     }
-    const projects = applyRecentProjectList(result);
-    setStatus(projects.length > 0 ? "최근 프로젝트 목록을 불러왔습니다." : "아직 최근 프로젝트가 없습니다.");
-    return projects;
+    const nextProjects = applyProjectList(result);
+    setStatus(nextProjects.length > 0 ? "프로젝트 목록을 불러왔습니다." : "아직 프로젝트가 없습니다.");
+    return nextProjects;
   }
 
-  async function loadRecentProjects(): Promise<RecentProject[]> {
+  async function loadProjects(): Promise<RecentProject[]> {
     try {
-      return await refreshRecentProjects();
+      return await refreshProjects();
     } catch (error) {
       const viewModel = projectListErrorViewModel({
         ok: false,
@@ -248,7 +248,7 @@ export function ProjectStartPage() {
         return;
       }
       const openedProjectId = applyProjectResult(result, typeof body.projectDirectory === "string" ? body.projectDirectory : projectDirectoryInput);
-      await loadRecentProjects();
+      await loadProjects();
       setReconnectProjectId(null);
       setStatus(`${label} 완료: 프로젝트를 열었습니다.`);
       if (navigateToDetail && openedProjectId) {
@@ -261,57 +261,57 @@ export function ProjectStartPage() {
     }
   }
 
-  async function removeRecentProject(entry: RecentProject, closeDeleteDialog = false): Promise<void> {
+  async function removeProjectFromList(entry: RecentProject, closeDeleteDialog = false): Promise<void> {
     setBusy(true);
     setProjectListState("deleting");
     if (closeDeleteDialog) {
       setDeleteError("");
       setDeleteErrorSource(null);
     }
-    setStatus("최근 목록 제거 실행 중");
+    setStatus("프로젝트 목록 제거 실행 중");
     try {
-      const result = await removeRecentProjectApi(postAuthedJson, entry);
+      const result = await removeProjectApi(postAuthedJson, entry);
       if (result.ok === false) {
-        throw new Error(projectFailureText(result, "최근 목록에서 제거하지 못했습니다."));
+        throw new Error(projectFailureText(result, "프로젝트 목록에서 제거하지 못했습니다."));
       }
-      applyRecentProjectList(result);
+      applyProjectList(result);
       setRemovedProject(result.removedProject || entry);
       if (closeDeleteDialog) {
         setDeleteTarget(null);
-        setDeleteDialogMode("recent");
+        setDeleteDialogMode("list");
         setDeleteError("");
         setDeleteErrorSource(null);
       }
-      setStatus("최근 목록에서 제거했습니다. 실제 프로젝트 파일은 삭제하지 않았습니다.");
+      setStatus("프로젝트 목록에서 제거했습니다. 실제 프로젝트 파일은 삭제하지 않았습니다.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setProjectListState(recentProjects.length > 0 ? "ready" : "empty");
+      setProjectListState(projects.length > 0 ? "ready" : "empty");
       if (closeDeleteDialog) {
         setDeleteError(message);
-        setDeleteErrorSource("recent");
+        setDeleteErrorSource("list");
       }
-      setStatus(`최근 목록 제거 실패: ${message}`);
+      setStatus(`프로젝트 목록 제거 실패: ${message}`);
     } finally {
       setBusy(false);
     }
   }
 
-  async function restoreRecentProject(): Promise<void> {
+  async function restoreProjectListEntry(): Promise<void> {
     if (!removedProject) {
       return;
     }
     setBusy(true);
-    setStatus("최근 목록 되돌리기 실행 중");
+    setStatus("프로젝트 목록 되돌리기 실행 중");
     try {
-      const result = await restoreRecentProjectApi(postAuthedJson, removedProject);
+      const result = await restoreProjectApi(postAuthedJson, removedProject);
       if (result.ok === false) {
-        throw new Error(projectFailureText(result, "최근 목록을 되돌리지 못했습니다."));
+        throw new Error(projectFailureText(result, "프로젝트 목록을 되돌리지 못했습니다."));
       }
-      applyRecentProjectList(result);
+      applyProjectList(result);
       setRemovedProject(null);
-      setStatus("최근 목록 되돌리기 완료");
+      setStatus("프로젝트 목록 되돌리기 완료");
     } catch (error) {
-      setStatus(`최근 목록 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus(`프로젝트 목록 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -320,7 +320,7 @@ export function ProjectStartPage() {
   function prepareProjectDelete(entry: RecentProject, trigger: HTMLElement): void {
     deleteReturnFocusRef.current = trigger;
     setDeleteTarget(entry);
-    setDeleteDialogMode("recent");
+    setDeleteDialogMode("list");
     setDeleteError("");
     setDeleteErrorSource(null);
     setStatus(`${entry.title} 프로젝트 삭제 방식을 선택합니다.`);
@@ -331,7 +331,7 @@ export function ProjectStartPage() {
       return;
     }
     setDeleteTarget(null);
-    setDeleteDialogMode("recent");
+    setDeleteDialogMode("list");
     setDeleteError("");
     setDeleteErrorSource(null);
     window.setTimeout(() => deleteReturnFocusRef.current?.focus(), 0);
@@ -344,8 +344,8 @@ export function ProjectStartPage() {
     setStatus(`${entry.title} 프로젝트 파일 삭제 확인이 필요합니다.`);
   }
 
-  function showRecentRemoveConfirmation(entry: RecentProject): void {
-    setDeleteDialogMode("recent");
+  function showProjectListRemoveConfirmation(entry: RecentProject): void {
+    setDeleteDialogMode("list");
     setDeleteError("");
     setDeleteErrorSource(null);
     setStatus(`${entry.title} 프로젝트를 목록에서만 제거할 수 있습니다.`);
@@ -388,37 +388,37 @@ export function ProjectStartPage() {
       });
       if (result.ok === false) {
         const viewModel = projectDeleteErrorViewModel(result);
-        setProjectListState(recentProjects.length > 0 ? "ready" : "empty");
+        setProjectListState(projects.length > 0 ? "ready" : "empty");
         setDeleteError(viewModel.content);
         setDeleteErrorSource("files");
         setStatus(`프로젝트 파일 삭제 실패: ${viewModel.message}`);
         return;
       }
-      applyRecentProjectList(result);
+      applyProjectList(result);
       clearCurrentProjectIfNeeded(entry);
       setDeleteTarget(null);
-      setDeleteDialogMode("recent");
+      setDeleteDialogMode("list");
       setRemovedProject(null);
       const recentIndexRemoval = result.recentIndexRemoval;
       const recentRemovalFailed = recentIndexRemoval?.ok === false;
       if (recentRemovalFailed) {
-        const removalMessage = recentIndexRemoval.error || "최근 목록 정리에 실패했습니다.";
-        setDeleteError(`최근 목록 정리에 실패했습니다. ${removalMessage}`);
-        setDeleteErrorSource("recent");
-        const partialSuccessStatus = "프로젝트 파일은 삭제했지만 최근 목록 정리에 실패했습니다. 목록 새로고침 또는 목록에서만 제거를 다시 시도하세요.";
+        const removalMessage = recentIndexRemoval.error || "프로젝트 목록 정리에 실패했습니다.";
+        setDeleteError(`프로젝트 목록 정리에 실패했습니다. ${removalMessage}`);
+        setDeleteErrorSource("list");
+        const partialSuccessStatus = "프로젝트 파일은 삭제했지만 프로젝트 목록 정리에 실패했습니다. 목록 새로고침 또는 목록에서만 제거를 다시 시도하세요.";
         setStatus(partialSuccessStatus);
-        void loadRecentProjects().finally(() => setStatus(partialSuccessStatus));
+        void loadProjects().finally(() => setStatus(partialSuccessStatus));
       } else {
         setDeleteError("");
         setDeleteErrorSource(null);
-        setStatus("프로젝트 파일까지 삭제했습니다. 최근 목록도 새로고침했습니다.");
-        void loadRecentProjects();
+        setStatus("프로젝트 파일까지 삭제했습니다. 프로젝트 목록도 새로고침했습니다.");
+        void loadProjects();
       }
     } catch (error) {
       const viewModel = projectDeleteErrorViewModel({
         message: error instanceof Error ? error.message : String(error)
       });
-      setProjectListState(recentProjects.length > 0 ? "ready" : "empty");
+      setProjectListState(projects.length > 0 ? "ready" : "empty");
       setDeleteError(viewModel.content);
       setDeleteErrorSource("files");
       setStatus(`프로젝트 파일 삭제 실패: ${viewModel.message}`);
@@ -428,7 +428,7 @@ export function ProjectStartPage() {
   }
 
   useEffect(() => {
-    void loadRecentProjects();
+    void loadProjects();
   }, []);
 
   useEffect(() => {
@@ -452,7 +452,7 @@ export function ProjectStartPage() {
   }, [projectId, tab, lastRestoredProjectId, currentProject?.id]);
 
   const reconnectTarget = reconnectProjectId
-    ? recentProjects.find((entry) => entry.projectId === reconnectProjectId) || {
+    ? projects.find((entry) => entry.projectId === reconnectProjectId) || {
       projectId: reconnectProjectId,
       projectDirectory: projectDirectoryInput,
       title: reconnectProjectId,
@@ -477,11 +477,11 @@ export function ProjectStartPage() {
   const projectStatusBanner = (
     <StatusBanner tone={statusTone(status)}>
       <span className="page-status">{status}</span>
-      {deleteError && deleteErrorSource === "recent" ? (
+      {deleteError && deleteErrorSource === "list" ? (
         <span className="page-status">{deleteError}</span>
       ) : null}
       {removedProject ? (
-        <Button disabled={busy} onClick={() => void restoreRecentProject()} variant="ghost">
+        <Button disabled={busy} onClick={() => void restoreProjectListEntry()} variant="ghost">
           되돌리기
         </Button>
       ) : null}
@@ -495,7 +495,7 @@ export function ProjectStartPage() {
           <div>
             <p className="eyebrow">Projects</p>
             <h1 id="projectsTitle">프로젝트 관리</h1>
-            <p>최근 프로젝트를 열고 Alpha 제작 루프의 상세 탭으로 바로 진입합니다.</p>
+            <p>프로젝트 목록에서 제작 루프의 상세 탭으로 바로 진입합니다.</p>
           </div>
           <div className="page-primary-action">
             <span>새 제작 프로젝트가 필요하면 생성 흐름으로 이동합니다.</span>
@@ -510,22 +510,22 @@ export function ProjectStartPage() {
       {projectStatusBanner}
 
       {!projectId ? (
-        <RecentProjectList
+        <ProjectList
           busy={busy}
           errorText={projectListError}
           listState={projectListState}
-          loadedAt={recentMeta.loadedAt}
-          missingCount={recentMeta.missingCount}
-          onOpen={(entry) => void openProject("최근 프로젝트 상세보기", { projectId: entry.projectId })}
+          loadedAt={projectListMeta.loadedAt}
+          missingCount={projectListMeta.missingCount}
+          onOpen={(entry) => void openProject("프로젝트 상세보기", { projectId: entry.projectId })}
           onPrepareDelete={(entry, trigger) => prepareProjectDelete(entry, trigger)}
           onPrepareReconnect={(entry) => {
             setReconnectProjectId(entry.projectId);
             setProjectDirectoryInput(entry.missing ? "" : entry.projectDirectory);
             setStatus("프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.");
           }}
-          onRefresh={() => void loadRecentProjects()}
-          recentProjects={recentProjects}
-          totalCount={recentMeta.count}
+          onRefresh={() => void loadProjects()}
+          projects={projects}
+          totalCount={projectListMeta.count}
         />
       ) : null}
 
@@ -550,7 +550,7 @@ export function ProjectStartPage() {
         </section>
       ) : null}
 
-      {deleteTarget && deleteDialogMode === "recent" ? (
+      {deleteTarget && deleteDialogMode === "list" ? (
         <DeleteConfirmDialog
           busy={busy}
           irreversible={false}
@@ -561,19 +561,19 @@ export function ProjectStartPage() {
           expectedConfirmation=""
           impactItems={[
             { label: "저장 위치", value: deleteTarget.projectDirectory },
-            { label: "파일 유지", value: "최근 목록에서만 사라지며 프로젝트 파일은 유지됩니다." },
+            { label: "파일 유지", value: "프로젝트 목록에서만 사라지며 프로젝트 파일은 유지됩니다." },
             { label: "되돌리기", value: "제거 직후 되돌리기로 목록에 다시 표시할 수 있습니다." }
           ]}
           intro="프로젝트 목록에서만 제거합니다."
           onClose={closeDeleteConfirmation}
           primaryAction={{
             label: "목록에서만 제거",
-            onSelect: () => void removeRecentProject(deleteTarget, true),
+            onSelect: () => void removeProjectFromList(deleteTarget, true),
             variant: "primary"
           }}
-          retryAction={deleteError && deleteErrorSource === "recent" ? {
+          retryAction={deleteError && deleteErrorSource === "list" ? {
             label: "다시 시도",
-            onSelect: () => void removeRecentProject(deleteTarget, true),
+            onSelect: () => void removeProjectFromList(deleteTarget, true),
             requiresConfirmation: false,
             variant: "ghost"
           } : undefined}
@@ -584,7 +584,7 @@ export function ProjectStartPage() {
             variant: "ghost"
           }]}
           title="프로젝트 목록에서 제거"
-          warningMessage="최근 목록 항목만 제거합니다. 로컬 프로젝트 파일은 그대로 유지됩니다."
+          warningMessage="프로젝트 목록 항목만 제거합니다. 로컬 프로젝트 파일은 그대로 유지됩니다."
           warningTitle="되돌릴 수 있음"
         />
       ) : null}
@@ -600,7 +600,7 @@ export function ProjectStartPage() {
           impactItems={[
             { label: "저장 위치", value: deleteTarget.projectDirectory },
             { label: "로컬 프로젝트 파일", value: "프로젝트 폴더와 제작 데이터를 삭제합니다." },
-            { label: "최근 목록 정리", value: "삭제 성공 후 목록에서도 제거합니다." }
+            { label: "프로젝트 목록 정리", value: "삭제 성공 후 목록에서도 제거합니다." }
           ]}
           intro="로컬 프로젝트 파일 삭제를 확인합니다."
           onClose={closeDeleteConfirmation}
@@ -616,7 +616,7 @@ export function ProjectStartPage() {
           } : undefined}
           secondaryActions={[{
             label: "목록 제거로 돌아가기",
-            onSelect: () => showRecentRemoveConfirmation(deleteTarget),
+            onSelect: () => showProjectListRemoveConfirmation(deleteTarget),
             requiresConfirmation: false,
             variant: "ghost"
           }]}

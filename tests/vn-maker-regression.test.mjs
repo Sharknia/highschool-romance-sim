@@ -663,7 +663,7 @@ assert.equal(apiRecentCreated.body.project.id, "api-recent");
 
 const apiRecentList = await mockApi({
   method: "POST",
-  path: "/api/projects/recent/list",
+  path: "/api/projects/list",
   body: {}
 });
 assert.equal(apiRecentList.status, 200);
@@ -680,7 +680,7 @@ assert.equal(apiRecentOpened.body.projectDirectory, apiRecentDirectory);
 
 const apiRecentRemoved = await mockApi({
   method: "POST",
-  path: "/api/projects/recent/remove",
+  path: "/api/projects/remove",
   body: { projectId: "api-recent" }
 });
 assert.equal(apiRecentRemoved.status, 200);
@@ -695,7 +695,7 @@ const apiRecentMiss = await mockApi({
 assert.equal(apiRecentMiss.status, 404);
 assert.equal(apiRecentMiss.body.ok, false);
 assert.equal(apiRecentMiss.body.code, "RECENT_PROJECT_INDEX_MISS");
-assert.equal(apiRecentMiss.body.message, "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+assert.equal(apiRecentMiss.body.message, "프로젝트 목록에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
 assert.equal(apiRecentMiss.body.nextAction, "프로젝트 디렉터리를 다시 열어 주세요.");
 
 const apiDeleteDirectory = join(tempRoot, "Issue20ApiDelete.vnmaker");

@@ -5,13 +5,13 @@ import type { RecentProject } from "./projectPageTypes";
 
 type RecentProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";
 
-interface RecentProjectListProps {
+interface ProjectListProps {
   busy: boolean;
   errorText?: string;
   listState: RecentProjectListState;
   loadedAt?: string;
   missingCount: number;
-  recentProjects: RecentProject[];
+  projects: RecentProject[];
   onOpen: (entry: RecentProject) => void;
   onPrepareDelete: (entry: RecentProject, trigger: HTMLElement) => void;
   onPrepareReconnect: (entry: RecentProject) => void;
@@ -64,31 +64,31 @@ function renderProjectField(label: string, value: string) {
   );
 }
 
-export function RecentProjectList({
+export function ProjectList({
   busy,
   errorText,
   listState,
   loadedAt,
   missingCount,
-  recentProjects,
+  projects,
   onOpen,
   onPrepareDelete,
   onPrepareReconnect,
   onRefresh,
   totalCount
-}: RecentProjectListProps) {
+}: ProjectListProps) {
   const [query, setQuery] = useState("");
   const filteredProjects = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
-      return recentProjects;
+      return projects;
     }
-    return recentProjects.filter((entry) => [
+    return projects.filter((entry) => [
       entry.title,
       entry.projectDirectory,
       entry.projectId
     ].some((value) => value.toLowerCase().includes(normalized)));
-  }, [query, recentProjects]);
+  }, [query, projects]);
 
   function openFromCard(entry: RecentProject): void {
     if (entry.missing) {
@@ -98,7 +98,7 @@ export function RecentProjectList({
     onOpen(entry);
   }
 
-  const effectiveListState: RecentProjectListState = listState === "ready" && recentProjects.length === 0 ? "empty" : listState;
+  const effectiveListState: RecentProjectListState = listState === "ready" && projects.length === 0 ? "empty" : listState;
 
   const listStateConfig: ContentListState | undefined = (() => {
     if (effectiveListState === "loading") {
@@ -112,7 +112,7 @@ export function RecentProjectList({
       return {
         kind: "empty",
         title: "빈 목록",
-        description: "아직 최근 프로젝트가 없습니다.",
+        description: "아직 프로젝트가 없습니다.",
         action: (
           <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh} variant="secondary">
             다시 시도
@@ -132,11 +132,11 @@ export function RecentProjectList({
         )
       };
     }
-    if (effectiveListState === "deleting" && recentProjects.length === 0) {
+    if (effectiveListState === "deleting" && projects.length === 0) {
       return {
         kind: "busy",
         title: "삭제",
-        description: "최근 프로젝트 항목을 삭제하는 중입니다."
+        description: "프로젝트 목록 항목을 삭제하는 중입니다."
       };
     }
     if (effectiveListState === "ready" && filteredProjects.length === 0) {
@@ -150,11 +150,11 @@ export function RecentProjectList({
   })();
 
   return (
-    <section className="page-panel recent-project-panel" aria-labelledby="recentProjectsTitle">
+    <section className="page-panel recent-project-panel" aria-labelledby="projectsListTitle">
       <div className="section-header">
         <div>
-          <p className="eyebrow">Recent</p>
-          <h2 id="recentProjectsTitle">최근 프로젝트</h2>
+          <p className="eyebrow">Projects</p>
+          <h2 id="projectsListTitle">프로젝트 목록</h2>
         </div>
         <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh}>
           새로고침
@@ -163,7 +163,7 @@ export function RecentProjectList({
       <div className="recent-project-toolbar">
         <label className="search-row">
           <Search size={16} />
-          <input aria-label="최근 프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
+          <input aria-label="프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
         </label>
         <div className="recent-project-counts">
           <span>총 {totalCount}개</span>
@@ -174,7 +174,7 @@ export function RecentProjectList({
       </div>
       {/* 키보드 포커스: ContentList의 focus-visible outline이 목록 카드 선택 affordance를 유지합니다. */}
       <ContentList
-        ariaLabel="최근 프로젝트 목록"
+        ariaLabel="프로젝트 목록"
         busy={busy || effectiveListState === "deleting"}
         state={listStateConfig}
         items={filteredProjects.map((entry) => ({

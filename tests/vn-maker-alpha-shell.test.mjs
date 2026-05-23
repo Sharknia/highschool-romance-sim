@@ -30,8 +30,9 @@ assert.doesNotMatch(issue27QaSource, /\| `\/projects` opens on a project list us
 [
   "POST /api/projects",
   "POST /api/projects/open",
-  "POST /api/projects/recent/list",
-  "POST /api/projects/recent/remove",
+  "POST /api/projects/list",
+  "POST /api/projects/remove",
+  "POST /api/projects/restore",
   "POST /api/projects/delete",
   "POST /api/projects/:projectId/heroine",
   "POST /api/generation/jobs/list",
@@ -43,9 +44,9 @@ assert.doesNotMatch(issue27QaSource, /\| `\/projects` opens on a project list us
 [
   "create-project",
   "open-project",
-  "list-recent-projects",
-  "remove-recent-project",
-  "restore-recent-project",
+  "list-projects",
+  "remove-project",
+  "restore-project",
   "delete-project",
   "run-generation-jobs"
 ].forEach((requiredText) => {
@@ -53,6 +54,7 @@ assert.doesNotMatch(issue27QaSource, /\| `\/projects` opens on a project list us
   assert.match(toolkitDocsSource, pattern, `toolkit 문서는 현재 CLI command를 포함해야 합니다: ${requiredText}`);
 });
 assert.match(toolkitDocsSource, /recent project index는 내부 저장소/, "toolkit 문서는 recent project index가 사용자-facing 핵심 목록이 아니라 내부 저장소임을 구분해야 합니다.");
+assert.doesNotMatch(toolkitDocsSource, /list-recent-projects|remove-recent-project|restore-recent-project|\/api\/projects\/recent\/list|\/api\/projects\/recent\/remove|\/api\/projects\/recent\/restore/, "toolkit 문서의 공개 API/CLI 계약은 recent 전용 이름이 아니라 projects 이름을 써야 합니다.");
 assert.doesNotMatch(toolkitDocsSource, /웹앱에서 프로젝트 파일 선택\/최근 작업 목록 UX 추가/, "이미 구현된 프로젝트 파일/최근 작업 UX를 다음 구현 우선순위로 남기면 안 됩니다.");
 
 assert.match(
@@ -227,8 +229,8 @@ assert.ok(
   projectStartSource.includes('type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";'),
   "ProjectStartPage는 프로젝트 목록 상태 union 타입을 가져야 합니다."
 );
-assert.match(projectStartSource, /function loadRecentProjects\(/, "프로젝트 목록 새로고침 실패는 catch 포함 loader에서 처리해야 합니다.");
-assert.match(projectStartSource, /onRefresh=\{\(\) => void loadRecentProjects\(\)\}/, "수동 새로고침은 unhandled rejection 없이 loader를 사용해야 합니다.");
+assert.match(projectStartSource, /function loadProjects\(/, "프로젝트 목록 새로고침 실패는 catch 포함 loader에서 처리해야 합니다.");
+assert.match(projectStartSource, /onRefresh=\{\(\) => void loadProjects\(\)\}/, "수동 새로고침은 unhandled rejection 없이 loader를 사용해야 합니다.");
 assert.match(projectStartSource, /if\s*\(tab && normalizeTab\(tab\) !== tab\)/, "명시된 legacy project detail tab alias만 정규화하고 /projects/:projectId/overview 복원은 막으면 안 됩니다.");
 assert.match(projectStartSource, /navigate\(`\/projects\/\$\{projectId\}\/\$\{normalizeTab\(tab\)\}`/, "legacy project detail tab alias는 overview가 아니라 normalizeTab 결과로 정규화해야 합니다.");
 assert.doesNotMatch(recentProjectListSource, /MoreVertical|recent-project-menu/, "프로젝트 목록 삭제 액션은 더보기 메뉴가 아니라 공통 직접 위험 액션이어야 합니다.");
@@ -240,15 +242,15 @@ assert.match(recentProjectListSource, /onPrepareDelete\(entry,\s*event\.currentT
 assert.match(projectStartSource, /deleteReturnFocusRef/, "ProjectStartPage는 삭제 dialog 닫힘 후 돌아갈 포커스 대상을 저장해야 합니다.");
 assert.match(projectStartSource, /deleteReturnFocusRef\.current\?\.focus\(\)/, "삭제 dialog 닫힘 후 삭제 트리거 버튼으로 포커스를 복귀해야 합니다.");
 assert.match(projectStartSource, /deleteDialogMode/, "ProjectStartPage는 목록 제거와 파일 삭제 confirmation 모드를 분리해야 합니다.");
-assert.match(projectStartSource, /deleteDialogMode === "recent"[\s\S]*irreversible=\{false\}[\s\S]*confirmationRequired=\{false\}[\s\S]*label: "목록에서만 제거"/, "목록 제거 dialog는 되돌림 가능 흐름이며 확인 입력 없이 최근 목록 제거만 실행해야 합니다.");
+assert.match(projectStartSource, /deleteDialogMode === "list"[\s\S]*irreversible=\{false\}[\s\S]*confirmationRequired=\{false\}[\s\S]*label: "목록에서만 제거"/, "목록 제거 dialog는 되돌림 가능 흐름이며 확인 입력 없이 프로젝트 목록 제거만 실행해야 합니다.");
 assert.match(projectStartSource, /deleteDialogMode === "files"[\s\S]*irreversible=\{true\}[\s\S]*confirmationLabel="프로젝트 제목"[\s\S]*label: "프로젝트 파일까지 삭제"/, "파일 삭제 dialog는 별도 모드에서 프로젝트명 입력 확인을 요구해야 합니다.");
 assert.doesNotMatch(projectStartSource, /\{ label: "목록에서만 제거", value: "최근 목록에서만 사라지며 프로젝트 파일은 유지됩니다\." \},\s*\{ label: "프로젝트 파일까지 삭제"/, "하나의 삭제 dialog impact 안에 목록 제거와 파일 삭제 영향을 함께 섞으면 안 됩니다.");
 assert.match(clientStylesSource, /\.button\s*\{[\s\S]*min-height:\s*40px/, "기본 버튼은 모바일 터치 기준을 위해 최소 40px 높이를 가져야 합니다.");
 [
   ["projectFailureText", ""],
-  ["listRecentProjects", "/api/projects/recent/list"],
-  ["removeRecentProject", "/api/projects/recent/remove"],
-  ["restoreRecentProject", "/api/projects/recent/restore"],
+  ["listProjects", "/api/projects/list"],
+  ["removeProject", "/api/projects/remove"],
+  ["restoreProject", "/api/projects/restore"],
   ["deleteProjectFiles", "/api/projects/delete"],
   ["openProject", "/api/projects/open"],
   ["reconnectProject", "/api/projects/reconnect"]
@@ -266,18 +268,18 @@ assert.match(projectApiSource, /confirmTitle:\s*string/, "deleteProjectFiles wra
 assert.match(projectApiSource, /confirmTitle/, "deleteProjectFiles wrapper는 /api/projects/delete에 confirmTitle을 전달해야 합니다.");
 assert.match(projectStartSource, /confirmTitle:\s*confirmationTitle\.trim\(\)/, "프로젝트 삭제 호출은 확인 제목을 confirmTitle로 전달해야 합니다.");
 assert.match(projectStartSource, /retryAction=\{deleteError && deleteErrorSource === "files" \? \{[\s\S]*onSelect: \(confirmationValue\) => void deleteProjectFiles\(deleteTarget, confirmationValue\)/, "프로젝트 삭제 retry는 dialog의 현재 확인 입력값을 재사용해야 합니다.");
-assert.match(projectStartSource, /applyRecentProjectList\(result\)/, "프로젝트 삭제 성공 후에는 delete API 응답 projects를 먼저 반영해야 합니다.");
+assert.match(projectStartSource, /applyProjectList\(result\)/, "프로젝트 삭제 성공 후에는 delete API 응답 projects를 먼저 반영해야 합니다.");
 assert.match(projectStartSource, /recentIndexRemoval\?\.ok === false/, "프로젝트 파일 삭제 성공 후 최근 목록 정리 실패는 부분 성공으로 따로 표시해야 합니다.");
-assert.match(projectStartSource, /최근 목록 정리에 실패/, "프로젝트 파일 삭제 성공 후 최근 목록 정리 실패 문구가 있어야 합니다.");
-assert.match(projectStartSource, /deleteErrorSource === "recent"/, "최근 목록 정리 실패는 파일 삭제 retry와 분리해야 합니다.");
+assert.match(projectStartSource, /프로젝트 목록 정리에 실패/, "프로젝트 파일 삭제 성공 후 프로젝트 목록 정리 실패 문구가 있어야 합니다.");
+assert.match(projectStartSource, /deleteErrorSource === "list"/, "프로젝트 목록 정리 실패는 파일 삭제 retry와 분리해야 합니다.");
 assert.match(projectPageTypesSource, /recentIndexRemoval\?:\s*\{[\s\S]*ok\?:\s*boolean/, "ProjectApiResult는 delete API의 최근 목록 정리 부분 실패를 타입으로 표현해야 합니다.");
-assert.match(projectStartSource, /void loadRecentProjects\(\)/, "프로젝트 삭제 성공 후 목록 재조회 실패는 삭제 실패와 분리해야 합니다.");
+assert.match(projectStartSource, /void loadProjects\(\)/, "프로젝트 삭제 성공 후 목록 재조회 실패는 삭제 실패와 분리해야 합니다.");
 assert.doesNotMatch(projectStartSource, /confirmationTitle:\s*confirmationTitle\.trim\(\)/, "프로젝트 삭제 호출은 #20 계약에 없는 confirmationTitle 필드를 보내면 안 됩니다.");
 assert.doesNotMatch(projectStartSource, /aria-label="보조 프로젝트 작업"/, "/projects 루트는 저장 위치/현재 상태 보조 패널을 기본 렌더링하면 안 됩니다.");
 assert.doesNotMatch(projectStartSource, /!\s*projectId\s*\?\s*detailView/, "/projects 루트는 선택되지 않은 상세 view를 하단에 다시 렌더링하면 안 됩니다.");
 assert.match(projectStartSource, /reconnectTarget\s*\?\s*\(/, "프로젝트 재연결 입력은 missing 항목을 선택했을 때만 조건부로 보여야 합니다.");
 assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<header className="page-hero"/, "목록용 hero와 새 프로젝트 CTA는 /projects 루트에서만 렌더링해야 합니다.");
-assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<RecentProjectList/, "프로젝트 목록은 /projects 루트에서만 렌더링해야 합니다.");
+assert.match(projectStartSource, /!projectId\s*\?\s*\(\s*<ProjectList/, "프로젝트 목록은 /projects 루트에서만 렌더링해야 합니다.");
 assert.match(projectStartSource, /\{projectId \? detailView : null\}\s*\{projectStatusBanner\}/, "상세 route에서는 상세 shell이 상태 배너보다 먼저 렌더링되어야 합니다.");
 assert.match(projectStartSource, /currentProject\?\.id\s*&&\s*currentProject\.id !== projectId[\s\S]*setCurrentProject\(null\)/, "route projectId가 바뀌면 이전 currentProject를 stale 상태로 비워야 합니다.");
 assert.doesNotMatch(projectStartSource, /if\s*\(projectId\)\s*\{\s*navigate\("\/projects",\s*\{\s*replace:\s*true\s*\}\);\s*\}/, "상세 deep link 복원 실패는 /projects로 밀어내지 말고 상세 shell을 유지해야 합니다.");
@@ -285,7 +287,7 @@ assert.match(projectStartSource, /const reconnectTarget = reconnectProjectId[\s\
 assert.doesNotMatch(projectStartSource, /!\s*projectId\s*&&\s*reconnectTarget/, "재연결 패널은 상세 route 실패 상태에서도 보여야 합니다.");
 [
   "프로젝트 목록을 불러오는 중입니다.",
-  "아직 최근 프로젝트가 없습니다.",
+  "아직 프로젝트가 없습니다.",
   "프로젝트 목록을 불러오지 못했습니다.",
   "상세보기",
   "상세보기 버튼",
@@ -306,6 +308,7 @@ assert.doesNotMatch(projectStartSource, /!\s*projectId\s*&&\s*reconnectTarget/, 
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(`${projectStartSource}\n${recentProjectListSource}`, pattern, `프로젝트 목록 화면 소스에 '${requiredText}' 문구가 있어야 합니다.`);
 });
+assert.doesNotMatch(`${projectStartSource}\n${recentProjectListSource}`, /최근 프로젝트 목록|최근 프로젝트 상세보기|아직 최근 프로젝트가 없습니다|<h2 id="recentProjectsTitle">최근 프로젝트<\/h2>|ariaLabel="최근 프로젝트 목록"|aria-label="최근 프로젝트 필터"/, "/projects의 사용자-facing 목록 계약은 최근 프로젝트가 아니라 프로젝트 목록이어야 합니다.");
 ["overview", "heroine", "background", "studio", "preview", "export"].forEach((tab) => {
   assert.match(projectPageTypesSource, new RegExp(`id: "${tab}"`), `${tab} 탭 정의가 있어야 합니다.`);
   assert.match(projectDetailViewSource, new RegExp(`activeTab === "${tab}"`), `${tab} 탭 body가 있어야 합니다.`);
@@ -451,9 +454,9 @@ assert.match(heroineDetailSource, /detail-card|summary-list|state-chip/, "Projec
 assert.match(projectDetailViewSource, /variant="primary"|variant=\{"primary"\}/, "Overview/detail primary action must use shared Button primary hierarchy.");
 assert.match(projectDetailViewSource, /<Button/, "Project detail actions must use the shared Button component.");
 [
-  "/api/projects/recent/list",
-  "/api/projects/recent/remove",
-  "/api/projects/recent/restore",
+  "/api/projects/list",
+  "/api/projects/remove",
+  "/api/projects/restore",
   "/api/projects/reconnect",
   "workflowSummary",
   "목록에서만 제거",
@@ -465,7 +468,7 @@ assert.match(projectDetailViewSource, /<Button/, "Project detail actions must us
   assert.match(`${projectStartSource}\n${recentProjectListSource}\n${projectDetailViewSource}\n${projectApiSource}`, pattern, `프로젝트 페이지 소스에 '${requiredText}' 문구 또는 API 호출이 있어야 합니다.`);
 });
 [
-  "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
+  "프로젝트 목록에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
   "프로젝트 폴더를 찾을 수 없습니다. 새 위치를 입력해 다시 연결해 주세요.",
   "프로젝트 ID가 일치하지 않습니다. 자동으로 덮어쓰지 않았습니다."
 ].forEach((requiredText) => {

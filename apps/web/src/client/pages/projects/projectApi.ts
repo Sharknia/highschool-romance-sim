@@ -5,8 +5,8 @@ export function projectFailureText(result: ProjectApiResult, fallback: string): 
   return result.message?.trim() || result.error?.trim() || fallback;
 }
 
-export function listRecentProjects(postJson: PostAuthedJson): Promise<ProjectApiResult> {
-  return postJson<ProjectApiResult>("/api/projects/recent/list", {});
+export function listProjects(postJson: PostAuthedJson): Promise<ProjectApiResult> {
+  return postJson<ProjectApiResult>("/api/projects/list", {});
 }
 
 export function openProject(postJson: PostAuthedJson, body: Record<string, unknown>): Promise<ProjectApiResult> {
@@ -17,15 +17,15 @@ export function reconnectProject(postJson: PostAuthedJson, body: Record<string, 
   return postJson<ProjectApiResult>("/api/projects/reconnect", body);
 }
 
-export function removeRecentProject(postJson: PostAuthedJson, entry: RecentProject): Promise<ProjectApiResult> {
-  return postJson<ProjectApiResult>("/api/projects/recent/remove", {
+export function removeProject(postJson: PostAuthedJson, entry: RecentProject): Promise<ProjectApiResult> {
+  return postJson<ProjectApiResult>("/api/projects/remove", {
     projectId: entry.projectId
   });
 }
 
-export function restoreRecentProject(postJson: PostAuthedJson, entry: RecentProject): Promise<ProjectApiResult> {
-  return postJson<ProjectApiResult>("/api/projects/recent/restore", {
-    recentProject: entry
+export function restoreProject(postJson: PostAuthedJson, entry: RecentProject): Promise<ProjectApiResult> {
+  return postJson<ProjectApiResult>("/api/projects/restore", {
+    projectListEntry: entry
   });
 }
 

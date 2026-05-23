@@ -151,9 +151,12 @@ export type MakerActionId =
   | "assignHeroineSnapshot"
   | "openProject"
   | "reconnectRecentProject"
+  | "listProjects"
   | "listRecentProjects"
+  | "removeProject"
   | "removeRecentProject"
   | "deleteProjectWorkspace"
+  | "restoreProject"
   | "restoreRecentProject"
   | "expandEvent"
   | "approveEvent"
@@ -314,7 +317,7 @@ const projectFailureContracts: Record<ProjectActionFailureCode, Omit<ProjectFail
     retryable: false
   },
   RECENT_PROJECT_INDEX_MISS: {
-    message: "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
+    message: "프로젝트 목록에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.",
     nextAction: "프로젝트 디렉터리를 다시 열어 주세요.",
     retryable: false
   },
@@ -2197,6 +2200,17 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       });
     },
 
+    async listProjects() {
+      const projects = await recentProjects.listProjects();
+      return withActionState("listProjects", {
+        projects,
+        count: projects.length,
+        missingCount: projects.filter((project) => project.missing).length,
+        loadedAt: new Date().toISOString(),
+        sort: "lastOpenedAtDesc"
+      });
+    },
+
     async removeRecentProject(input: unknown) {
       const projectId = optionalProjectId(input);
       if (!projectId) {
@@ -2210,6 +2224,23 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           mode: "recentIndexOnly",
           reversible: true,
           impact: ["recentProjectIndex"]
+        } satisfies ProjectDeletionPolicyDto
+      });
+    },
+
+    async removeProject(input: unknown) {
+      const projectId = optionalProjectId(input);
+      if (!projectId) {
+        throw new InputValidationError("projectId 입력이 필요합니다.", [{ severity: "error", path: "projectId", message: "비어 있을 수 없습니다." }]);
+      }
+      const removedProject = await recentProjects.findProject(projectId);
+      return withActionState("removeProject", {
+        projects: await recentProjects.removeProject(projectId),
+        removedProject,
+        deletionPolicy: {
+          mode: "recentIndexOnly",
+          reversible: true,
+          impact: ["projectList", "recentProjectIndex"]
         } satisfies ProjectDeletionPolicyDto
       });
     },
@@ -2275,6 +2306,22 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       }
       return withActionState("restoreRecentProject", {
         projects: await recentProjects.restoreProject(recentProject as unknown as RecentProjectIndexEntry)
+      });
+    },
+
+    async restoreProject(input: unknown) {
+      const record = asRecord(input);
+      const projectListEntry = asRecord(record.projectListEntry || record.recentProject);
+      if (
+        typeof projectListEntry.projectId !== "string"
+        || typeof projectListEntry.projectDirectory !== "string"
+        || typeof projectListEntry.title !== "string"
+        || typeof projectListEntry.lastOpenedAt !== "string"
+      ) {
+        throw new InputValidationError("projectListEntry 입력이 필요합니다.", [{ severity: "error", path: "projectListEntry", message: "복원할 프로젝트 목록 항목이 필요합니다." }]);
+      }
+      return withActionState("restoreProject", {
+        projects: await recentProjects.restoreProject(projectListEntry as unknown as RecentProjectIndexEntry)
       });
     },
 

@@ -92,9 +92,9 @@ echo '{"project": {...}}' | node packages/cli/dist/index.js build-html
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","heroine":{...}}' | node packages/cli/dist/index.js create-project-from-heroine
 echo '{"projectId":"haru"}' | node packages/cli/dist/index.js open-project
 echo '{"projectId":"haru","projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js reconnect-project
-echo '{}' | node packages/cli/dist/index.js list-recent-projects
-echo '{"projectId":"haru"}' | node packages/cli/dist/index.js remove-recent-project
-echo '{"recentProject":{...}}' | node packages/cli/dist/index.js restore-recent-project
+echo '{}' | node packages/cli/dist/index.js list-projects
+echo '{"projectId":"haru"}' | node packages/cli/dist/index.js remove-project
+echo '{"projectListEntry":{...}}' | node packages/cli/dist/index.js restore-project
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","projectId":"haru","confirmTitle":"하루","deleteFiles":true}' | node packages/cli/dist/index.js delete-project
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","userEvent":"하루와 도서관 이벤트"}' | node packages/cli/dist/index.js expand-event
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","request":{...},"plan":{...}}' | node packages/cli/dist/index.js approve-event
@@ -162,9 +162,9 @@ POST /api/codex/logout
 POST /api/projects
 POST /api/projects/open
 POST /api/projects/reconnect
-POST /api/projects/recent/list
-POST /api/projects/recent/remove
-POST /api/projects/recent/restore
+POST /api/projects/list
+POST /api/projects/remove
+POST /api/projects/restore
 POST /api/projects/delete
 POST /api/project/starter
 POST /api/project/open
@@ -202,7 +202,7 @@ POST /api/generation/images
 
 `/api/codex/session`은 `codex app-server`의 `account/read`와 `modelProvider/capabilities/read`를 호출한다. API key 입력은 기본 경로에서 제거했다.
 
-recent project index는 내부 저장소와 복원 캐시다. 현재 UI에는 최근 목록이 노출되어 있지만 계약상 권위 있는 프로젝트 identity는 route `projectId`와 `@vn-maker/use-cases`의 open/reconnect/delete DTO이며, 프론트는 이 DTO를 표시한다.
+recent project index는 내부 저장소와 복원 캐시다. 현재 UI와 API/CLI의 공개 계약은 프로젝트 목록이며, 최근 열람 시각은 목록 항목의 정렬 메타데이터로만 표시한다. 권위 있는 프로젝트 identity는 route `projectId`와 `@vn-maker/use-cases`의 open/reconnect/delete DTO이며, 프론트는 이 DTO를 표시한다.
 
 `/api/codex/login`은 다음 두 흐름을 지원한다.
 
@@ -277,5 +277,4 @@ npm run build -w @vn-maker/cli
 2. 포트레이트 생성 결과를 히로인 라이브러리 메타데이터에 직접 반영
 3. 프리뷰/export 런타임을 기존 `src/engine` 모델과 통합
 4. 캐릭터/표정/CG 배치 생성 워크플로 추가
-5. 프로젝트 목록을 내부 recent index 구현에서 일반 ProjectList/ResourceList 계약으로 정리
-6. CLI 명령에 JSON Schema와 `--input`, `--output` 파일 옵션 추가
+5. CLI 명령에 JSON Schema와 `--input`, `--output` 파일 옵션 추가

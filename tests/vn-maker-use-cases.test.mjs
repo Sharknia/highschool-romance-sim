@@ -442,7 +442,7 @@ const recentMissFailure = useCasesModule.projectActionFailureFromError(
 assert.equal(recentMissFailure.ok, false);
 assert.equal(recentMissFailure.action, "openProject");
 assert.equal(recentMissFailure.code, "RECENT_PROJECT_INDEX_MISS");
-assert.equal(recentMissFailure.message, "최근 프로젝트에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+assert.equal(recentMissFailure.message, "프로젝트 목록에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
 assert.equal(recentMissFailure.error, recentMissFailure.message);
 assert.equal(recentMissFailure.nextAction, "프로젝트 디렉터리를 다시 열어 주세요.");
 assert.equal(recentMissFailure.retryable, false);
@@ -575,9 +575,9 @@ assert.equal(openedAfterLibraryDelete.project.characters[0].sourceHeroineId, her
 assert.equal(openedAfterLibraryDelete.project.characters[0].displayName, heroine.name);
 assert.equal(openedAfterLibraryDelete.project.characters[0].defaultPortraitAssetId, heroine.defaultPortraitAssetId);
 
-const recentAfterCreate = await useCases.listRecentProjects();
+const recentAfterCreate = await useCases.listProjects();
 assert.equal(recentAfterCreate.ok, true);
-assert.equal(recentAfterCreate.action, "listRecentProjects");
+assert.equal(recentAfterCreate.action, "listProjects");
 assert.equal(typeof recentAfterCreate.requestId, "string");
 assert.equal(recentAfterCreate.count, 1);
 assert.equal(recentAfterCreate.missingCount, 0);
@@ -590,22 +590,22 @@ assert.equal(recentAfterCreate.projects[0].title, "하루 Use Case");
 assert.equal(recentAfterCreate.projects[0].validationState, "valid");
 assert.equal(recentAfterCreate.projects[0].missing, false);
 
-const removedRecentProject = await useCases.removeRecentProject({
+const removedRecentProject = await useCases.removeProject({
   projectId: created.project.id
 });
 assert.equal(removedRecentProject.ok, true);
-assert.equal(removedRecentProject.action, "removeRecentProject");
+assert.equal(removedRecentProject.action, "removeProject");
 assert.equal(removedRecentProject.removedProject.projectId, created.project.id);
 assert.equal(removedRecentProject.projects.some((entry) => entry.projectId === created.project.id), false);
 assert.equal(removedRecentProject.deletionPolicy.mode, "recentIndexOnly");
 assert.equal(removedRecentProject.deletionPolicy.reversible, true);
 assert.equal(Array.isArray(removedRecentProject.deletionPolicy.impact), true);
 assert.equal(existsSync(join(projectDirectory, "project.sqlite")), true);
-const restoredRecentProject = await useCases.restoreRecentProject({
-  recentProject: removedRecentProject.removedProject
+const restoredRecentProject = await useCases.restoreProject({
+  projectListEntry: removedRecentProject.removedProject
 });
 assert.equal(restoredRecentProject.ok, true);
-assert.equal(restoredRecentProject.action, "restoreRecentProject");
+assert.equal(restoredRecentProject.action, "restoreProject");
 assert.equal(restoredRecentProject.projects[0].projectId, created.project.id);
 
 const reconnectedProject = await useCases.reconnectRecentProject({
@@ -1152,7 +1152,7 @@ await assert.rejects(
     return true;
   }
 );
-const recentAfterMissing = await useCases.listRecentProjects();
+const recentAfterMissing = await useCases.listProjects();
 assert.equal(recentAfterMissing.projects.find((entry) => entry.projectId === "missing-recent").missing, true);
 const wrongReconnectDirectory = join(tempRoot, "WrongReconnect.vnmaker");
 await assert.rejects(
@@ -1193,12 +1193,12 @@ await assert.rejects(
     return true;
   }
 );
-const recentAfterMismatch = await useCases.listRecentProjects();
+const recentAfterMismatch = await useCases.listProjects();
 const mismatchEntry = recentAfterMismatch.projects.find((entry) => entry.projectId === "expected-recent");
 assert.equal(mismatchEntry.projectDirectory, mismatchRecentProjectDirectory);
 assert.equal(mismatchEntry.title, "Expected Recent");
 
-const removedRecent = await useCases.removeRecentProject({ projectId: manualCreated.project.id });
+const removedRecent = await useCases.removeProject({ projectId: manualCreated.project.id });
 assert.equal(removedRecent.ok, true);
 assert.equal(removedRecent.projects.some((entry) => entry.projectId === manualCreated.project.id), false);
 assert.equal(removedRecent.deletionPolicy.mode, "recentIndexOnly");
