@@ -702,6 +702,13 @@ assert.equal(previewBeforeReady.previewReadiness.missingItems.some((item) => ite
 assert.equal(previewBeforeReady.previewReadiness.missingItems.some((item) => item.tab === "background"), true);
 assert.equal(previewBeforeReady.previewReadiness.nextActions.some((action) => action.tab === "heroine" && action.label.includes("해결 탭으로 이동")), true);
 assert.equal(previewBeforeReady.previewReadiness.retryable, false);
+const exportBeforeReady = await useCases.exportProject({ projectDirectory: blankProjectDirectory }).catch((error) => error);
+assert.equal(exportBeforeReady.code, "EXPORT_BLOCKED");
+assert.equal(exportBeforeReady.exportPlan.state, "blocked");
+assert.equal(exportBeforeReady.exportPlan.canExport, false);
+assert.equal(exportBeforeReady.exportPlan.blockers.some((blocker) => blocker.kind === "requiredData" && blocker.id === "heroine"), true);
+assert.equal(exportBeforeReady.exportPlan.blockers.some((blocker) => blocker.kind === "requiredData" && blocker.id === "background"), true);
+assert.equal(exportBeforeReady.exportPlan.blockers.some((blocker) => blocker.kind === "requiredData" && blocker.id === "studio"), true);
 
 const blankStarterProject = await useCases.createProject({
   projectDirectory: blankStarterProjectDirectory,
@@ -741,6 +748,58 @@ assert.deepEqual(
   ["project", "heroine", "background", "studio", "preview", "export"]
 );
 assert.equal(assignedSnapshot.workflowSummary.primaryAction, "goToBackground");
+const blankOpeningSceneId = assignedSnapshot.project.routes[0].entrySceneId;
+const blankSceneBeforeBackground = await useCases.insertManualScene({
+  projectDirectory: blankProjectDirectory,
+  sourceSceneId: blankOpeningSceneId,
+  link: {
+    type: "next",
+    preservePreviousNext: true
+  },
+  scene: {
+    id: "scene-blank-before-background",
+    label: "배경 생성 전 추가 장면",
+    speaker: heroine.name,
+    text: "배경을 만들기 전에 추가한 장면도 단일 배경 정책을 따라야 한다.",
+    characters: [],
+    choices: []
+  }
+});
+assert.equal(blankSceneBeforeBackground.ok, true);
+assert.equal(blankSceneBeforeBackground.project.scenes.length > 1, true);
+const blankAssignedBackground = await useCases.generateImage({
+  projectDirectory: blankProjectDirectory,
+  kind: "background",
+  targetId: assignedSnapshot.project.id,
+  prompt: "blank assigned classroom background",
+  outputAssetId: "asset-blank-assigned-background"
+});
+assert.equal(blankAssignedBackground.ok, true);
+assert.equal(
+  blankAssignedBackground.project.scenes.every((scene) => scene.backgroundAssetId === "asset-blank-assigned-background"),
+  true
+);
+const blankSceneAfterBackground = await useCases.insertManualScene({
+  projectDirectory: blankProjectDirectory,
+  sourceSceneId: "scene-blank-before-background",
+  link: {
+    type: "next",
+    preservePreviousNext: true
+  },
+  scene: {
+    id: "scene-blank-after-background",
+    label: "배경 생성 후 추가 장면",
+    speaker: heroine.name,
+    text: "배경 생성 뒤 새로 추가한 장면도 기존 단일 배경을 공유해야 한다.",
+    characters: [],
+    choices: []
+  }
+});
+assert.equal(blankSceneAfterBackground.ok, true);
+assert.equal(
+  blankSceneAfterBackground.project.scenes.find((scene) => scene.id === "scene-blank-after-background").backgroundAssetId,
+  "asset-blank-assigned-background"
+);
 const changedSourceHeroine = {
   ...heroine,
   name: "수정된 하루",

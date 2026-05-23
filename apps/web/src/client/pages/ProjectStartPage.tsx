@@ -377,11 +377,22 @@ export function ProjectStartPage() {
       applyRecentProjectList(result);
       clearCurrentProjectIfNeeded(entry);
       setDeleteTarget(null);
-      setDeleteError("");
-      setDeleteErrorSource(null);
       setRemovedProject(null);
-      setStatus("프로젝트 파일까지 삭제했습니다. 최근 목록도 새로고침했습니다.");
-      void loadRecentProjects();
+      const recentIndexRemoval = result.recentIndexRemoval;
+      const recentRemovalFailed = recentIndexRemoval?.ok === false;
+      if (recentRemovalFailed) {
+        const removalMessage = recentIndexRemoval.error || "최근 목록 정리에 실패했습니다.";
+        setDeleteError(`최근 목록 정리에 실패했습니다. ${removalMessage}`);
+        setDeleteErrorSource("recent");
+        const partialSuccessStatus = "프로젝트 파일은 삭제했지만 최근 목록 정리에 실패했습니다. 목록 새로고침 또는 목록에서만 제거를 다시 시도하세요.";
+        setStatus(partialSuccessStatus);
+        void loadRecentProjects().finally(() => setStatus(partialSuccessStatus));
+      } else {
+        setDeleteError("");
+        setDeleteErrorSource(null);
+        setStatus("프로젝트 파일까지 삭제했습니다. 최근 목록도 새로고침했습니다.");
+        void loadRecentProjects();
+      }
     } catch (error) {
       const viewModel = projectDeleteErrorViewModel({
         message: error instanceof Error ? error.message : String(error)
@@ -451,6 +462,9 @@ export function ProjectStartPage() {
 
       <StatusBanner tone={statusTone(status)}>
         <span className="page-status">{status}</span>
+        {deleteError && deleteErrorSource === "recent" ? (
+          <span className="page-status">{deleteError}</span>
+        ) : null}
         {removedProject ? (
           <Button disabled={busy} onClick={() => void restoreRecentProject()} variant="ghost">
             되돌리기

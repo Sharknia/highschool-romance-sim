@@ -248,6 +248,10 @@ export interface ProjectApiResult extends ApiResult {
   exportPlan?: ProjectExportPlan;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
+  recentIndexRemoval?: {
+    ok?: boolean;
+    error?: string;
+  };
   request?: ProjectEventRequest;
   routeGraphAnalysis?: {
     issues?: ProjectIssue[];

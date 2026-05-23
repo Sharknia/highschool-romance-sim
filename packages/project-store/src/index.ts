@@ -607,6 +607,24 @@ function summarizeProject(project: VnMakerProject): string {
   return `씬 ${project.scenes.length}개, 선택지 ${project.scenes.reduce((total, scene) => total + scene.choices.length, 0)}개, 에셋 ${project.assets.length}개, 생성 작업 ${project.generationJobs.length}개`;
 }
 
+function applySingleBackgroundScenePolicy(project: VnMakerProject): VnMakerProject {
+  const backgroundAssets = project.assets.filter((asset) => asset.kind === "background");
+  if (backgroundAssets.length !== 1 || project.scenes.length === 0) {
+    return project;
+  }
+  const backgroundAssetId = backgroundAssets[0].id;
+  if (project.scenes.every((scene) => scene.backgroundAssetId === backgroundAssetId)) {
+    return project;
+  }
+  return {
+    ...project,
+    scenes: project.scenes.map((scene) => ({
+      ...scene,
+      backgroundAssetId
+    }))
+  };
+}
+
 function applyGenerationPolicy(project: VnMakerProject, input: StoreGenerationResultInput): VnMakerProject {
   const nextProject = applyGenerationResultToProject(project, input);
   if (input.asset.kind !== "background") {
@@ -615,33 +633,13 @@ function applyGenerationPolicy(project: VnMakerProject, input: StoreGenerationRe
 
   const outputAssetId = input.asset.id;
   const outputJobId = input.job.id;
-  const replacedBackgroundAssetIds = new Set(nextProject.assets
-    .filter((asset) => asset.kind === "background" && asset.id !== outputAssetId)
-    .map((asset) => asset.id));
 
   nextProject.assets = nextProject.assets.filter((asset) => {
     return !(asset.kind === "background" && asset.id !== outputAssetId);
   });
   nextProject.generationJobs = nextProject.generationJobs.filter((job) => job.kind !== "background" || job.id === outputJobId);
 
-  nextProject.scenes = nextProject.scenes.map((scene) => {
-    if (scene.backgroundAssetId && replacedBackgroundAssetIds.has(scene.backgroundAssetId)) {
-      return { ...scene, backgroundAssetId: outputAssetId };
-    }
-    return scene;
-  });
-
-  const defaultRoute = nextProject.routes.find((route) => route.id === nextProject.settings.defaultRouteId) || nextProject.routes[0];
-  const targetSceneId = defaultRoute?.entrySceneId || nextProject.scenes[0]?.id;
-  const targetSceneIndex = nextProject.scenes.findIndex((scene) => scene.id === targetSceneId);
-  if (targetSceneIndex >= 0) {
-    nextProject.scenes[targetSceneIndex] = {
-      ...nextProject.scenes[targetSceneIndex],
-      backgroundAssetId: outputAssetId
-    };
-  }
-
-  return nextProject;
+  return applySingleBackgroundScenePolicy(nextProject);
 }
 
 function patchHistoryEntryFromRow(row: PatchHistoryRow): PatchHistoryEntry {
@@ -1296,6 +1294,7 @@ WHERE project_id = @projectId AND id = @id AND consumed_at IS NULL
   }
 
   saveProject(project: VnMakerProject): VnMakerProject {
+    project = applySingleBackgroundScenePolicy(project);
     assertProjectSnapshot(project);
 
     this.runInTransaction(() => {

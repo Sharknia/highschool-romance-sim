@@ -236,11 +236,11 @@ export interface ProjectExportPlanDto {
   includedData: Array<"project" | "runtime" | "assetManifest">;
   includedAssets: Array<Pick<VnMakerAsset, "id" | "kind" | "label" | "uri" | "source" | "generationJobId">>;
   blockers: Array<{
-    kind: "validation" | "generationJob";
+    kind: "requiredData" | "validation" | "generationJob";
     id?: string;
     status?: string;
     message: string;
-    tab: "background" | "studio" | "export";
+    tab: "heroine" | "background" | "studio" | "export";
   }>;
   warnings: string[];
   failureCause: string;
@@ -489,14 +489,17 @@ function isBlockingGenerationState(state: MakerGenerationState): boolean {
 function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boolean; issues?: ValidationIssue[] }): MakerWorkflowSummary {
   const hasProject = Boolean(project);
   const hasHeroine = Boolean(project?.characters.length);
-  const hasBackground = Boolean(project?.assets.some((asset) => asset.kind === "background"));
+  const hasBackgroundAsset = Boolean(project?.assets.some((asset) => asset.kind === "background"));
+  const hasScenesMissingBackground = Boolean(project?.scenes.some((scene) => !scene.backgroundAssetId));
+  const hasBackground = hasBackgroundAsset && !hasScenesMissingBackground;
   const hasEvent = Boolean(project && project.scenes.length > 1);
   const incompleteImageJobs = project?.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed") || [];
   const generationState = generationStateForWorkflow(project);
   const validationState = validationStateForWorkflow(validation);
   const blockingIssues = [
     hasProject && !hasHeroine ? "히로인 1명을 먼저 선택해야 합니다." : "",
-    hasHeroine && !hasBackground ? "배경 화면 생성이 필요합니다." : "",
+    hasHeroine && !hasBackgroundAsset ? "배경 화면 생성이 필요합니다." : "",
+    hasHeroine && hasBackgroundAsset && hasScenesMissingBackground ? "모든 제작 씬에 배경 화면 연결이 필요합니다." : "",
     hasHeroine && hasBackground && !hasEvent ? "제작 탭에서 이벤트와 씬을 준비해야 합니다." : "",
     validationState === "error" ? "문제 확인 결과를 먼저 해결해야 합니다." : "",
     incompleteImageJobs.length > 0 || isBlockingGenerationState(generationState)
@@ -557,6 +560,39 @@ function createWorkflowSummary(project?: VnMakerProject, validation?: { ok?: boo
   };
 }
 
+function requiredDataBlockersFor(project: VnMakerProject): ProjectExportPlanDto["blockers"] {
+  const hasHeroine = project.characters.length > 0;
+  const hasBackgroundAsset = project.assets.some((asset) => asset.kind === "background");
+  const hasScenesMissingBackground = project.scenes.some((scene) => !scene.backgroundAssetId);
+  const hasEventScenes = project.scenes.length > 1;
+  const blockers: ProjectExportPlanDto["blockers"] = [];
+  if (!hasHeroine) {
+    blockers.push({
+      kind: "requiredData",
+      id: "heroine",
+      message: "히로인 1명을 먼저 선택해야 합니다.",
+      tab: "heroine"
+    });
+  }
+  if (!hasBackgroundAsset || hasScenesMissingBackground) {
+    blockers.push({
+      kind: "requiredData",
+      id: "background",
+      message: hasBackgroundAsset ? "모든 제작 씬에 배경 화면 연결이 필요합니다." : "배경 화면 생성이 필요합니다.",
+      tab: "background"
+    });
+  }
+  if (!hasEventScenes) {
+    blockers.push({
+      kind: "requiredData",
+      id: "studio",
+      message: "제작 탭에서 이벤트와 씬을 준비해야 합니다.",
+      tab: "studio"
+    });
+  }
+  return blockers;
+}
+
 function previewReadinessFor(
   project: VnMakerProject,
   validation: { ok?: boolean; issues?: ValidationIssue[] },
@@ -566,7 +602,9 @@ function previewReadinessFor(
   const backgroundJobs = project.generationJobs.filter((job) => job.kind === "background" && job.status !== "completed");
   const incompleteImageJobs = project.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed");
   const failedImageJobs = incompleteImageJobs.filter((job) => job.status === "failed");
-  const hasBackground = project.assets.some((asset) => asset.kind === "background");
+  const hasBackgroundAsset = project.assets.some((asset) => asset.kind === "background");
+  const hasScenesMissingBackground = project.scenes.some((scene) => !scene.backgroundAssetId);
+  const hasBackground = hasBackgroundAsset && !hasScenesMissingBackground;
   const hasEventScenes = project.scenes.length > 1;
   const validationInvalid = validation.ok === false;
   const missingItems: ProjectPreviewReadinessDto["missingItems"] = [];
@@ -577,7 +615,11 @@ function previewReadinessFor(
   if (!hasBackground || backgroundJobs.length > 0) {
     missingItems.push({
       id: "background",
-      label: backgroundJobs.length > 0 ? "완료된 배경 화면" : "배경 화면",
+      label: backgroundJobs.length > 0
+        ? "완료된 배경 화면"
+        : hasBackgroundAsset && hasScenesMissingBackground
+          ? "씬에 연결된 배경 화면"
+          : "배경 화면",
       tab: "background"
     });
   }
@@ -593,7 +635,8 @@ function previewReadinessFor(
 
   const blockingIssues = [
     !hasHeroine ? "히로인 1명을 먼저 선택해야 합니다." : "",
-    !hasBackground ? "배경 화면 생성이 필요합니다." : "",
+    !hasBackgroundAsset ? "배경 화면 생성이 필요합니다." : "",
+    hasBackgroundAsset && hasScenesMissingBackground ? "모든 제작 씬에 배경 화면 연결이 필요합니다." : "",
     !hasEventScenes ? "제작 탭에서 이벤트와 씬을 준비해야 합니다." : "",
     validationInvalid ? "문제 확인 결과를 먼저 해결해야 합니다." : "",
     incompleteImageJobs.length > 0 ? `완료되지 않은 이미지 작업이 있습니다: ${incompleteImageJobs.map((job) => job.id).join(", ")}` : ""
@@ -660,6 +703,7 @@ function exportPlanFor(
   const validationSummary = validationSummaryFor(validation);
   const incompleteImageJobs = project.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed");
   const blockers: ProjectExportPlanDto["blockers"] = [
+    ...requiredDataBlockersFor(project),
     ...validationSummary.errors.map((issue) => ({
       kind: "validation" as const,
       message: issue.message,
@@ -683,11 +727,17 @@ function exportPlanFor(
     ? "저장 위치와 권한을 확인한 뒤 다시 실행하세요."
     : blockers.some((blocker) => blocker.kind === "generationJob")
       ? "배경 화면 생성 탭에서 완료되지 않은 이미지 작업을 실행하세요."
-      : blockers.some((blocker) => blocker.kind === "validation")
-        ? "제작 탭에서 문제 확인 결과를 해결하세요."
-        : state === "complete"
-          ? "내보내기 실행 결과를 확인하세요."
-          : "내보내기를 실행할 수 있습니다.";
+      : blockers.some((blocker) => blocker.kind === "requiredData" && blocker.id === "heroine")
+        ? "히로인 탭에서 히로인 스냅샷을 배정하세요."
+        : blockers.some((blocker) => blocker.kind === "requiredData" && blocker.id === "background")
+          ? "배경 화면 생성 탭에서 배경을 준비하세요."
+          : blockers.some((blocker) => blocker.kind === "requiredData" && blocker.id === "studio")
+            ? "제작 탭에서 이벤트와 씬을 준비하세요."
+            : blockers.some((blocker) => blocker.kind === "validation")
+              ? "제작 탭에서 문제 확인 결과를 해결하세요."
+              : state === "complete"
+                ? "내보내기 실행 결과를 확인하세요."
+                : "내보내기를 실행할 수 있습니다.";
 
   return {
     state,
@@ -713,12 +763,16 @@ function exportPlanFor(
 }
 
 function exportBlockedMessage(validation: { ok?: boolean; issues?: ValidationIssue[] }, plan: ProjectExportPlanDto): string {
-  if (validation.ok === false) {
-    return `검증 실패 프로젝트는 export할 수 없습니다: ${(validation.issues || []).map((issue) => issue.message).join(", ")}`;
-  }
   const generationBlockers = plan.blockers.filter((blocker) => blocker.kind === "generationJob");
   if (generationBlockers.length > 0) {
     return `완료되지 않은 이미지 작업이 있습니다: ${generationBlockers.map((blocker) => blocker.id).filter(Boolean).join(", ")}`;
+  }
+  const requiredDataBlockers = plan.blockers.filter((blocker) => blocker.kind === "requiredData");
+  if (requiredDataBlockers.length > 0) {
+    return `내보내기 전에 필수 데이터를 준비해야 합니다: ${requiredDataBlockers.map((blocker) => blocker.message).join(", ")}`;
+  }
+  if (validation.ok === false) {
+    return `검증 실패 프로젝트는 export할 수 없습니다: ${(validation.issues || []).map((issue) => issue.message).join(", ")}`;
   }
   return "내보내기 전에 차단 항목을 해결해야 합니다.";
 }
@@ -2723,7 +2777,15 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           failureCause: result.smoke.ok ? undefined : "실행 확인 결과 실패했습니다.",
           retryable: !result.smoke.ok
         });
-        return withActionState("exportProject", { projectDirectory: store.paths.projectDirectory, ...result, exportPlan }, {
+        return withActionState("exportProject", {
+          projectDirectory: store.paths.projectDirectory,
+          ...result,
+          ok: result.smoke.ok,
+          code: result.smoke.ok ? undefined : "SERVER_ERROR",
+          message: result.smoke.ok ? undefined : "내보내기 후 실행 확인 결과 실패했습니다.",
+          error: result.smoke.ok ? undefined : "내보내기 후 실행 확인 결과 실패했습니다.",
+          exportPlan
+        }, {
           project,
           validation: result.smoke.ok ? { ok: true, issues: [] } : { ok: false, issues: [] }
         });

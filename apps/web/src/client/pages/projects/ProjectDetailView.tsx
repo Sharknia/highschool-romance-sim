@@ -1202,9 +1202,17 @@ export function ProjectDetailView({
               ) : (
                 <p className="page-muted">배경 생성 전에는 작업 목록이 비어 있습니다.</p>
               )}
-              <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
-                프리뷰로 이동
-              </Button>
+              <div className="button-row">
+                <Button disabled={assetBusy || backgroundBusy || plannedImageJobIds.length === 0} icon={<Play size={16} />} onClick={() => void runImageJobs(plannedImageJobIds)} variant="primary">
+                  이미지 만들기
+                </Button>
+                <Button disabled={assetBusy || backgroundBusy || failedImageJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(failedImageJobIds, true)}>
+                  실패 작업 재시도
+                </Button>
+                <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${currentProject?.id || projectId}/preview`)} variant="ghost">
+                  프리뷰로 이동
+                </Button>
+              </div>
             </section>
           </div>
         ) : null}
