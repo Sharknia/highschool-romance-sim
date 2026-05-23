@@ -21,10 +21,11 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 ## 기획/프로젝트 관리
 
 - 제품 기획 원천은 Notion의 [VN Maker](https://www.notion.so/sharknia/VN-Maker-36845e8947528170b5fdfbfec23e27a2?source=copy_link) 문서다.
-- 프로젝트 관리는 GitHub Issues를 기준으로 한다.
-- Notion 기획문서와 GitHub Issue 내용이 충돌하면 주인님에게 확인하고, 임의로 범위를 축소하지 않는다.
-- 구현 작업의 완료 조건, 진행 상황, 차단 사항, 후속 작업은 관련 GitHub Issue에 기록하는 것을 우선한다.
-- 커밋은 GitHub Issue 또는 하위 작업 단위로 분리해 생성한다.
+- 프로젝트 관리는 GitHub Projects v2를 기준으로 하며, 기본 보드는 https://github.com/users/Sharknia/projects/4 이다.
+- 새 작업은 먼저 Project item으로 열거나 기존 item을 찾아 사용한다. Issue는 연결된 보조 기록으로만 사용하고, 주인님 지시 없이 Issue로 대체하지 않는다.
+- Notion, Project item, Issue 내용이 충돌하면 주인님에게 확인하고 임의로 범위를 축소하지 않는다.
+- 완료 조건, 진행 상황, 차단 사항, 후속 작업은 Project item에 우선 기록한다.
+- GitHub Project 접근 권한 또는 `gh project` 권한이 없으면 Issue로 우회하지 말고 중단 사유를 보고한다.
 
 ## 작업 원칙
 
@@ -40,6 +41,8 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 - 로컬 실행 준비에는 `npm install`을 기본 사용하지 않는다. 브랜치 전환 후 의존성 동기화는 `npm ci`, 임시 workspace 링크 복구는 `npm install --package-lock=false`를 사용한다.
 - `main`에는 직접 push하지 않는다. 작업 전 원격 `main`을 최신화한 뒤 전용 워크트리를 만들고, 그 워크트리 안에서 전용 브랜치를 따서 작업한다. push/PR은 해당 작업 브랜치 기준으로 진행한다.
 - 커밋이 생성된 작업은 사용자가 별도로 요청하지 않아도 항상 해당 브랜치를 push까지 완료한다. 권한, 네트워크, 원격 정책 때문에 push가 불가능하면 미실행 사유를 보고한다.
+- 서브에이전트에게 전달하는 컨텍스트는 영어로 작성하고, Commit message와 PR 제목/본문은 반드시 한국어로 작성한다.
+- `AGENTS.md`는 중복 없이 컴팩트하게 유지한다.
 
 ## 검증
 
@@ -61,10 +64,10 @@ GitHub Pages, `gh-pages`, 정적 배포, `index.html` 단독 실행물은 과거
 - 여기서 "완료"는 `/goal`의 완료 조건을 항목별로 확인하고, 완료/부분 구현/미완료/검증 결과를 최종 보고할 수 있는 상태를 말한다.
 - Gmail 사용이 불가능한 환경이면 전송하지 않고, 최종 응답에 미실행 사유와 완료 요약을 남긴다.
 
-## GitHub Issues 기반 작업 운영
+## GitHub Projects 작업 운영
 
-- goal이 GitHub Issue 또는 하위 작업으로 주어진 경우, 작업 진행 상황을 해당 GitHub Issue에 기록한다.
-- 주요 단계 시작, 구현 완료, 검증 결과, 차단 사항, 후속 작업은 GitHub Issue 댓글 또는 상태 업데이트로 남긴다.
-- 커밋은 Issue 또는 하위 작업 단위로 분리해 생성한다.
-- push는 사용자 요청 여부와 무관하게 태스크 또는 서브태스크 단위 커밋 후 항상 수행한다.
-- 커밋/푸시 전에 현재 변경 범위를 확인하고, 사용자가 만든 unrelated 변경은 포함하거나 되돌리지 않는다.
+- goal이 주어지면 먼저 기본 Project item을 확인하고, 없으면 새 item을 만든 뒤 item URL을 기록한다.
+- 상태는 실시간으로 바꾼다: 시작 시 `진행중`, 구현/검증 완료 후 PR을 열면 `리뷰중`, PR 완료 후 `DONE`.
+- 주요 단계 시작, 구현 완료, 검증 결과, 차단 사항, 후속 작업은 Project item 댓글 또는 상태 업데이트로 남긴다.
+- 커밋은 Project item 또는 하위 작업 단위로 분리해 생성한다.
+- 완료된 Project item은 `DONE` 처리하고, 연결 Issue가 있으면 완료 조건 충족 시 close한다.
