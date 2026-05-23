@@ -607,6 +607,11 @@ assert.match(sharedListSource, /role="listitem"/, "공통 리스트 항목은 li
 assert.match(sharedListSource, /content-list-select/, "공통 리스트는 row 선택 control을 actions 영역과 분리해야 합니다.");
 assert.match(sharedListSource, /<button[\s\S]*type="button"[\s\S]*className=\{selectClassName\}/, "선택 가능한 row는 실제 button control을 사용해야 합니다.");
 assert.doesNotMatch(sharedListSource, /role=\{selectable \? "button" : "listitem"\}/, "선택 가능한 row가 listitem 대신 button role로 바뀌면 안 됩니다.");
+assert.match(sharedListSource, /export interface ContentListState/, "공통 리스트 컴포넌트가 loading/empty/error/busy 상태 표면 계약을 소유해야 합니다.");
+assert.match(sharedListSource, /content-list-status/, "공통 리스트 상태 표면은 content-list-status class를 사용해야 합니다.");
+assert.match(recentProjectListSource, /state=\{listStateConfig\}/, "프로젝트 목록 상태 표면은 공통 ContentList state 계약으로 전달해야 합니다.");
+assert.match(heroineRouteSource, /state=\{heroineListStateConfig\}/, "히로인 목록 상태 표면도 공통 ContentList state 계약으로 전달해야 합니다.");
+assert.doesNotMatch(recentProjectListSource, /page-empty-state/, "프로젝트 목록은 전용 page-empty-state 상태 DOM을 만들면 안 됩니다.");
 [
   "아직 히로인이 없습니다.",
   "히로인 목록을 불러오는 중입니다.",

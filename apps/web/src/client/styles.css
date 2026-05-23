@@ -1005,6 +1005,38 @@ a {
   background: #0f0f0d;
 }
 
+.content-list-status {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  padding: 14px;
+  background: #0f0f0d;
+}
+
+.content-list-status p {
+  margin: 0;
+  color: #d8d0c2;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.content-list-status-error {
+  border-color: #d66b5f;
+}
+
+.content-list-status-loading,
+.content-list-status-busy {
+  border-color: #5eead4;
+}
+
+.content-list-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .content-list-select {
   width: 100%;
   min-width: 0;

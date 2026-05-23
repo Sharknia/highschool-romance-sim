@@ -14,14 +14,46 @@ export interface ContentListItem {
   tone?: "default" | "danger";
 }
 
-interface ContentListProps {
-  ariaLabel: string;
-  items: ContentListItem[];
+export interface ContentListState {
+  action?: ReactNode;
+  description?: ReactNode;
+  kind: "loading" | "empty" | "error" | "busy";
+  title: ReactNode;
 }
 
-export function ContentList({ ariaLabel, items }: ContentListProps) {
+interface ContentListProps {
+  ariaLabel: string;
+  busy?: boolean;
+  items: ContentListItem[];
+  state?: ContentListState;
+}
+
+function statusRole(kind: ContentListState["kind"]): "alert" | "status" | undefined {
+  if (kind === "error") {
+    return "alert";
+  }
+  if (kind === "loading" || kind === "busy") {
+    return "status";
+  }
+  return undefined;
+}
+
+export function ContentList({ ariaLabel, busy = false, items, state }: ContentListProps) {
+  if (state) {
+    const className = ["content-list-status", `content-list-status-${state.kind}`].join(" ");
+    return (
+      <div aria-busy={busy || state.kind === "loading" || state.kind === "busy"} aria-label={ariaLabel} className="content-list">
+        <div className={className} role={statusRole(state.kind)}>
+          <strong>{state.title}</strong>
+          {state.description ? <p>{state.description}</p> : null}
+          {state.action ? <div className="content-list-status-actions">{state.action}</div> : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div aria-label={ariaLabel} className="content-list" role="list">
+    <div aria-busy={busy} aria-label={ariaLabel} className="content-list" role="list">
       {items.map((item) => {
         const selectable = Boolean(item.onSelect);
         const className = [
