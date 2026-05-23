@@ -139,6 +139,7 @@ export function ProjectNewPage() {
           title: title.trim(),
           premise: premise.trim() || `${title.trim()} 프로젝트`
         },
+        blank: mode === "blank",
         heroineId: mode === "heroine" ? selectedHeroine?.id : undefined,
         sourceProjectDirectory: mode === "heroine" ? heroineSourceProjectDirectory || undefined : undefined
       };

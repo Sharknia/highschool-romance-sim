@@ -3,12 +3,13 @@ import { isAuthFailure, logoutCodex, postJson, readCodexSession } from "../api/c
 import type { ApiResult, CodexSessionResult } from "../api/types";
 
 type AuthStatus = "checking" | "authenticated" | "anonymous";
+export type PostAuthedJson = <T extends ApiResult = ApiResult>(path: string, body: unknown) => Promise<T>;
 
 interface AuthContextValue {
   status: AuthStatus;
   session: CodexSessionResult | null;
   refreshSession: () => Promise<CodexSessionResult>;
-  postAuthedJson: <T extends ApiResult = ApiResult>(path: string, body: unknown) => Promise<T>;
+  postAuthedJson: PostAuthedJson;
   logout: () => Promise<void>;
 }
 

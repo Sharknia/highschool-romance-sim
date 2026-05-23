@@ -2,9 +2,9 @@ import type { ApiResult } from "../../api/types";
 
 export const detailTabs = [
   { id: "overview", label: "개요" },
-  { id: "heroine", label: "히로인 스냅샷" },
-  { id: "event", label: "제작/이벤트" },
-  { id: "assets", label: "에셋/생성" },
+  { id: "heroine", label: "히로인" },
+  { id: "background", label: "배경 화면 생성" },
+  { id: "studio", label: "제작" },
   { id: "preview", label: "프리뷰" },
   { id: "export", label: "내보내기" }
 ] as const;
@@ -40,12 +40,17 @@ export interface ProjectData {
   characters?: Array<{
     id?: string;
     displayName?: string;
+    profile?: string;
+    description?: string;
+    personality?: string;
+    speechStyle?: string;
+    appearance?: string;
     sourceHeroineId?: string;
     sourceHeroineName?: string;
     sourceSnapshotCreatedAt?: string;
   }>;
   routes?: Array<{ id?: string; title?: string; entrySceneId?: string; heroineId?: string }>;
-  scenes?: Array<{ id?: string; label?: string; speaker?: string; text?: string; ending?: { title?: string; kind?: string } }>;
+  scenes?: Array<{ id?: string; label?: string; speaker?: string; text?: string; backgroundAssetId?: string; ending?: { title?: string; kind?: string } }>;
   assets?: ProjectAsset[];
   generationJobs?: ProjectGenerationJob[];
 }
@@ -126,6 +131,52 @@ export interface ProjectExportResult {
   runtimeScriptPath?: string;
 }
 
+export interface ProjectPreviewReadiness {
+  state?: "blocked" | "prepared" | "running" | "failed" | string;
+  availableState?: string;
+  canRun?: boolean;
+  requiredData?: Record<string, string>;
+  missingItems?: Array<{
+    id?: string;
+    label?: string;
+    tab?: ProjectTabId | string;
+  }>;
+  blockingIssues?: string[];
+  nextActions?: Array<{
+    label?: string;
+    tab?: ProjectTabId | string;
+  }>;
+  failureCause?: string;
+  retryable?: boolean;
+  nextAction?: string;
+}
+
+export interface ProjectExportPlan {
+  state?: "ready" | "blocked" | "running" | "complete" | "failed" | string;
+  canExport?: boolean;
+  target?: "localDesktopWebApp" | string;
+  githubPagesTarget?: boolean;
+  validationSummary?: {
+    ok?: boolean;
+    issueCount?: number;
+    errors?: ProjectIssue[];
+    warnings?: ProjectIssue[];
+  };
+  includedData?: string[];
+  includedAssets?: ProjectAsset[];
+  blockers?: Array<{
+    kind?: string;
+    id?: string;
+    status?: string;
+    message?: string;
+    tab?: ProjectTabId | string;
+  }>;
+  warnings?: string[];
+  failureCause?: string;
+  retryable?: boolean;
+  nextAction?: string;
+}
+
 export interface ProjectSmokeResult {
   ok?: boolean;
   checks?: Record<string, boolean>;
@@ -183,12 +234,24 @@ export interface ProjectApiResult extends ApiResult {
   diff?: ProjectPatchDescription;
   errors?: string[];
   issues?: ProjectIssue[];
+  job?: ProjectGenerationJob;
   jobs?: ProjectGenerationJob[];
+  backgroundPolicy?: {
+    limit?: number;
+    existingAssetId?: string;
+    replacesExisting?: boolean;
+  };
   patchHistoryEntry?: ProjectPatchHistoryEntry;
   plan?: ProjectEventPlan;
   export?: ProjectExportResult;
+  previewReadiness?: ProjectPreviewReadiness;
+  exportPlan?: ProjectExportPlan;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
+  recentIndexRemoval?: {
+    ok?: boolean;
+    error?: string;
+  };
   request?: ProjectEventRequest;
   routeGraphAnalysis?: {
     issues?: ProjectIssue[];
@@ -204,5 +267,11 @@ export interface ProjectApiResult extends ApiResult {
 }
 
 export function normalizeTab(value?: string): ProjectTabId {
+  if (value === "event") {
+    return "studio";
+  }
+  if (value === "assets") {
+    return "background";
+  }
   return detailTabs.some((tab) => tab.id === value) ? value as ProjectTabId : "overview";
 }

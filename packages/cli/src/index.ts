@@ -58,6 +58,9 @@ interface CliInput {
   job?: unknown;
   image?: unknown;
   recentProject?: unknown;
+  projectId?: string;
+  confirmTitle?: string;
+  deleteFiles?: boolean;
   login?: {
     flow?: "browser" | "device";
   };
@@ -123,6 +126,7 @@ function printCapabilities(): void {
       "list-recent-projects",
       "remove-recent-project",
       "restore-recent-project",
+      "delete-project",
       "list-heroines",
       "get-heroine",
       "create-heroine",
@@ -173,6 +177,7 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "list-recent-projects": "listRecentProjects",
     "remove-recent-project": "removeRecentProject",
     "restore-recent-project": "restoreRecentProject",
+    "delete-project": "deleteProjectWorkspace",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
     "preview": "previewProject",
@@ -235,6 +240,11 @@ async function run(): Promise<void> {
 
   if (command === "restore-recent-project") {
     writeJson(await useCases.restoreRecentProject(input));
+    return;
+  }
+
+  if (command === "delete-project") {
+    writeJson(await useCases.deleteProjectWorkspace(input));
     return;
   }
 

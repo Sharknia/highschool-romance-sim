@@ -1,12 +1,22 @@
+export type ApiFailureCode =
+  | "EMPTY_RESPONSE"
+  | "NON_JSON_RESPONSE"
+  | "HTTP_ERROR"
+  | "NETWORK_ERROR"
+  | "REQUEST_ABORTED";
+
 export interface ApiResult {
   ok?: boolean;
   error?: string;
   message?: string;
-  code?: string;
+  code?: ApiFailureCode | string;
   requestId?: string;
   issues?: Array<{ severity?: string; path?: string; message?: string }>;
   retryable?: boolean;
   httpStatus?: number;
+  userSummary?: string;
+  technicalDetail?: string;
+  nextAction?: string;
   [key: string]: unknown;
 }
 

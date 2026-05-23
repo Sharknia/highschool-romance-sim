@@ -1,7 +1,9 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   analyzeRouteGraph,
   buildPlayerRuntimeScript,
@@ -605,6 +607,41 @@ function summarizeProject(project: VnMakerProject): string {
   return `씬 ${project.scenes.length}개, 선택지 ${project.scenes.reduce((total, scene) => total + scene.choices.length, 0)}개, 에셋 ${project.assets.length}개, 생성 작업 ${project.generationJobs.length}개`;
 }
 
+function applySingleBackgroundScenePolicy(project: VnMakerProject): VnMakerProject {
+  const backgroundAssets = project.assets.filter((asset) => asset.kind === "background");
+  if (backgroundAssets.length !== 1 || project.scenes.length === 0) {
+    return project;
+  }
+  const backgroundAssetId = backgroundAssets[0].id;
+  if (project.scenes.every((scene) => scene.backgroundAssetId === backgroundAssetId)) {
+    return project;
+  }
+  return {
+    ...project,
+    scenes: project.scenes.map((scene) => ({
+      ...scene,
+      backgroundAssetId
+    }))
+  };
+}
+
+function applyGenerationPolicy(project: VnMakerProject, input: StoreGenerationResultInput): VnMakerProject {
+  const nextProject = applyGenerationResultToProject(project, input);
+  if (input.asset.kind !== "background") {
+    return nextProject;
+  }
+
+  const outputAssetId = input.asset.id;
+  const outputJobId = input.job.id;
+
+  nextProject.assets = nextProject.assets.filter((asset) => {
+    return !(asset.kind === "background" && asset.id !== outputAssetId);
+  });
+  nextProject.generationJobs = nextProject.generationJobs.filter((job) => job.kind !== "background" || job.id === outputJobId);
+
+  return applySingleBackgroundScenePolicy(nextProject);
+}
+
 function patchHistoryEntryFromRow(row: PatchHistoryRow): PatchHistoryEntry {
   const beforeProject = parseJson<VnMakerProject | null>(row.before_project_json, null);
   const afterProject = parseJson<VnMakerProject | null>(row.after_project_json, null);
@@ -770,6 +807,33 @@ export async function projectWorkspaceExists(projectDirectory: string): Promise<
     }
     throw error;
   }
+}
+
+class ProjectDirectoryDeleteSafetyError extends Error {
+  readonly code = "PROJECT_INPUT_INVALID";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectDirectoryDeleteSafetyError";
+  }
+}
+
+export async function deleteLocalProjectDirectory(projectDirectory: string): Promise<void> {
+  const resolvedProjectDirectory = await realpath(projectDirectory);
+  const resolvedRoot = await realpath(dirname(projectDirectory));
+  if (!basename(resolvedProjectDirectory).endsWith(".vnmaker")) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 폴더명은 .vnmaker로 끝나야 삭제할 수 있습니다.");
+  }
+  if (!resolvedProjectDirectory.startsWith(`${resolvedRoot}${sep}`)) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 폴더 경계가 안전하지 않아 삭제할 수 없습니다.");
+  }
+  if (resolvedProjectDirectory === resolvedRoot || resolvedProjectDirectory === homedir() || resolvedProjectDirectory === sep) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 루트가 아닌 위치는 삭제할 수 없습니다.");
+  }
+  if (!existsSync(join(resolvedProjectDirectory, "project.sqlite"))) {
+    throw new ProjectDirectoryDeleteSafetyError("프로젝트 데이터베이스가 있는 폴더만 삭제할 수 있습니다.");
+  }
+  await rm(resolvedProjectDirectory, { recursive: true, force: false });
 }
 
 export class RecentProjectIndexStore {
@@ -1230,6 +1294,7 @@ WHERE project_id = @projectId AND id = @id AND consumed_at IS NULL
   }
 
   saveProject(project: VnMakerProject): VnMakerProject {
+    project = applySingleBackgroundScenePolicy(project);
     assertProjectSnapshot(project);
 
     this.runInTransaction(() => {
@@ -1424,7 +1489,7 @@ VALUES (
   async storeGenerationResult(input: StoreGenerationResultInput): Promise<VnMakerProject> {
     const project = this.requireProject();
     const metadata = await fileMetadata(this.paths.projectDirectory, input);
-    const saved = this.saveProject(applyGenerationResultToProject(project, input));
+    const saved = this.saveProject(applyGenerationPolicy(project, input));
     this.writeAssetMetadata(project.id, input.asset.id, metadata);
     this.writeGenerationJobMetadata(project.id, input.job.id, metadata);
     return saved;

@@ -19,7 +19,7 @@ import type {
 type JsonObject = Record<string, unknown>;
 type LoginFlow = "browser" | "device";
 type CodexAuthMode = "chatgpt" | "chatgptAuthTokens" | "apikey" | null;
-type CodexImageKind = Extract<AssetKind, "portrait" | "expression" | "cg">;
+type CodexImageKind = Extract<AssetKind, "portrait" | "expression" | "cg" | "background">;
 type EventTextGenerationInput = Parameters<EventTextGenerationAdapter["generateEventExpansionPlan"]>[0];
 
 interface JsonRpcResponse<T = unknown> {

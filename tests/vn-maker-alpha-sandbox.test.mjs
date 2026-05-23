@@ -197,6 +197,77 @@ try {
   assert.equal(missingTextAdapterExpansion.status, 401);
   assert.match(String(missingTextAdapterExpansion.body.error), /OAuth 로그인이 필요/);
 
+  const imageFailureProjectDirectory = join(tempRoot, "ImageFailureProject.vnmaker");
+  const imageFailureApi = webHandlers.createApiRequestHandler({
+    codex: {
+      async readSession() {
+        return {
+          connected: false,
+          mode: null,
+          account: null,
+          requiresOpenaiAuth: true,
+          capabilities: null
+        };
+      },
+      async startLogin() {
+        return {
+          type: "chatgpt",
+          loginId: "image-failure-login",
+          authUrl: "https://chatgpt.com/auth"
+        };
+      },
+      async logout() {
+        return undefined;
+      },
+      async generateImageAsset() {
+        throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+      },
+      async generateEventExpansionPlan() {
+        throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+      }
+    }
+  });
+  const imageFailureProject = await imageFailureApi({
+    method: "POST",
+    path: "/api/projects",
+    body: {
+      projectDirectory: imageFailureProjectDirectory,
+      starter: {
+        id: "image-failure-project",
+        title: "Image Failure Project",
+        premise: "이미지 생성 실패 분류를 검증한다."
+      }
+    }
+  });
+  assert.equal(imageFailureProject.status, 200);
+  const imageFailureJob = await imageFailureApi({
+    method: "POST",
+    path: "/api/generation/jobs",
+    body: {
+      projectDirectory: imageFailureProjectDirectory,
+      id: "job-image-failure-background",
+      kind: "background",
+      targetId: "image-failure-project",
+      prompt: "failure background",
+      outputAssetId: "asset-image-failure-background"
+    }
+  });
+  assert.equal(imageFailureJob.status, 200);
+  const imageFailureRun = await imageFailureApi({
+    method: "POST",
+    path: "/api/generation/jobs/run",
+    body: {
+      projectDirectory: imageFailureProjectDirectory,
+      jobIds: ["job-image-failure-background"],
+      replaceCompleted: true
+    }
+  });
+  assert.equal(imageFailureRun.status, 401);
+  assert.equal(imageFailureRun.body.ok, false);
+  assert.equal(imageFailureRun.body.code, "OAUTH_REQUIRED");
+  assert.match(String(imageFailureRun.body.message), /OAuth 로그인이 필요/);
+  assert.equal(imageFailureRun.body.retryable, true);
+
   process.env.VN_MAKER_ALPHA_SANDBOX = "1";
   const sandboxApi = webHandlers.createApiRequestHandler();
   const sandboxSession = await sandboxApi({ method: "GET", path: "/api/codex/session" });
@@ -294,7 +365,8 @@ try {
   assert.equal(staleApproval.body.action, "approveEvent");
   assert.equal(staleApproval.body.code, "PATCH_STALE");
   assert.equal(staleApproval.body.retryable, false);
-  assert.equal(staleApproval.body.workflowSummary.previewState, "stale");
+  assert.equal(staleApproval.body.workflowSummary.previewState, "blocked");
+  assert.equal(staleApproval.body.workflowSummary.primaryAction, "goToBackground");
 
   const apiRoute = apiProject.body.project.routes[0];
   const apiAfterSceneId = apiProject.body.project.scenes[0].id;
@@ -337,6 +409,11 @@ try {
   assert.equal(apiBlockedExport.body.action, "exportProject");
   assert.equal(apiBlockedExport.body.code, "EXPORT_BLOCKED");
   assert.equal(apiBlockedExport.body.workflowSummary.generationState, "planned");
+  assert.equal(apiBlockedExport.body.exportPlan.state, "blocked");
+  assert.equal(apiBlockedExport.body.exportPlan.canExport, false);
+  assert.equal(apiBlockedExport.body.exportPlan.target, "localDesktopWebApp");
+  assert.equal(apiBlockedExport.body.exportPlan.githubPagesTarget, false);
+  assert.equal(apiBlockedExport.body.exportPlan.blockers.some((blocker) => blocker.kind === "generationJob"), true);
 
   const apiGeneratedImage = await sandboxApi({
     method: "POST",
@@ -352,6 +429,55 @@ try {
   assert.equal(apiGeneratedImage.body.asset.source, "generated");
   assert.equal(existsSync(join(apiProjectDirectory, "assets", "generated", `${apiPlannedCgJob.outputAssetId}.png`)), true);
 
+  const apiBackgroundImage = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/images",
+    body: {
+      projectDirectory: apiProjectDirectory,
+      kind: "background",
+      targetId: apiProject.body.project.id,
+      prompt: "shared API background",
+      outputAssetId: "asset-api-direct-background"
+    }
+  });
+  assert.equal(apiBackgroundImage.status, 200);
+  assert.equal(apiBackgroundImage.body.asset.kind, "background");
+  assert.equal(apiBackgroundImage.body.job.kind, "background");
+  assert.equal(
+    apiBackgroundImage.body.project.scenes.some((scene) => scene.backgroundAssetId === "asset-api-direct-background"),
+    true
+  );
+
+  const apiBackgroundJob = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/jobs",
+    body: {
+      projectDirectory: apiProjectDirectory,
+      id: "job-api-background",
+      kind: "background",
+      targetId: apiProject.body.project.id,
+      prompt: "alpha sandbox classroom background",
+      outputAssetId: "asset-api-background"
+    }
+  });
+  assert.equal(apiBackgroundJob.status, 200);
+  assert.equal(apiBackgroundJob.body.job.kind, "background");
+  assert.equal(apiBackgroundJob.body.backgroundPolicy.limit, 1);
+  assert.equal(apiBackgroundJob.body.backgroundPolicy.replacesExisting, true);
+  const apiBackgroundRun = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/jobs/run",
+    body: { projectDirectory: apiProjectDirectory, jobIds: ["job-api-background"], replaceCompleted: true }
+  });
+  assert.equal(apiBackgroundRun.status, 200);
+  assert.equal(apiBackgroundRun.body.assets[0].kind, "background");
+  assert.equal(apiBackgroundRun.body.backgroundPolicy.limit, 1);
+  assert.equal(apiBackgroundRun.body.project.assets.filter((asset) => asset.kind === "background").length, 1);
+  assert.equal(
+    apiBackgroundRun.body.project.scenes.some((scene) => scene.backgroundAssetId === "asset-api-background"),
+    true
+  );
+
   const apiPreview = await sandboxApi({
     method: "POST",
     path: "/api/project/preview",
@@ -362,6 +488,9 @@ try {
   });
   assert.equal(apiPreview.status, 200);
   assert.equal(apiPreview.body.runtime.scenes.some((scene) => scene.cgAsset?.id === apiPlannedCgJob.outputAssetId), true);
+  assert.equal(apiPreview.body.previewReadiness.state, "prepared");
+  assert.equal(apiPreview.body.previewReadiness.canRun, true);
+  assert.equal(apiPreview.body.previewReadiness.requiredData.background, "ready");
 
   const apiExport = await sandboxApi({
     method: "POST",
@@ -370,6 +499,11 @@ try {
   });
   assert.equal(apiExport.status, 200);
   assert.equal(apiExport.body.smoke.ok, true);
+  assert.equal(apiExport.body.exportPlan.state, "complete");
+  assert.equal(apiExport.body.exportPlan.target, "localDesktopWebApp");
+  assert.equal(apiExport.body.exportPlan.githubPagesTarget, false);
+  assert.equal(apiExport.body.exportPlan.includedData.includes("assetManifest"), true);
+  assert.equal(apiExport.body.exportPlan.includedAssets.some((asset) => asset.kind === "background"), true);
   assert.equal(existsSync(join(apiExport.body.export.outputDirectory, "index.html")), true);
   const apiProjectData = JSON.parse(readFileSync(join(apiExport.body.export.outputDirectory, "project-data.json"), "utf8"));
   assert.equal(apiProjectData.assets.some((asset) => String(asset.label).includes(alphaSandbox.ALPHA_SANDBOX_PROVENANCE)), true);
@@ -431,6 +565,10 @@ try {
   assert.equal(cliBlockedExport.action, "exportProject");
   assert.equal(cliBlockedExport.code, "EXPORT_BLOCKED");
   assert.equal(cliBlockedExport.workflowSummary.generationState, "planned");
+  assert.equal(cliBlockedExport.exportPlan.state, "blocked");
+  assert.equal(cliBlockedExport.exportPlan.canExport, false);
+  assert.equal(cliBlockedExport.exportPlan.target, "localDesktopWebApp");
+  assert.equal(cliBlockedExport.exportPlan.blockers.some((blocker) => blocker.kind === "generationJob"), true);
 
   const cliGeneratedImage = runCli("generate-image", {
     projectDirectory: cliProjectDirectory,
@@ -440,18 +578,65 @@ try {
   assert.equal(cliGeneratedImage.job.provider, "mock-adapter");
   assert.equal(cliGeneratedImage.raw.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
 
+  const cliGenerateBackground = runCli("generate-image", {
+    projectDirectory: cliProjectDirectory,
+    kind: "background",
+    targetId: cliProject.project.id,
+    prompt: "shared CLI background",
+    outputAssetId: "asset-cli-direct-background"
+  }, cliEnv);
+  assert.equal(cliGenerateBackground.ok, true);
+  assert.equal(cliGenerateBackground.asset.kind, "background");
+  assert.equal(cliGenerateBackground.job.kind, "background");
+  assert.equal(
+    cliGenerateBackground.project.scenes.some((scene) => scene.backgroundAssetId === "asset-cli-direct-background"),
+    true
+  );
+
+  const cliBackgroundJob = runCli("create-image-job", {
+    projectDirectory: cliProjectDirectory,
+    id: "job-cli-background",
+    kind: "background",
+    targetId: cliProject.project.id,
+    prompt: "alpha sandbox cli background",
+    outputAssetId: "asset-cli-background"
+  }, cliEnv);
+  assert.equal(cliBackgroundJob.job.kind, "background");
+  assert.equal(cliBackgroundJob.backgroundPolicy.limit, 1);
+  assert.equal(cliBackgroundJob.backgroundPolicy.replacesExisting, true);
+  const cliBackgroundRun = runCli("run-generation-jobs", {
+    projectDirectory: cliProjectDirectory,
+    jobIds: ["job-cli-background"],
+    replaceCompleted: true
+  }, cliEnv);
+  assert.equal(cliBackgroundRun.ok, true);
+  assert.equal(cliBackgroundRun.assets[0].kind, "background");
+  assert.equal(cliBackgroundRun.backgroundPolicy.limit, 1);
+  assert.equal(cliBackgroundRun.project.assets.filter((asset) => asset.kind === "background").length, 1);
+  assert.equal(
+    cliBackgroundRun.project.scenes.some((scene) => scene.backgroundAssetId === "asset-cli-background"),
+    true
+  );
+
   const cliPreview = runCli("preview", {
     projectDirectory: cliProjectDirectory,
     startSceneId: cliAfterSceneId
   }, cliEnv);
   assert.equal(cliPreview.ok, true);
   assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.id === cliPlannedCgJob.outputAssetId), true);
+  assert.equal(cliPreview.previewReadiness.state, "prepared");
+  assert.equal(cliPreview.previewReadiness.canRun, true);
+  assert.equal(cliPreview.previewReadiness.requiredData.background, "ready");
 
   const cliExport = runCli("export-web", {
     projectDirectory: cliProjectDirectory
   }, cliEnv);
   assert.equal(cliExport.ok, true);
   assert.equal(cliExport.smoke.ok, true);
+  assert.equal(cliExport.exportPlan.state, "complete");
+  assert.equal(cliExport.exportPlan.target, "localDesktopWebApp");
+  assert.equal(cliExport.exportPlan.githubPagesTarget, false);
+  assert.equal(cliExport.exportPlan.includedData.includes("runtime"), true);
 
   const cliSmoke = runCli("smoke-export", {
     outputPath: cliExport.export.outputDirectory
