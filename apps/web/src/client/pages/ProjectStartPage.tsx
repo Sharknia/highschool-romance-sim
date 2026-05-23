@@ -1,4 +1,4 @@
-import { CheckCircle2, Database, FolderOpen, Plus, RotateCw } from "lucide-react";
+import { Plus, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -138,7 +138,7 @@ export function projectDeleteErrorViewModel(result: ProjectFailureLike): Project
 
 export function ProjectStartPage() {
   const { postAuthedJson } = useAuth();
-  const { setShellState, shellState, summarizeDirectory } = useWorkspaceShell();
+  const { setShellState, shellState } = useWorkspaceShell();
   const navigate = useNavigate();
   const { projectId, tab } = useParams<{ projectId?: string; tab?: string }>();
   const activeTab = normalizeTab(tab);
@@ -492,44 +492,26 @@ export function ProjectStartPage() {
         totalCount={recentMeta.count}
       />
 
-      <section className="page-panel-grid" aria-label="보조 프로젝트 작업">
-        <article className="page-panel">
-          <div className="page-panel-icon"><Database size={18} /></div>
-          <h2>저장 위치</h2>
-          <label className="field-row">
-            <span>프로젝트 디렉터리</span>
-            <input aria-label="프로젝트 디렉터리" onChange={(event) => setProjectDirectoryInput(event.target.value)} placeholder="기본 작업공간 사용" value={projectDirectoryInput} />
-          </label>
-          <div className="panel-actions">
-            <Button disabled={busy} icon={<FolderOpen size={16} />} onClick={() => void openProject("프로젝트 열기", {
-              projectDirectory: projectDirectoryInput || undefined
-            })}>
-              프로젝트 열기
-            </Button>
-            <Button disabled={busy || !reconnectProjectId} icon={<RotateCw size={16} />} onClick={() => void openProject("프로젝트 재연결", {
-              projectId: reconnectProjectId || undefined,
-              projectDirectory: projectDirectoryInput || undefined
-            }, true, "reconnect")}>
-              재연결
-            </Button>
-          </div>
-          {reconnectTarget ? (
+      {reconnectTarget ? (
+        <section className="page-panel-grid" aria-label="프로젝트 재연결">
+          <article className="page-panel">
+            <h2>프로젝트 재연결</h2>
+            <label className="field-row">
+              <span>프로젝트 디렉터리</span>
+              <input aria-label="프로젝트 디렉터리" onChange={(event) => setProjectDirectoryInput(event.target.value)} placeholder="기본 작업공간 사용" value={projectDirectoryInput} />
+            </label>
+            <div className="panel-actions">
+              <Button disabled={busy || !reconnectProjectId} icon={<RotateCw size={16} />} onClick={() => void openProject("프로젝트 재연결", {
+                projectId: reconnectProjectId || undefined,
+                projectDirectory: projectDirectoryInput || undefined
+              }, true, "reconnect")}>
+                재연결
+              </Button>
+            </div>
             <p className="page-muted">{reconnectTarget.title}의 새 위치를 입력해 다시 연결합니다.</p>
-          ) : null}
-        </article>
-
-        <article className="page-panel">
-          <div className="page-panel-icon"><CheckCircle2 size={18} /></div>
-          <h2>현재 상태</h2>
-          <dl className="summary-list" aria-label="상태 요약">
-            <div><dt>프로젝트</dt><dd>{shellState.projectTitle}</dd></div>
-            <div><dt>저장 위치</dt><dd>{summarizeDirectory(shellState.projectDirectory)}</dd></div>
-            <div><dt>검증</dt><dd>{shellState.validationStatus}</dd></div>
-          </dl>
-        </article>
-      </section>
-
-      {!projectId ? detailView : null}
+          </article>
+        </section>
+      ) : null}
 
       {deleteTarget ? (
         <DeleteConfirmDialog
