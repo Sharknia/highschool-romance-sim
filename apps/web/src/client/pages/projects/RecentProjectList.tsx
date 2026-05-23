@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock3, Eye, MoreVertical, RotateCw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock3, Eye, RotateCw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button, ContentList, type ContentListState } from "../../components/ui";
 import type { RecentProject } from "./projectPageTypes";
@@ -209,16 +209,15 @@ export function RecentProjectList({
               <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)} variant={entry.missing ? "primary" : "secondary"}>
                 재연결
               </Button>
-              <details className="recent-project-menu">
-                <summary aria-label={`${entry.title} 삭제 메뉴`}>
-                  <MoreVertical size={17} />
-                </summary>
-                <div className="recent-project-menu-actions">
-                  <Button className="icon-button-danger" disabled={busy} icon={<Trash2 size={16} />} onClick={(event) => onPrepareDelete(entry, event.currentTarget)} variant="ghost">
-                    삭제
-                  </Button>
-                </div>
-              </details>
+              <button
+                aria-label={`${entry.title} 삭제`}
+                className="icon-button icon-button-danger"
+                disabled={busy}
+                onClick={(event) => onPrepareDelete(entry, event.currentTarget)}
+                type="button"
+              >
+                <Trash2 size={17} aria-hidden="true" />
+              </button>
             </>
           )
         }))}

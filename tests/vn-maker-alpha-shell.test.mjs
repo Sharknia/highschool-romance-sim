@@ -185,7 +185,8 @@ assert.match(projectStartSource, /function loadRecentProjects\(/, "프로젝트 
 assert.match(projectStartSource, /onRefresh=\{\(\) => void loadRecentProjects\(\)\}/, "수동 새로고침은 unhandled rejection 없이 loader를 사용해야 합니다.");
 assert.match(projectStartSource, /if\s*\(tab && normalizeTab\(tab\) !== tab\)/, "명시된 legacy project detail tab alias만 정규화하고 /projects/:projectId/overview 복원은 막으면 안 됩니다.");
 assert.match(projectStartSource, /navigate\(`\/projects\/\$\{projectId\}\/\$\{normalizeTab\(tab\)\}`/, "legacy project detail tab alias는 overview가 아니라 normalizeTab 결과로 정규화해야 합니다.");
-assert.match(recentProjectListSource, /recent-project-menu-actions/, "최근 프로젝트 삭제 메뉴는 여러 액션이 겹치지 않는 컨테이너를 가져야 합니다.");
+assert.doesNotMatch(recentProjectListSource, /MoreVertical|recent-project-menu/, "프로젝트 목록 삭제 액션은 더보기 메뉴가 아니라 공통 직접 위험 액션이어야 합니다.");
+assert.match(recentProjectListSource, /className="icon-button icon-button-danger"/, "프로젝트 목록 삭제 액션은 히로인 목록과 같은 icon-button danger 패턴을 사용해야 합니다.");
 assert.match(clientStylesSource, /\.recent-project-field\s*\{[\s\S]*display:\s*block/, "최근 프로젝트 필드는 저장 위치/상태/수정 시각이 이어붙지 않도록 줄 단위로 표시해야 합니다.");
 assert.match(recentProjectListSource, /onPrepareDelete:\s*\(entry:\s*RecentProject,\s*trigger:\s*HTMLElement\)\s*=>\s*void/, "최근 프로젝트 삭제 준비는 포커스 복귀용 트리거 버튼을 전달해야 합니다.");
 assert.match(recentProjectListSource, /onPrepareDelete\(entry,\s*event\.currentTarget\)/, "삭제 버튼 클릭 시 현재 버튼을 포커스 복귀 대상으로 전달해야 합니다.");
@@ -664,6 +665,6 @@ const styleSource = readText("apps/web/src/client/styles.css");
 [".workspace-layout", ".workspace-nav", ".page-hero", ".page-primary-action"].forEach((selector) => {
   assert.match(styleSource, new RegExp(selector.replace(".", "\\.")), `${selector} 스타일이 있어야 합니다.`);
 });
-assert.match(styleSource, /\.recent-project-menu-actions/, "최근 프로젝트 메뉴 액션은 겹치지 않도록 별도 컨테이너 스타일을 가져야 합니다.");
+assert.doesNotMatch(styleSource, /recent-project-menu/, "프로젝트 목록 더보기 메뉴 전용 스타일은 남기지 않아야 합니다.");
 assert.match(styleSource, /@media \(max-width: 820px\)/, "태블릿 이하 breakpoint가 있어야 합니다.");
 assert.match(styleSource, /@media \(max-width: 560px\)/, "모바일 breakpoint가 있어야 합니다.");

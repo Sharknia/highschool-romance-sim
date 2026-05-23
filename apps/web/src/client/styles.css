@@ -1186,101 +1186,6 @@ a {
   font-size: 0.9rem;
 }
 
-.recent-project-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(240px, auto);
-  align-items: center;
-  gap: 12px;
-  border: 1px solid #3a3730;
-  border-radius: 8px;
-  padding: 12px;
-  background: #0f0f0d;
-  cursor: pointer;
-}
-
-.recent-project-row.missing {
-  border-color: #d66b5f;
-}
-
-.recent-project-row:hover,
-.recent-project-row:focus-visible {
-  border-color: #5eead4;
-  outline: none;
-}
-
-.recent-project-main {
-  min-width: 0;
-  display: grid;
-  gap: 5px;
-}
-
-.recent-project-main strong,
-.recent-project-main span,
-.recent-project-main small {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.recent-project-main small {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  color: #bfb6a8;
-}
-
-.recent-project-state,
-.recent-project-actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.recent-project-menu {
-  position: relative;
-}
-
-.recent-project-menu summary {
-  min-width: 44px;
-  min-height: 44px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid #565147;
-  border-radius: 7px;
-  color: #fbf7ef;
-  background: #24221e;
-  cursor: pointer;
-  list-style: none;
-}
-
-.recent-project-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.recent-project-menu-actions {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 4;
-  display: grid;
-  gap: 6px;
-  min-width: 220px;
-  padding: 6px;
-  border: 1px solid #3a3730;
-  border-radius: 8px;
-  background: #191814;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
-}
-
-.recent-project-menu-actions .button {
-  justify-content: flex-start;
-  width: 100%;
-}
-
 .state-chip {
   min-height: 28px;
   display: inline-flex;
@@ -2063,16 +1968,14 @@ pre {
   .page-hero,
   .topbar-meta,
   .content-list-item,
-  .content-list-item.with-leading,
-  .recent-project-row {
+  .content-list-select,
+  .content-list-select.with-leading {
     grid-template-columns: 1fr;
   }
 
   .content-list-state,
   .content-list-actions,
-  .recent-project-toolbar,
-  .recent-project-state,
-  .recent-project-actions {
+  .recent-project-toolbar {
     justify-content: flex-start;
   }
 
