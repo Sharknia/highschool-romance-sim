@@ -134,6 +134,8 @@ const deleteConfirmDialogSource = readText(deleteConfirmDialogPath);
   "다시 시도",
   "confirmationValue.trim() === expectedConfirmation",
   "requiresConfirmation?: boolean",
+  "confirmationRequired?: boolean",
+  "irreversible?: boolean",
   "inputRef.current?.focus()",
   "event.key === \"Escape\"",
   "trapDialogFocus"
@@ -143,6 +145,7 @@ const deleteConfirmDialogSource = readText(deleteConfirmDialogPath);
 });
 assert.match(deleteConfirmDialogSource, /retryAction\.onSelect\(confirmationValue\.trim\(\)\)/, "DeleteConfirmDialog retry는 현재 확인 입력값의 trim 결과를 전달해야 합니다.");
 assert.match(deleteConfirmDialogSource, /primaryAction\.onSelect\(confirmationValue\.trim\(\)\)/, "DeleteConfirmDialog primary action은 trim된 확인 입력값을 전달해야 합니다.");
+assert.match(deleteConfirmDialogSource, /action\.requiresConfirmation !== false && !confirmationMatches/, "DeleteConfirmDialog 보조 action은 requiresConfirmation=false일 때 확인 입력 없이 실행할 수 있어야 합니다.");
 const sharedUiIndexSource = readText("apps/web/src/client/components/ui/index.ts");
 assert.match(sharedUiIndexSource, /DeleteConfirmDialog/, "공통 UI index는 DeleteConfirmDialog를 export해야 합니다.");
 const tabListPath = "apps/web/src/client/components/ui/TabList.tsx";
@@ -236,6 +239,10 @@ assert.match(recentProjectListSource, /onPrepareDelete:\s*\(entry:\s*RecentProje
 assert.match(recentProjectListSource, /onPrepareDelete\(entry,\s*event\.currentTarget\)/, "삭제 버튼 클릭 시 현재 버튼을 포커스 복귀 대상으로 전달해야 합니다.");
 assert.match(projectStartSource, /deleteReturnFocusRef/, "ProjectStartPage는 삭제 dialog 닫힘 후 돌아갈 포커스 대상을 저장해야 합니다.");
 assert.match(projectStartSource, /deleteReturnFocusRef\.current\?\.focus\(\)/, "삭제 dialog 닫힘 후 삭제 트리거 버튼으로 포커스를 복귀해야 합니다.");
+assert.match(projectStartSource, /deleteDialogMode/, "ProjectStartPage는 목록 제거와 파일 삭제 confirmation 모드를 분리해야 합니다.");
+assert.match(projectStartSource, /deleteDialogMode === "recent"[\s\S]*irreversible=\{false\}[\s\S]*confirmationRequired=\{false\}[\s\S]*label: "목록에서만 제거"/, "목록 제거 dialog는 되돌림 가능 흐름이며 확인 입력 없이 최근 목록 제거만 실행해야 합니다.");
+assert.match(projectStartSource, /deleteDialogMode === "files"[\s\S]*irreversible=\{true\}[\s\S]*confirmationLabel="프로젝트 제목"[\s\S]*label: "프로젝트 파일까지 삭제"/, "파일 삭제 dialog는 별도 모드에서 프로젝트명 입력 확인을 요구해야 합니다.");
+assert.doesNotMatch(projectStartSource, /\{ label: "목록에서만 제거", value: "최근 목록에서만 사라지며 프로젝트 파일은 유지됩니다\." \},\s*\{ label: "프로젝트 파일까지 삭제"/, "하나의 삭제 dialog impact 안에 목록 제거와 파일 삭제 영향을 함께 섞으면 안 됩니다.");
 assert.match(clientStylesSource, /\.button\s*\{[\s\S]*min-height:\s*40px/, "기본 버튼은 모바일 터치 기준을 위해 최소 40px 높이를 가져야 합니다.");
 [
   ["projectFailureText", ""],

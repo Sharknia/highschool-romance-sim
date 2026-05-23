@@ -18,6 +18,7 @@ import {
 import { normalizeTab, type ProjectApiResult, type ProjectData, type ProjectWorkflowSummary, type RecentProject } from "./projects/projectPageTypes";
 
 type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";
+type DeleteDialogMode = "recent" | "files";
 type ProjectFailureLike = Pick<ProjectApiResult, "code" | "error" | "httpStatus" | "message" | "nextAction" | "userSummary">;
 
 export interface ProjectFailureViewModel {
@@ -155,6 +156,7 @@ export function ProjectStartPage() {
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
   const [removedProject, setRemovedProject] = useState<RecentProject | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RecentProject | null>(null);
+  const [deleteDialogMode, setDeleteDialogMode] = useState<DeleteDialogMode>("recent");
   const [deleteError, setDeleteError] = useState("");
   const [deleteErrorSource, setDeleteErrorSource] = useState<"files" | "recent" | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -275,6 +277,7 @@ export function ProjectStartPage() {
       setRemovedProject(result.removedProject || entry);
       if (closeDeleteDialog) {
         setDeleteTarget(null);
+        setDeleteDialogMode("recent");
         setDeleteError("");
         setDeleteErrorSource(null);
       }
@@ -316,6 +319,7 @@ export function ProjectStartPage() {
   function prepareProjectDelete(entry: RecentProject, trigger: HTMLElement): void {
     deleteReturnFocusRef.current = trigger;
     setDeleteTarget(entry);
+    setDeleteDialogMode("recent");
     setDeleteError("");
     setDeleteErrorSource(null);
     setStatus(`${entry.title} 프로젝트 삭제 방식을 선택합니다.`);
@@ -326,9 +330,24 @@ export function ProjectStartPage() {
       return;
     }
     setDeleteTarget(null);
+    setDeleteDialogMode("recent");
     setDeleteError("");
     setDeleteErrorSource(null);
     window.setTimeout(() => deleteReturnFocusRef.current?.focus(), 0);
+  }
+
+  function showFileDeleteConfirmation(entry: RecentProject): void {
+    setDeleteDialogMode("files");
+    setDeleteError("");
+    setDeleteErrorSource(null);
+    setStatus(`${entry.title} 프로젝트 파일 삭제 확인이 필요합니다.`);
+  }
+
+  function showRecentRemoveConfirmation(entry: RecentProject): void {
+    setDeleteDialogMode("recent");
+    setDeleteError("");
+    setDeleteErrorSource(null);
+    setStatus(`${entry.title} 프로젝트를 목록에서만 제거할 수 있습니다.`);
   }
 
   function isCurrentProjectEntry(entry: RecentProject): boolean {
@@ -377,6 +396,7 @@ export function ProjectStartPage() {
       applyRecentProjectList(result);
       clearCurrentProjectIfNeeded(entry);
       setDeleteTarget(null);
+      setDeleteDialogMode("recent");
       setRemovedProject(null);
       const recentIndexRemoval = result.recentIndexRemoval;
       const recentRemovalFailed = recentIndexRemoval?.ok === false;
@@ -523,19 +543,59 @@ export function ProjectStartPage() {
         </section>
       ) : null}
 
-      {deleteTarget ? (
+      {deleteTarget && deleteDialogMode === "recent" ? (
         <DeleteConfirmDialog
           busy={busy}
-          confirmationHint="프로젝트 제목을 정확히 입력해야 삭제 방식을 실행할 수 있습니다."
+          irreversible={false}
+          confirmationHint=""
+          confirmationLabel=""
+          confirmationRequired={false}
+          error={deleteError}
+          expectedConfirmation=""
+          impactItems={[
+            { label: "저장 위치", value: deleteTarget.projectDirectory },
+            { label: "파일 유지", value: "최근 목록에서만 사라지며 프로젝트 파일은 유지됩니다." },
+            { label: "되돌리기", value: "제거 직후 되돌리기로 목록에 다시 표시할 수 있습니다." }
+          ]}
+          intro="프로젝트 목록에서만 제거합니다."
+          onClose={closeDeleteConfirmation}
+          primaryAction={{
+            label: "목록에서만 제거",
+            onSelect: () => void removeRecentProject(deleteTarget, true),
+            variant: "primary"
+          }}
+          retryAction={deleteError && deleteErrorSource === "recent" ? {
+            label: "다시 시도",
+            onSelect: () => void removeRecentProject(deleteTarget, true),
+            requiresConfirmation: false,
+            variant: "ghost"
+          } : undefined}
+          secondaryActions={[{
+            label: "프로젝트 파일까지 삭제",
+            onSelect: () => showFileDeleteConfirmation(deleteTarget),
+            requiresConfirmation: false,
+            variant: "ghost"
+          }]}
+          title="프로젝트 목록에서 제거"
+          warningMessage="최근 목록 항목만 제거합니다. 로컬 프로젝트 파일은 그대로 유지됩니다."
+          warningTitle="되돌릴 수 있음"
+        />
+      ) : null}
+
+      {deleteTarget && deleteDialogMode === "files" ? (
+        <DeleteConfirmDialog
+          busy={busy}
+          irreversible={true}
+          confirmationHint="프로젝트 제목을 정확히 입력해야 로컬 파일 삭제를 실행할 수 있습니다."
           confirmationLabel="프로젝트 제목"
           error={deleteError}
           expectedConfirmation={deleteTarget.title}
           impactItems={[
             { label: "저장 위치", value: deleteTarget.projectDirectory },
-            { label: "목록에서만 제거", value: "최근 목록에서만 사라지며 프로젝트 파일은 유지됩니다." },
-            { label: "프로젝트 파일까지 삭제", value: "로컬 프로젝트 폴더를 삭제하며 되돌릴 수 없습니다." }
+            { label: "로컬 프로젝트 파일", value: "프로젝트 폴더와 제작 데이터를 삭제합니다." },
+            { label: "최근 목록 정리", value: "삭제 성공 후 목록에서도 제거합니다." }
           ]}
-          intro="프로젝트 삭제 방식을 선택합니다."
+          intro="로컬 프로젝트 파일 삭제를 확인합니다."
           onClose={closeDeleteConfirmation}
           primaryAction={{
             label: "프로젝트 파일까지 삭제",
@@ -548,11 +608,14 @@ export function ProjectStartPage() {
             variant: "ghost"
           } : undefined}
           secondaryActions={[{
-            label: "목록에서만 제거",
-            onSelect: () => void removeRecentProject(deleteTarget, true),
+            label: "목록 제거로 돌아가기",
+            onSelect: () => showRecentRemoveConfirmation(deleteTarget),
+            requiresConfirmation: false,
             variant: "ghost"
           }]}
-          title="삭제할 프로젝트"
+          title="프로젝트 파일 삭제"
+          warningMessage="로컬 프로젝트 폴더를 삭제하며 이 화면에서 복구할 수 없습니다."
+          warningTitle="되돌릴 수 없음"
         />
       ) : null}
     </section>
