@@ -1,8 +1,8 @@
-import { Heart, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, ContentList, StatusBanner } from "../../components/ui";
+import { Button, ContentList, StatusBanner, type ContentListState } from "../../components/ui";
 import { deleteHeroine, failureText, listHeroines } from "./heroineApi";
 import { HeroineDeleteDialog, type HeroineDeleteConfirmation } from "./HeroineDeleteDialog";
 import type { HeroineDraft, HeroineListState } from "./heroinePageTypes";
@@ -89,6 +89,26 @@ export function HeroineListPage() {
     setStatus("대상 히로인이 이미 목록에서 사라져 삭제 dialog를 닫았습니다.");
   }
 
+  const heroineListStateConfig: ContentListState | undefined = state === "loading" ? {
+    kind: "loading",
+    title: "로딩",
+    description: "히로인 목록을 불러오는 중입니다."
+  } : state === "empty" ? {
+    kind: "empty",
+    title: "아직 히로인이 없습니다.",
+    description: "첫 히로인 만들기로 라이브러리 원본을 준비하세요.",
+    action: (
+      <Button icon={<Plus size={16} />} onClick={() => navigate("/heroines/new")} variant="primary">
+        첫 히로인 만들기
+      </Button>
+    )
+  } : state === "error" ? {
+    kind: "error",
+    title: "오류",
+    description: status,
+    action: <Button icon={<RefreshCw size={16} />} onClick={() => void load()}>다시 시도</Button>
+  } : undefined;
+
   return (
     <section className="app-page heroine-page" aria-labelledby="heroinesTitle">
       <header className="page-hero">
@@ -109,23 +129,13 @@ export function HeroineListPage() {
         <span className="page-status">{status}</span>
       </StatusBanner>
 
-      {state === "error" ? (
-        <div className="panel-actions">
-          <Button icon={<RefreshCw size={16} />} onClick={() => void load()}>다시 시도</Button>
-        </div>
-      ) : null}
-
-      {state === "empty" ? (
-        <section className="page-panel">
-          <div className="page-panel-icon"><Heart size={18} /></div>
-          <h2>아직 히로인이 없습니다.</h2>
-          <p className="page-muted">첫 히로인 만들기로 라이브러리 원본을 준비하세요.</p>
-          <div className="panel-actions">
-            <Button icon={<Plus size={16} />} onClick={() => navigate("/heroines/new")} variant="primary">
-              첫 히로인 만들기
-            </Button>
-          </div>
-        </section>
+      {heroineListStateConfig ? (
+        <ContentList
+          ariaLabel="히로인 목록"
+          busy={state === "loading"}
+          items={[]}
+          state={heroineListStateConfig}
+        />
       ) : null}
 
       {state === "ready" || state === "deleting" ? (

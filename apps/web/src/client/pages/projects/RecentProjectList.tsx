@@ -1,17 +1,17 @@
-import { AlertTriangle, Clock3, Eye, MoreVertical, RotateCw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock3, Eye, RotateCw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Button, ContentList } from "../../components/ui";
+import { Button, ContentList, type ContentListState } from "../../components/ui";
 import type { RecentProject } from "./projectPageTypes";
 
 type RecentProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";
 
-interface RecentProjectListProps {
+interface ProjectListProps {
   busy: boolean;
   errorText?: string;
   listState: RecentProjectListState;
   loadedAt?: string;
   missingCount: number;
-  recentProjects: RecentProject[];
+  projects: RecentProject[];
   onOpen: (entry: RecentProject) => void;
   onPrepareDelete: (entry: RecentProject, trigger: HTMLElement) => void;
   onPrepareReconnect: (entry: RecentProject) => void;
@@ -64,31 +64,31 @@ function renderProjectField(label: string, value: string) {
   );
 }
 
-export function RecentProjectList({
+export function ProjectList({
   busy,
   errorText,
   listState,
   loadedAt,
   missingCount,
-  recentProjects,
+  projects,
   onOpen,
   onPrepareDelete,
   onPrepareReconnect,
   onRefresh,
   totalCount
-}: RecentProjectListProps) {
+}: ProjectListProps) {
   const [query, setQuery] = useState("");
   const filteredProjects = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
-      return recentProjects;
+      return projects;
     }
-    return recentProjects.filter((entry) => [
+    return projects.filter((entry) => [
       entry.title,
       entry.projectDirectory,
       entry.projectId
     ].some((value) => value.toLowerCase().includes(normalized)));
-  }, [query, recentProjects]);
+  }, [query, projects]);
 
   function openFromCard(entry: RecentProject): void {
     if (entry.missing) {
@@ -98,58 +98,63 @@ export function RecentProjectList({
     onOpen(entry);
   }
 
-  const effectiveListState: RecentProjectListState = listState === "ready" && recentProjects.length === 0 ? "empty" : listState;
+  const effectiveListState: RecentProjectListState = listState === "ready" && projects.length === 0 ? "empty" : listState;
 
-  function renderStateSurface() {
+  const listStateConfig: ContentListState | undefined = (() => {
     if (effectiveListState === "loading") {
-      return (
-        <div className="page-empty-state" role="status">
-          <strong>로딩</strong>
-          <p>프로젝트 목록을 불러오는 중입니다.</p>
-        </div>
-      );
+      return {
+        kind: "loading",
+        title: "로딩",
+        description: "프로젝트 목록을 불러오는 중입니다."
+      };
     }
     if (effectiveListState === "empty") {
-      return (
-        <div className="page-empty-state">
-          <strong>빈 목록</strong>
-          <p>아직 최근 프로젝트가 없습니다.</p>
-          <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh}>
+      return {
+        kind: "empty",
+        title: "빈 목록",
+        description: "아직 프로젝트가 없습니다.",
+        action: (
+          <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh} variant="secondary">
             다시 시도
           </Button>
-        </div>
-      );
+        )
+      };
     }
     if (effectiveListState === "error") {
-      return (
-        <div className="page-empty-state" role="alert">
-          <strong>오류</strong>
-          <p>{errorText || "프로젝트 목록을 불러오지 못했습니다."}</p>
-          <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh}>
+      return {
+        kind: "error",
+        title: "오류",
+        description: errorText || "프로젝트 목록을 불러오지 못했습니다.",
+        action: (
+          <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh} variant="secondary">
             다시 시도
           </Button>
-        </div>
-      );
+        )
+      };
     }
-    if (effectiveListState === "deleting") {
-      return (
-        <div className="page-empty-state" role="status">
-          <strong>삭제</strong>
-          <p>최근 프로젝트 항목을 삭제하는 중입니다.</p>
-        </div>
-      );
+    if (effectiveListState === "deleting" && projects.length === 0) {
+      return {
+        kind: "busy",
+        title: "삭제",
+        description: "프로젝트 목록 항목을 삭제하는 중입니다."
+      };
     }
-    return null;
-  }
-
-  const stateSurface = renderStateSurface();
+    if (effectiveListState === "ready" && filteredProjects.length === 0) {
+      return {
+        kind: "empty",
+        title: "필터 결과 없음",
+        description: "필터 결과가 없습니다. 다른 제목이나 경로로 검색해 주세요."
+      };
+    }
+    return undefined;
+  })();
 
   return (
-    <section className="page-panel recent-project-panel" aria-labelledby="recentProjectsTitle">
+    <section className="page-panel recent-project-panel" aria-labelledby="projectsListTitle">
       <div className="section-header">
         <div>
-          <p className="eyebrow">Recent</p>
-          <h2 id="recentProjectsTitle">최근 프로젝트</h2>
+          <p className="eyebrow">Projects</p>
+          <h2 id="projectsListTitle">프로젝트 목록</h2>
         </div>
         <Button disabled={busy} icon={<RotateCw size={16} />} onClick={onRefresh}>
           새로고침
@@ -158,7 +163,7 @@ export function RecentProjectList({
       <div className="recent-project-toolbar">
         <label className="search-row">
           <Search size={16} />
-          <input aria-label="최근 프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
+          <input aria-label="프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
         </label>
         <div className="recent-project-counts">
           <span>총 {totalCount}개</span>
@@ -167,59 +172,58 @@ export function RecentProjectList({
           {loadedAt ? <span>갱신 {formatRecentProjectDate(loadedAt)}</span> : null}
         </div>
       </div>
-      {stateSurface ? stateSurface : filteredProjects.length === 0 ? (
-        <p className="page-muted">필터 결과가 없습니다. 다른 제목이나 경로로 검색해 주세요.</p>
-      ) : (
-        /* 키보드 포커스: ContentList의 focus-visible outline이 목록 카드 선택 affordance를 유지합니다. */
-        <ContentList
-          ariaLabel="최근 프로젝트 목록"
-          items={filteredProjects.map((entry) => ({
-            id: entry.projectId,
-            className: entry.missing ? "missing" : "",
-            title: entry.title,
-            description: (
-              <>
-                {renderProjectField("저장 위치", entry.projectDirectory)}
-                {renderProjectField("현재 상태", projectCurrentState(entry))}
-                {renderProjectField("상태 요약", projectStatusSummary(entry))}
-                {renderProjectField("최근 수정", formatRecentProjectDate(entry.lastValidatedAt))}
-                {renderProjectField("마지막 작업 시각", formatRecentProjectDate(entry.lastOpenedAt))}
-              </>
-            ),
-            meta: (
-              <>
-                <Clock3 size={14} /> 마지막 작업 시각 {formatRecentProjectDate(entry.lastOpenedAt)} · 최근 수정 {formatRecentProjectDate(entry.lastValidatedAt)} · {entry.projectId}
-              </>
-            ),
-            state: entry.missing ? (
-              <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
-            ) : (
-              <span className="state-chip">ready</span>
-            ),
-            onSelect: () => openFromCard(entry),
-            actions: (
-              <>
-                <Button aria-label={`${entry.title} 상세보기 버튼`} disabled={busy} icon={<Eye size={16} />} onClick={() => openFromCard(entry)} variant="primary">
-                  상세보기
-                </Button>
-                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)} variant={entry.missing ? "primary" : "secondary"}>
+      {/* 키보드 포커스: ContentList의 focus-visible outline이 목록 카드 선택 affordance를 유지합니다. */}
+      <ContentList
+        ariaLabel="프로젝트 목록"
+        busy={busy || effectiveListState === "deleting"}
+        state={listStateConfig}
+        items={filteredProjects.map((entry) => ({
+          id: entry.projectId,
+          className: entry.missing ? "missing" : "",
+          title: entry.title,
+          description: (
+            <>
+              {renderProjectField("저장 위치", entry.projectDirectory)}
+              {renderProjectField("현재 상태", projectCurrentState(entry))}
+              {renderProjectField("상태 요약", projectStatusSummary(entry))}
+              {renderProjectField("최근 수정", formatRecentProjectDate(entry.lastValidatedAt))}
+              {renderProjectField("마지막 작업 시각", formatRecentProjectDate(entry.lastOpenedAt))}
+            </>
+          ),
+          meta: (
+            <>
+              <Clock3 size={14} /> 마지막 작업 시각 {formatRecentProjectDate(entry.lastOpenedAt)} · 최근 수정 {formatRecentProjectDate(entry.lastValidatedAt)} · {entry.projectId}
+            </>
+          ),
+          state: entry.missing ? (
+            <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
+          ) : (
+            <span className="state-chip">ready</span>
+          ),
+          onSelect: () => openFromCard(entry),
+          actions: (
+            <>
+              <Button aria-label={`${entry.title} 상세보기 버튼`} disabled={busy} icon={<Eye size={16} />} onClick={() => openFromCard(entry)} variant="primary">
+                상세보기
+              </Button>
+              {entry.missing ? (
+                <Button disabled={busy} icon={<RotateCw size={16} />} onClick={() => onPrepareReconnect(entry)} variant="primary">
                   재연결
                 </Button>
-                <details className="recent-project-menu">
-                  <summary aria-label={`${entry.title} 삭제 메뉴`}>
-                    <MoreVertical size={17} />
-                  </summary>
-                  <div className="recent-project-menu-actions">
-                    <Button className="icon-button-danger" disabled={busy} icon={<Trash2 size={16} />} onClick={(event) => onPrepareDelete(entry, event.currentTarget)} variant="ghost">
-                      삭제
-                    </Button>
-                  </div>
-                </details>
-              </>
-            )
-          }))}
-        />
-      )}
+              ) : null}
+              <button
+                aria-label={`${entry.title} 삭제`}
+                className="icon-button icon-button-danger"
+                disabled={busy}
+                onClick={(event) => onPrepareDelete(entry, event.currentTarget)}
+                type="button"
+              >
+                <Trash2 size={17} aria-hidden="true" />
+              </button>
+            </>
+          )
+        }))}
+      />
     </section>
   );
 }

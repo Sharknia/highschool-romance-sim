@@ -4,6 +4,7 @@
 - Parent: #27
 - Sub-issues: #20, #21, #22, #23, #24, #25, #26
 - This file is the evidence artifact for #26 and the consolidated verification record for #27.
+- #44 project-management audit supersedes the `/projects` acceptance rows that were tied to the old recent-project implementation. Rows marked `superseded` are historical evidence only and are not current completion criteria.
 
 ## Acceptance Checklist
 | Requirement | Evidence | Result |
@@ -11,8 +12,8 @@
 | #20 safe API envelope covers JSON, empty, nonJSON, network, abort, 4xx, and 5xx | `tests/vn-maker-regression.test.mjs`, `tests/vn-maker-alpha-shell.test.mjs` | pass |
 | #20 Web/API/CLI share project deletion and generation use cases | `packages/use-cases`, `apps/web/src/server/handlers.ts`, `packages/cli/src/index.ts` | pass |
 | Existing app project menu entry is kept and no extra project-management menu entry is added | `tests/vn-maker-alpha-shell.test.mjs`, browser screenshots | pass |
-| `/projects` opens on a project list using central list UI | `RecentProjectList`, `ContentList`, screenshots | pass |
-| Project list cards show storage/status/summary/recent timestamps | source assertions and `/projects` screenshots | pass |
+| `/projects` opens on a project list using central list UI | Superseded by #44 project-management audit; current checks live in #45-#63 | superseded |
+| Project list cards show storage/status/summary/recent timestamps | Superseded by #44 project-management audit; do not treat old screenshots as current acceptance evidence | superseded |
 | Project list delete confirmation uses shared `DeleteConfirmDialog` | source assertions | pass |
 | Delete confirmation shows impact, reversibility, retry/failure state | source assertions, use-case/API tests | pass |
 | Recent-list removal is reversible and does not delete local files | `tests/vn-maker-use-cases.test.mjs`, `tests/vn-maker-alpha-sandbox.test.mjs` | pass |

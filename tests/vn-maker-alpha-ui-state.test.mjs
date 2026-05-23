@@ -53,12 +53,13 @@ try {
   assert.equal(ready.exportState, "ready");
   assert.match(ready.exportStatus, /내보내기를 실행할 수 있습니다/);
 
-  const blockedBackground = createPreviewExportResetState({
+  const dtoMissing = createPreviewExportResetState({
     project: { ...plannedCgProject, generationJobs: [{ id: "job-bg", kind: "background", status: "planned" }] },
     workflowSummary: null
   });
-  assert.equal(blockedBackground.exportState, "blocked");
-  assert.match(blockedBackground.exportStatus, /완료되지 않은 이미지 작업/);
+  assert.equal(dtoMissing.previewState, "empty");
+  assert.equal(dtoMissing.exportState, "empty");
+  assert.doesNotMatch(dtoMissing.exportStatus, /완료되지 않은 이미지 작업/);
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

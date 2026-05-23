@@ -987,7 +987,6 @@ a {
 
 .content-list,
 .recent-project-list,
-.project-tab-list,
 .tab-list {
   min-width: 0;
   display: grid;
@@ -997,7 +996,7 @@ a {
 .content-list-item {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   border: 1px solid #3a3730;
@@ -1006,12 +1005,64 @@ a {
   background: #0f0f0d;
 }
 
-.content-list-item.with-leading {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+.content-list-status {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  border: 1px solid #3a3730;
+  border-radius: 8px;
+  padding: 14px;
+  background: #0f0f0d;
 }
 
-.content-list-item[role="button"] {
+.content-list-status p {
+  margin: 0;
+  color: #d8d0c2;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.content-list-status-error {
+  border-color: #d66b5f;
+}
+
+.content-list-status-loading,
+.content-list-status-busy {
+  border-color: #5eead4;
+}
+
+.content-list-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.content-list-select {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.content-list-select.with-leading {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.content-list-select.selectable {
   cursor: pointer;
+}
+
+.content-list-select:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid #5eead4;
+  outline-offset: 3px;
 }
 
 .content-list-item.missing,
@@ -1020,7 +1071,7 @@ a {
 }
 
 .content-list-item:hover,
-.content-list-item:focus-visible {
+.content-list-item:focus-within {
   border-color: #5eead4;
   outline: none;
 }
@@ -1135,101 +1186,6 @@ a {
   font-size: 0.9rem;
 }
 
-.recent-project-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(240px, auto);
-  align-items: center;
-  gap: 12px;
-  border: 1px solid #3a3730;
-  border-radius: 8px;
-  padding: 12px;
-  background: #0f0f0d;
-  cursor: pointer;
-}
-
-.recent-project-row.missing {
-  border-color: #d66b5f;
-}
-
-.recent-project-row:hover,
-.recent-project-row:focus-visible {
-  border-color: #5eead4;
-  outline: none;
-}
-
-.recent-project-main {
-  min-width: 0;
-  display: grid;
-  gap: 5px;
-}
-
-.recent-project-main strong,
-.recent-project-main span,
-.recent-project-main small {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.recent-project-main small {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  color: #bfb6a8;
-}
-
-.recent-project-state,
-.recent-project-actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.recent-project-menu {
-  position: relative;
-}
-
-.recent-project-menu summary {
-  min-width: 44px;
-  min-height: 44px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid #565147;
-  border-radius: 7px;
-  color: #fbf7ef;
-  background: #24221e;
-  cursor: pointer;
-  list-style: none;
-}
-
-.recent-project-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.recent-project-menu-actions {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 4;
-  display: grid;
-  gap: 6px;
-  min-width: 220px;
-  padding: 6px;
-  border: 1px solid #3a3730;
-  border-radius: 8px;
-  background: #191814;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
-}
-
-.recent-project-menu-actions .button {
-  justify-content: flex-start;
-  width: 100%;
-}
-
 .state-chip {
   min-height: 28px;
   display: inline-flex;
@@ -1250,12 +1206,10 @@ a {
   color: #ffd7d2;
 }
 
-.project-tab-list,
 .tab-list {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
-.project-tab,
 .tab-list-item {
   min-height: 38px;
   display: inline-flex;
@@ -1271,8 +1225,6 @@ a {
   overflow-wrap: anywhere;
 }
 
-.project-tab.active,
-.project-tab:hover,
 .tab-list-item.active,
 .tab-list-item:hover,
 .tab-list-item:focus-visible {
@@ -2016,20 +1968,17 @@ pre {
   .page-hero,
   .topbar-meta,
   .content-list-item,
-  .content-list-item.with-leading,
-  .recent-project-row {
+  .content-list-select,
+  .content-list-select.with-leading {
     grid-template-columns: 1fr;
   }
 
   .content-list-state,
   .content-list-actions,
-  .recent-project-toolbar,
-  .recent-project-state,
-  .recent-project-actions {
+  .recent-project-toolbar {
     justify-content: flex-start;
   }
 
-  .project-tab-list,
   .tab-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -2126,7 +2075,6 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .project-tab-list,
   .tab-list {
     grid-template-columns: 1fr 1fr;
   }

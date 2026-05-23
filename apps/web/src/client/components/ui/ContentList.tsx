@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 export interface ContentListItem {
   id: string;
@@ -14,56 +14,93 @@ export interface ContentListItem {
   tone?: "default" | "danger";
 }
 
+export interface ContentListState {
+  action?: ReactNode;
+  description?: ReactNode;
+  kind: "loading" | "empty" | "error" | "busy";
+  title: ReactNode;
+}
+
 interface ContentListProps {
   ariaLabel: string;
+  busy?: boolean;
   items: ContentListItem[];
+  state?: ContentListState;
 }
 
-function handleSelectKey(event: KeyboardEvent<HTMLElement>, onSelect?: () => void): void {
-  if (!onSelect || (event.key !== "Enter" && event.key !== " ")) {
-    return;
+function statusRole(kind: ContentListState["kind"]): "alert" | "status" | undefined {
+  if (kind === "error") {
+    return "alert";
   }
-  event.preventDefault();
-  onSelect();
+  if (kind === "loading" || kind === "busy") {
+    return "status";
+  }
+  return undefined;
 }
 
-export function ContentList({ ariaLabel, items }: ContentListProps) {
+export function ContentList({ ariaLabel, busy = false, items, state }: ContentListProps) {
+  if (state) {
+    const className = ["content-list-status", `content-list-status-${state.kind}`].join(" ");
+    return (
+      <div aria-busy={busy || state.kind === "loading" || state.kind === "busy"} aria-label={ariaLabel} className="content-list">
+        <div className={className} role={statusRole(state.kind)}>
+          <strong>{state.title}</strong>
+          {state.description ? <p>{state.description}</p> : null}
+          {state.action ? <div className="content-list-status-actions">{state.action}</div> : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div aria-label={ariaLabel} className="content-list">
+    <div aria-busy={busy} aria-label={ariaLabel} className="content-list" role="list">
       {items.map((item) => {
         const selectable = Boolean(item.onSelect);
         const className = [
           "content-list-item",
-          item.leading ? "with-leading" : "",
+          item.actions ? "with-actions" : "",
           item.tone === "danger" ? "danger" : "",
           item.className || ""
         ].filter(Boolean).join(" ");
-
-        return (
-          <article
-            aria-label={item.ariaLabel}
-            className={className}
-            key={item.id}
-            onClick={item.onSelect}
-            onKeyDown={(event) => handleSelectKey(event, item.onSelect)}
-            role={selectable ? "button" : "listitem"}
-            tabIndex={selectable ? 0 : undefined}
-          >
-            {item.leading ? <div className="content-list-leading">{item.leading}</div> : null}
-            <div className="content-list-main">
+        const selectClassName = [
+          "content-list-select",
+          item.leading ? "with-leading" : "",
+          selectable ? "selectable" : ""
+        ].filter(Boolean).join(" ");
+        const itemContent = (
+          <>
+            {item.leading ? <span className="content-list-leading">{item.leading}</span> : null}
+            <span className="content-list-main">
               <strong>{item.title}</strong>
               {item.description ? <span>{item.description}</span> : null}
               {item.meta ? <small>{item.meta}</small> : null}
-            </div>
-            {item.state ? <div className="content-list-state">{item.state}</div> : null}
-            {item.actions ? (
-              <div
-                className="content-list-actions"
-                onClick={(event) => event.stopPropagation()}
-                onKeyDown={(event) => event.stopPropagation()}
+            </span>
+            {item.state ? <span className="content-list-state">{item.state}</span> : null}
+          </>
+        );
+
+        return (
+          <article
+            className={className}
+            key={item.id}
+            role="listitem"
+          >
+            {selectable ? (
+              <button
+                aria-label={item.ariaLabel}
+                type="button"
+                className={selectClassName}
+                onClick={item.onSelect}
               >
-                {item.actions}
+                {itemContent}
+              </button>
+            ) : (
+              <div aria-label={item.ariaLabel} className={selectClassName}>
+                {itemContent}
               </div>
+            )}
+            {item.actions ? (
+              <div className="content-list-actions">{item.actions}</div>
             ) : null}
           </article>
         );

@@ -616,6 +616,36 @@ const apiLogin = await mockApi({
 assert.equal(apiLogin.status, 200);
 assert.equal(apiLogin.body.login.userCode, "ABCD-1234");
 
+const invalidJsonProjectDirectory = join(tempRoot, "InvalidJsonShouldNotCreate.vnmaker");
+const invalidJsonApi = webHandlers.createApiApp({
+  codex: mockCodex,
+  projectDirectory: invalidJsonProjectDirectory,
+  recentProjectIndexFile: apiRecentProjectIndexFile
+});
+const invalidJsonResponse = await invalidJsonApi.request("http://127.0.0.1/api/projects", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: "{not valid json"
+});
+const invalidJsonBody = await invalidJsonResponse.json();
+assert.equal(invalidJsonResponse.status, 400);
+assert.equal(invalidJsonBody.ok, false);
+assert.equal(invalidJsonBody.code, "PROJECT_INPUT_INVALID");
+assert.equal(invalidJsonBody.message, "JSON 입력을 해석하지 못했습니다.");
+assert.equal(invalidJsonBody.nextAction, "입력값을 확인한 뒤 다시 시도하세요.");
+assert.equal(existsSync(join(invalidJsonProjectDirectory, "project.sqlite")), false);
+
+const cliInvalidJson = spawnSync(process.execPath, ["packages/cli/dist/index.js", "create-project"], {
+  input: "{not valid json",
+  encoding: "utf8"
+});
+assert.notEqual(cliInvalidJson.status, 0);
+const cliInvalidJsonBody = JSON.parse(cliInvalidJson.stdout);
+assert.equal(cliInvalidJsonBody.ok, false);
+assert.equal(cliInvalidJsonBody.code, "PROJECT_INPUT_INVALID");
+assert.equal(cliInvalidJsonBody.message, invalidJsonBody.message);
+assert.equal(cliInvalidJsonBody.nextAction, invalidJsonBody.nextAction);
+
 const apiRecentCreated = await mockApi({
   method: "POST",
   path: "/api/projects",
@@ -633,7 +663,7 @@ assert.equal(apiRecentCreated.body.project.id, "api-recent");
 
 const apiRecentList = await mockApi({
   method: "POST",
-  path: "/api/projects/recent/list",
+  path: "/api/projects/list",
   body: {}
 });
 assert.equal(apiRecentList.status, 200);
@@ -650,13 +680,23 @@ assert.equal(apiRecentOpened.body.projectDirectory, apiRecentDirectory);
 
 const apiRecentRemoved = await mockApi({
   method: "POST",
-  path: "/api/projects/recent/remove",
+  path: "/api/projects/remove",
   body: { projectId: "api-recent" }
 });
 assert.equal(apiRecentRemoved.status, 200);
 assert.equal(apiRecentRemoved.body.projects.some((entry) => entry.projectId === "api-recent"), false);
 assert.equal(apiRecentRemoved.body.deletionPolicy.mode, "recentIndexOnly");
 assert.equal(existsSync(join(apiRecentDirectory, "project.sqlite")), true);
+const apiRecentMiss = await mockApi({
+  method: "POST",
+  path: "/api/projects/open",
+  body: { projectId: "api-recent" }
+});
+assert.equal(apiRecentMiss.status, 404);
+assert.equal(apiRecentMiss.body.ok, false);
+assert.equal(apiRecentMiss.body.code, "RECENT_PROJECT_INDEX_MISS");
+assert.equal(apiRecentMiss.body.message, "프로젝트 목록에서 찾을 수 없습니다. 프로젝트 디렉터리를 다시 열어 주세요.");
+assert.equal(apiRecentMiss.body.nextAction, "프로젝트 디렉터리를 다시 열어 주세요.");
 
 const apiDeleteDirectory = join(tempRoot, "Issue20ApiDelete.vnmaker");
 const apiDeleteCreate = await mockApi({

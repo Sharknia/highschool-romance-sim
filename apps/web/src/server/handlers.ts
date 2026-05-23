@@ -11,6 +11,7 @@ import { sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSessi
 import { resolveProjectWorkspacePaths } from "@vn-maker/project-store";
 import {
   createVnMakerUseCases,
+  createProjectJsonParseFailureError,
   heroineFailureStatus,
   InputValidationError,
   isHeroineActionFailure,
@@ -157,7 +158,7 @@ async function readRequestJson(context: { req: { json(): Promise<unknown> } }): 
   try {
     return await context.req.json();
   } catch {
-    return undefined;
+    throw createProjectJsonParseFailureError();
   }
 }
 
@@ -196,8 +197,7 @@ async function jsonBodyRoute(
   operation: (body: unknown) => Promise<unknown> | unknown,
   action?: MakerActionId
 ): Promise<Response> {
-  const body = await readRequestJson(context);
-  return jsonRoute(() => operation(body), action);
+  return jsonRoute(async () => operation(await readRequestJson(context)), action);
 }
 
 class ApiServices {
@@ -298,8 +298,16 @@ class ApiServices {
     return this.useCases.listRecentProjects();
   }
 
+  listProjects(): Promise<Record<string, unknown>> {
+    return this.useCases.listProjects();
+  }
+
   removeRecentProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.removeRecentProject(body);
+  }
+
+  removeProject(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.removeProject(body);
   }
 
   deleteProjectWorkspace(body: unknown): Promise<unknown> {
@@ -308,6 +316,10 @@ class ApiServices {
 
   restoreRecentProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.restoreRecentProject(body);
+  }
+
+  restoreProject(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.restoreProject(body);
   }
 
   saveCharacter(body: unknown): Promise<Record<string, unknown>> {
@@ -402,6 +414,9 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/projects", (context) => jsonBodyRoute(context, (body) => services.createProject(body), "createProject"));
   app.post("/api/projects/open", (context) => jsonBodyRoute(context, (body) => services.openProject(body), "openProject"));
   app.post("/api/projects/reconnect", (context) => jsonBodyRoute(context, (body) => services.reconnectRecentProject(body), "reconnectRecentProject"));
+  app.post("/api/projects/list", () => jsonRoute(() => services.listProjects(), "listProjects"));
+  app.post("/api/projects/remove", (context) => jsonBodyRoute(context, (body) => services.removeProject(body), "removeProject"));
+  app.post("/api/projects/restore", (context) => jsonBodyRoute(context, (body) => services.restoreProject(body), "restoreProject"));
   app.post("/api/projects/recent/list", () => jsonRoute(() => services.listRecentProjects(), "listRecentProjects"));
   app.post("/api/projects/recent/remove", (context) => jsonBodyRoute(context, (body) => services.removeRecentProject(body), "removeRecentProject"));
   app.post("/api/projects/delete", (context) => jsonBodyRoute(context, (body) => services.deleteProjectWorkspace(body), "deleteProjectWorkspace"));
