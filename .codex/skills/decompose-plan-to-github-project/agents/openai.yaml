@@ -1,0 +1,4 @@
+interface:
+  display_name: "Decompose Plan to GitHub Project"
+  short_description: "기획 문서를 Project 작업 단위로 분해합니다"
+  default_prompt: "Use $decompose-plan-to-github-project to decompose this planning document into GitHub Project-first parent items and child Issues; stop if Project access is missing, do not create standalone Issues, and record predecessor/successor dependencies."
