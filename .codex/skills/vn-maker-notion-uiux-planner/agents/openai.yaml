@@ -1,0 +1,4 @@
+interface:
+  display_name: "VN Maker Notion UI/UX Planner"
+  short_description: "Draft VN Maker UI/UX plans in Notion"
+  default_prompt: "Use $vn-maker-notion-uiux-planner to turn my VN Maker idea into a Notion UI/UX planning document."
