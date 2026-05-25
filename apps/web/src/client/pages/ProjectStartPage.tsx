@@ -2,7 +2,7 @@ import { Plus, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { Button, DeleteConfirmDialog, StatusBanner } from "../components/ui";
+import { Button, DeleteConfirmDialog, StatusBanner, StatusRegion } from "../components/ui";
 import { useWorkspaceShell } from "../components/WorkspaceLayout";
 import { ProjectDetailView } from "./projects/ProjectDetailView";
 import { ProjectList } from "./projects/RecentProjectList";
@@ -475,17 +475,19 @@ export function ProjectStartPage() {
     />
   ) : null;
   const projectStatusBanner = (
-    <StatusBanner tone={statusTone(status)}>
-      <span className="page-status">{status}</span>
-      {deleteError && deleteErrorSource === "list" ? (
-        <span className="page-status">{deleteError}</span>
-      ) : null}
-      {removedProject ? (
-        <Button disabled={busy} onClick={() => void restoreProjectListEntry()} variant="ghost">
-          되돌리기
-        </Button>
-      ) : null}
-    </StatusBanner>
+    <StatusRegion>
+      <StatusBanner tone={statusTone(status)}>
+        <span className="page-status">{status}</span>
+        {deleteError && deleteErrorSource === "list" ? (
+          <span className="page-status">{deleteError}</span>
+        ) : null}
+        {removedProject ? (
+          <Button disabled={busy} onClick={() => void restoreProjectListEntry()} variant="ghost">
+            되돌리기
+          </Button>
+        ) : null}
+      </StatusBanner>
+    </StatusRegion>
   );
 
   return (

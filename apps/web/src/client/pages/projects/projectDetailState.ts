@@ -12,6 +12,7 @@ export interface PreviewExportResetInput {
 export interface PreviewExportResetState {
   previewState: PreviewResetState;
   previewStatus: string;
+  previewCanRun: boolean;
   exportState: ExportResetState;
   exportStatus: string;
 }
@@ -30,6 +31,9 @@ function exportStateFrom(value: unknown, blocked: boolean): ExportResetState {
   if (blocked) {
     return "blocked";
   }
+  if (value === "complete") {
+    return "completed";
+  }
   if (typeof value === "string" && exportStates.has(value)) {
     return value as ExportResetState;
   }
@@ -47,8 +51,10 @@ export function createPreviewExportResetState(input: PreviewExportResetInput): P
   const exportBlocked = Boolean(blockedReason || input.workflowSummary?.exportState === "blocked");
   const previewState = previewStateFrom(input.workflowSummary?.previewState);
   const exportState = exportStateFrom(input.workflowSummary?.exportState, exportBlocked);
+  const previewCanRun = hasProject && (previewState === "ready" || previewState === "stale");
   return {
     previewState,
+    previewCanRun,
     previewStatus: input.previewStatus || (hasProject ? "프로젝트 변경 후 프리뷰가 아직 생성되지 않았습니다." : "프리뷰 생성 전입니다."),
     exportState,
     exportStatus: !hasProject || !hasWorkflowSummary

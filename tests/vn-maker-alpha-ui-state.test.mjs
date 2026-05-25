@@ -51,13 +51,28 @@ try {
     }
   });
   assert.equal(ready.exportState, "ready");
+  assert.equal(ready.previewCanRun, true);
   assert.match(ready.exportStatus, /내보내기를 실행할 수 있습니다/);
+
+  const completedAlias = createPreviewExportResetState({
+    project: { ...plannedCgProject, generationJobs: [{ id: "job-cg", kind: "cg", status: "completed" }] },
+    workflowSummary: {
+      previewState: "ready",
+      exportState: "complete",
+      generationState: "completed",
+      blockingIssues: []
+    }
+  });
+  assert.equal(completedAlias.exportState, "completed");
+  assert.equal(completedAlias.previewCanRun, true);
+  assert.match(completedAlias.exportStatus, /내보내기를 실행할 수 있습니다|완료/);
 
   const dtoMissing = createPreviewExportResetState({
     project: { ...plannedCgProject, generationJobs: [{ id: "job-bg", kind: "background", status: "planned" }] },
     workflowSummary: null
   });
   assert.equal(dtoMissing.previewState, "empty");
+  assert.equal(dtoMissing.previewCanRun, false);
   assert.equal(dtoMissing.exportState, "empty");
   assert.doesNotMatch(dtoMissing.exportStatus, /완료되지 않은 이미지 작업/);
 } finally {

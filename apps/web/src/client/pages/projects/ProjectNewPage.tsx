@@ -2,7 +2,7 @@ import { ArrowLeft, Database, FolderOpen, Save, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, StatusBanner } from "../../components/ui";
+import { Button, StatusBanner, StatusRegion } from "../../components/ui";
 import { useWorkspaceShell } from "../../components/WorkspaceLayout";
 import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePageTypes";
 import type { ProjectApiResult } from "./projectPageTypes";
@@ -183,9 +183,11 @@ export function ProjectNewPage() {
         </div>
       </header>
 
-      <StatusBanner tone={statusTone(status)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
+      <StatusRegion>
+        <StatusBanner tone={statusTone(status)}>
+          <span className="page-status">{status}</span>
+        </StatusBanner>
+      </StatusRegion>
 
       <section className="page-panel-grid project-new-grid">
         <article className="page-panel">
