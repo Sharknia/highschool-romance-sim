@@ -12,11 +12,13 @@ Use this structure when creating or updating a Notion planning document for VN M
 - 대상 사용자
 - 사용자가 얻게 되는 결과
 - 현재 확정/가정/미정 구분
+- 연결된 Project item
 
 ## 2. 문제와 기회
 
 - 사용자가 지금 겪는 문제
 - 기존 화면 또는 흐름이 있다면 관찰 근거
+- 화면 캡처나 브라우저 관찰이 있다면 대표 근거 매핑
 - 제품 기준과 충돌하는 레거시 해석
 - 이번 기획으로 해결하지 않는 것
 
@@ -70,6 +72,7 @@ For each screen or state:
 - 사용자가 완료할 수 있는 happy path
 - 차단/오류/빈 상태 기준
 - 반응형 기준
+- 스크린샷 또는 브라우저 QA 기준
 - 접근성 또는 문구 기준
 - 회귀하면 안 되는 레거시 흐름
 
@@ -87,8 +90,18 @@ For each screen or state:
 - 실제 연동 검증이 필요한 사항
 - 후속 기획으로 넘길 사항
 
+## 11. 완료 리뷰
+
+- 요청 범위가 모두 반영됐는지
+- 데스크톱/모바일 근거가 충분한지
+- 목 테스트와 실제 실행이 구분됐는지
+- Project item이 갱신됐는지
+- 완료/부분/미완료 판단
+- 최종 보고에 포함할 핵심 요약
+
 ## Evidence Rules
 
 - Existing UI claims need file references, screenshots, browser observations, or Notion/GitHub Project references.
 - Do not report mock generation, mocked API responses, or sandbox data as real Codex app-server success.
 - If Notion, GitHub Project, CLI, API, or browser access is unavailable, write the planning document as far as possible and record the blocked step explicitly.
+- Final reports must summarize the planning content, not only Notion URLs or artifact paths.

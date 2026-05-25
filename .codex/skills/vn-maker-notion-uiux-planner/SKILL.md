@@ -1,6 +1,6 @@
 ---
 name: vn-maker-notion-uiux-planner
-description: Create or update Notion UI/UX planning documents for this VN Maker repository when the user describes a product idea, feature idea, UX improvement, screen flow, maker workflow, or asks Codex to turn an idea into a planning document. Use for project-scoped planning work that should respect AGENTS.md, GitHub Projects #4, the VN Maker Core + CLI + Web App + Codex OAuth + generation adapter architecture, and Notion as the planning source of truth.
+description: Use when the user asks for a VN Maker Notion UI/UX planning document, product or feature planning from an idea, existing screen audit, maker workflow design, screen flow planning, or implementation-ready UX specification for this repository.
 ---
 
 # VN Maker Notion UI/UX Planner
@@ -10,12 +10,17 @@ description: Create or update Notion UI/UX planning documents for this VN Maker 
 1. Read the local project rules first: `AGENTS.md`, then `docs/vn-maker-toolkit.md`, and `docs/architecture-decisions.md` only if DB, backend, packaging, or app-shell decisions are involved.
 2. Use GitHub Project #4 before writing the document. Find a matching item or create a draft item; do not substitute an Issue unless the user explicitly asks for it.
 3. Treat the user's idea as a planning request, not an implementation request. Do not edit app code unless the user separately asks for implementation.
-4. If the idea is underspecified, make conservative product assumptions and record them in the Notion document. Ask the user only when a missing decision changes the product direction or architecture boundary.
-5. Gather evidence from the repo when the plan touches existing UI or flows. Prefer `rg`, targeted file reads, and browser screenshots when visual audit is part of the request.
-6. Write the Notion document under the VN Maker planning context. Use the template in `references/notion-planning-template.md`.
-7. Keep the document implementation-ready: include goals, non-goals, user journey, information architecture, screen states, data/API boundaries, generation behavior, acceptance criteria, validation plan, risks, and follow-up work.
-8. Update the Project item with the Notion URL, progress, blockers, and verification notes.
-9. Report in Korean to `주인님` with what was created, what is partial, what was not done, validation performed, and whether any commit/push happened.
+4. Choose the operating mode:
+   - Idea-to-plan: turn a new product or feature idea into a Notion planning document.
+   - UI/UX audit-to-plan: inspect existing screens, gather desktop/mobile evidence, then create the planning document. Load `references/uiux-audit-workflow.md`.
+5. If the idea is underspecified, make conservative product assumptions and record them in the Notion document. Ask the user only when a missing decision changes the product direction or architecture boundary.
+6. Write a short execution plan before creating the Notion document. Review the plan against the user request and project rules before proceeding.
+7. Gather evidence from the repo when the plan touches existing UI or flows. Prefer `rg`, targeted file reads, and browser screenshots when visual audit is part of the request.
+8. Write the Notion document under the VN Maker planning context. Use the template in `references/notion-planning-template.md`.
+9. Keep the document implementation-ready: include goals, non-goals, user journey, information architecture, screen states, data/API boundaries, generation behavior, acceptance criteria, validation plan, risks, and follow-up work.
+10. Run the completion review gate before reporting: verify request coverage, evidence coverage, project rule compliance, mock-vs-real labels, implementation readiness, unresolved blockers, and follow-up items.
+11. Update the Project item with the Notion URL, progress, blockers, and verification notes.
+12. Report in Korean to `주인님` only after the completion review gate passes or a blocker is explicit. Include what the document actually says, not only links or file paths.
 
 ## Project Rules
 
@@ -30,3 +35,18 @@ description: Create or update Notion UI/UX planning documents for this VN Maker 
 Load `references/notion-planning-template.md` before drafting the Notion document.
 
 For small ideas, keep the Notion document compact but preserve the section order. For large ideas, split implementation work into GitHub Project items after the plan is approved or when the user asks.
+
+## Completion Gate
+
+Do not final-report just because a Notion page exists. Final-report only when one of these is true:
+
+- Complete: the Notion plan covers the request, the evidence is recorded, Project item is updated, and the review gate has no blocking gaps.
+- Partial: the Notion plan is useful but a named dependency is unavailable, such as Notion access, browser execution, GitHub Project permission, or real Codex app-server execution.
+- Blocked: the same required external dependency prevents meaningful progress.
+
+The final report must include:
+
+- Notion document title and URL.
+- Project item URL and status.
+- A concise summary of the plan content: goals, target user, core flow, major screen changes, architecture/data boundary, generation behavior, acceptance criteria, and risks.
+- Done, partial, not done, verification commands or observations, mock checks versus real execution, and commit/push status.
