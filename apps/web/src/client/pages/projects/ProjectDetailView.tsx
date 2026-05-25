@@ -21,7 +21,15 @@ import {
   type ProjectTabId,
   type ProjectWorkflowSummary
 } from "./projectPageTypes";
-import { createPreviewExportResetState } from "./projectDetailState";
+import {
+  createExportPlanFallback,
+  createPreviewExportResetState,
+  createPreviewReadinessFallback,
+  emptyExportPlan,
+  emptyPreviewReadiness,
+  primaryActionDisplayLabel,
+  primaryActionTabFromSummary
+} from "./projectDetailState";
 
 interface ProjectDetailViewProps {
   activeTab: ProjectTabId;
@@ -39,54 +47,17 @@ type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "pa
 type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
 type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
 
+const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
+
 const emptyWorkflowSummary: ProjectWorkflowSummary = {
   primaryAction: "goToHeroine",
-  primaryLabel: "프로젝트 상태 DTO를 기다리는 중입니다.",
+  primaryLabel: "프로젝트 제작 상태를 확인하세요.",
   blockingIssues: [],
   validationState: "unknown",
   generationState: "empty",
   previewState: "empty",
   exportState: "empty",
   steps: []
-};
-
-const emptyPreviewReadiness: ProjectPreviewReadiness = {
-  state: "blocked",
-  availableState: "empty",
-  canRun: false,
-  requiredData: {
-    heroine: "missing",
-    background: "missing",
-    event: "missing",
-    validation: "unknown",
-    generationJobs: "unknown"
-  },
-  missingItems: [],
-  blockingIssues: [],
-  nextActions: [],
-  failureCause: "프로젝트 상태 DTO를 기다리는 중입니다.",
-  retryable: false,
-  nextAction: "프로젝트를 먼저 열어 주세요."
-};
-
-const emptyExportPlan: ProjectExportPlan = {
-  state: "blocked",
-  canExport: false,
-  target: "localDesktopWebApp",
-  githubPagesTarget: false,
-  validationSummary: {
-    ok: false,
-    issueCount: 0,
-    errors: [],
-    warnings: []
-  },
-  includedData: [],
-  includedAssets: [],
-  blockers: [],
-  warnings: [],
-  failureCause: "프로젝트 상태 DTO를 기다리는 중입니다.",
-  retryable: false,
-  nextAction: "프로젝트를 먼저 열어 주세요."
 };
 
 function stateLabel(value?: string): string {
@@ -132,6 +103,9 @@ function tabShellStatus(tab: ProjectTabId, summary: ProjectWorkflowSummary, proj
   }
   if (tab === "export") {
     return stateLabel(summary.exportState);
+  }
+  if (tab === "studio") {
+    return "준비 중";
   }
   const step = summary.steps?.find((item) => item.id === tab);
   return workflowStepStateLabel(step?.state);
@@ -240,9 +214,30 @@ function previewStateLabel(value: PreviewState): string {
 
 function previewReadinessStateLabel(value?: string): string {
   if (value === "prepared") return "준비됨";
+  if (value === "ready") return "준비됨";
+  if (value === "empty") return "확인 전";
+  if (value === "stale") return "다시 확인 필요";
   if (value === "running") return "생성 중";
   if (value === "failed") return "실패";
   if (value === "blocked") return "차단";
+  return value || "확인 전";
+}
+
+function requiredDataNameLabel(name: string): string {
+  if (name === "heroine") return "히로인";
+  if (name === "background") return "배경";
+  if (name === "event") return "장면";
+  if (name === "validation") return "검증";
+  if (name === "generationJobs") return "이미지 작업";
+  return name;
+}
+
+function requiredDataValueLabel(value?: string): string {
+  if (value === "ready" || value === "valid" || value === "completed") return "준비됨";
+  if (value === "missing") return "필요";
+  if (value === "waiting" || value === "planned" || value === "running") return "진행 중";
+  if (value === "error" || value === "failed" || value === "blocked") return "확인 필요";
+  if (value === "empty" || value === "unknown") return "확인 전";
   return value || "확인 전";
 }
 
@@ -255,20 +250,50 @@ function exportStateLabel(value: ExportState): string {
   return "준비됨";
 }
 
-function tabFromAction(action?: string): ProjectTabId {
-  if (action === "goToHeroine") return "heroine";
-  if (action === "goToBackground") return "background";
-  if (action === "goToStudio") return "studio";
-  if (action === "goToExport") return "export";
-  return "preview";
+function exportPlanStateLabel(value?: string): string {
+  if (value === "ready") return "준비됨";
+  if (value === "blocked") return "차단";
+  if (value === "running") return "실행 중";
+  if (value === "complete" || value === "completed") return "완료";
+  if (value === "failed") return "실패";
+  return "확인 전";
 }
 
-function primaryActionDisplayLabel(tab: ProjectTabId): string {
-  if (tab === "heroine") return "히로인 스냅샷으로 이동";
-  if (tab === "background") return "배경 화면 생성으로 이동";
-  if (tab === "studio") return "제작으로 이동";
-  if (tab === "export") return "내보내기로 이동";
-  return "프리뷰 확인";
+function exportValidationSummaryText(plan: ProjectExportPlan): string {
+  const issueCount = plan.validationSummary?.issueCount ?? 0;
+  const status = plan.validationSummary?.ok ? "검증 통과" : "검증 확인 필요";
+  return issueCount > 0 ? `${status} · 문제 ${issueCount}건` : `${status} · 문제 없음`;
+}
+
+function assetKindSummaryLabel(kind?: string): string {
+  if (kind === "portrait") return "포트레이트";
+  if (kind === "background") return "배경 화면";
+  if (kind === "cg") return "이벤트 CG";
+  return "에셋";
+}
+
+function exportAssetSummaryText(assets?: ProjectAsset[]): string {
+  if (!assets?.length) {
+    return "없음";
+  }
+  const counts = assets.reduce<Record<string, number>>((summary, asset) => {
+    const label = assetKindSummaryLabel(asset.kind);
+    summary[label] = (summary[label] || 0) + 1;
+    return summary;
+  }, {});
+  return Object.entries(counts).map(([label, count]) => `${label} ${count}개`).join(" · ");
+}
+
+function exportBlockerSummaryText(blockers?: ProjectExportPlan["blockers"]): string {
+  if (!blockers?.length) {
+    return "없음";
+  }
+  return blockers.map((blocker) => {
+    if (blocker.kind === "generationJob") {
+      return "필수 이미지 작업이 완료되지 않았습니다.";
+    }
+    return blocker.message || "확인이 필요합니다.";
+  }).join(" · ");
 }
 
 function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): ProjectRuntimeScene | null {
@@ -365,10 +390,15 @@ export function ProjectDetailView({
   const activeBackgroundJob = backgroundJobs.find((job) => job.status !== "completed") || backgroundJobs[0] || null;
   const hasBackgroundAsset = Boolean(currentBackgroundAsset);
   const hasBackgroundJob = backgroundJobs.length > 0;
+  const detailProjectId = projectId || currentProject?.id || "";
+  const primaryActionTab = primaryActionTabFromSummary(summary);
+  const primaryActionLabel = summary.primaryLabel || primaryActionDisplayLabel(primaryActionTab);
+  const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
+  const showHeaderPrimaryAction = Boolean(detailProjectId) && !tabsWithLocalPrimaryAction.has(activeTab);
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
-  const currentPreviewReadiness = previewReadiness || emptyPreviewReadiness;
-  const previewRunBlocked = previewReadiness ? currentPreviewReadiness.canRun === false : !fallbackPreviewCanRun;
-  const currentExportPlan = exportPlan || emptyExportPlan;
+  const currentPreviewReadiness = previewReadiness || createPreviewReadinessFallback(currentProject, summary, hasBackgroundAsset, incompleteImageJobs, primaryActionTab, emptyPreviewReadiness);
+  const previewRunBlocked = currentPreviewReadiness.canRun === false || (!previewReadiness && !fallbackPreviewCanRun && currentPreviewReadiness.canRun !== true);
+  const currentExportPlan = exportPlan || createExportPlanFallback(currentProject, summary, hasBackgroundAsset, incompleteImageJobs, primaryActionTab, emptyExportPlan);
   const previewResolutionActions = [
     ...(currentPreviewReadiness.nextActions || []).map((action) => ({
       label: action.label || "해결 탭으로 이동",
@@ -387,18 +417,6 @@ export function ProjectDetailView({
       : eventState;
   const canExpandEvent = Boolean(assignedHeroine && currentRoute?.id && currentEventScene?.id && eventPrompt.trim() && !pendingPatch && !eventBusy);
   const canApproveEvent = Boolean(pendingPatch && pendingPatch.validation?.ok !== false && !eventBusy);
-  const detailProjectId = projectId || currentProject?.id || "";
-  const primaryActionTab: ProjectTabId = summary.primaryAction === "goToHeroine"
-    ? "heroine"
-    : summary.primaryAction === "goToBackground"
-      ? "background"
-      : summary.primaryAction === "goToStudio"
-        ? "studio"
-        : summary.primaryAction === "goToExport"
-          ? "export"
-          : "preview";
-  const primaryActionLabel = summary.primaryLabel || primaryActionDisplayLabel(primaryActionTab);
-  const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
   const suggestedBackgroundJobId = currentProject?.id ? `job-background-${currentProject.id}` : "job-background";
   const suggestedBackgroundAssetId = currentProject?.id ? `asset-background-${currentProject.id}` : "asset-background";
   const suggestedBackgroundPrompt = [
@@ -869,7 +887,7 @@ export function ProjectDetailView({
         availableState: "failed",
         failureCause: result.error || messages[0] || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.",
         retryable: false,
-        nextAction: "다음 행동: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
+        nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
       });
       setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
       return false;
@@ -942,7 +960,7 @@ export function ProjectDetailView({
         availableState: "failed",
         failureCause: message,
         retryable: true,
-        nextAction: "다음 행동: API 응답과 네트워크 상태를 확인한 뒤 다시 시도하세요."
+        nextAction: "다음 작업: API 응답과 네트워크 상태를 확인한 뒤 다시 시도하세요."
       });
       setPreviewStatus(`프리뷰 생성 실패: ${message}`);
     } finally {
@@ -999,12 +1017,14 @@ export function ProjectDetailView({
           <h2 id="projectDetailTitle">{currentProject?.title || (projectId ? projectId : shellProjectTitle)}</h2>
         </div>
         <StatusChip>{activeTabLabel}</StatusChip>
-        <div className="page-primary-action">
-          <span>{primaryActionLabel}</span>
-          <Button icon={primaryActionTab === "heroine" ? <Heart size={16} /> : <ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${primaryActionTab}`)} variant="primary">
-            {primaryActionLabel}
-          </Button>
-        </div>
+        {showHeaderPrimaryAction ? (
+          <div className="page-primary-action">
+            <span>{primaryActionLabel}</span>
+            <Button icon={primaryActionTab === "heroine" ? <Heart size={16} /> : <ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${primaryActionTab}`)} variant="primary">
+              {primaryActionLabel}
+            </Button>
+          </div>
+        ) : null}
       </div>
       <dl className="summary-list detail-summary">
         <div><dt>현재 상태</dt><dd>{currentProject ? "프로젝트 열림" : "복원 중"}</dd></div>
@@ -1050,7 +1070,7 @@ export function ProjectDetailView({
                   {summary.blockingIssues.map((issue) => <li key={issue}>{issue}</li>)}
                 </ul>
               ) : <p className="page-muted">차단된 항목이 없습니다.</p>}
-              <p className="page-muted">상단 헤더의 기본 액션이 현재 권장 이동을 담당합니다.</p>
+              <p className="page-muted">현재 권장 작업은 이 카드와 관련 탭의 기본 버튼에서 실행합니다.</p>
             </section>
             <section className="detail-card">
               <h3>해결해야 할 차단 항목</h3>
@@ -1178,7 +1198,7 @@ export function ProjectDetailView({
                 <li>분기 편집: 선택지와 엔딩 도달 상태를 시각적으로 조정합니다.</li>
                 <li>장면 구성: 대사, 배경, 캐릭터 표시를 한 장면 단위로 편집합니다.</li>
               </ul>
-              <div className="inline-status">실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
+              <div className="inline-status">제작으로 이동 상태: 준비 중. 실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
             </section>
           </div>
         ) : null}
@@ -1302,13 +1322,13 @@ export function ProjectDetailView({
               <div className={previewState === "failed" || previewState === "blocked" ? "inline-status warning" : "inline-status success"}>
                 {previewStatus}
               </div>
-              <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. availableState: {currentPreviewReadiness.availableState || "unknown"}</p>
+              <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. 현재 상태: {previewReadinessStateLabel(currentPreviewReadiness.availableState || currentPreviewReadiness.state)}</p>
               <dl className="summary-list">
-                <div><dt>previewReadiness</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
-                <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${name}: ${value}`).join(" · ") || "확인 전"}</dd></div>
+                <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
+                <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${requiredDataNameLabel(name)}: ${requiredDataValueLabel(value)}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>
-                <div><dt>다음 행동</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
+                <div><dt>다음 작업</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
               </dl>
               {currentPreviewReadiness.missingItems?.length ? (
                 <div>
@@ -1385,18 +1405,18 @@ export function ProjectDetailView({
               </div>
               <p className="page-muted">내보내기 대상: 로컬 데스크톱형 웹 앱</p>
               <dl className="summary-list">
-                <div><dt>검증 요약</dt><dd>validationSummary {currentExportPlan.validationSummary?.ok ? "통과" : "차단"} · issues {currentExportPlan.validationSummary?.issueCount ?? 0}</dd></div>
+                <div><dt>검증 요약</dt><dd>{exportValidationSummaryText(currentExportPlan)}</dd></div>
                 <div><dt>포함될 프로젝트 데이터</dt><dd>{currentExportPlan.includedData?.join(" · ") || "확인 전"}</dd></div>
-                <div><dt>포함될 에셋</dt><dd>{currentExportPlan.includedAssets?.length ? currentExportPlan.includedAssets.map((asset) => `${asset.kind}:${asset.id}`).join(" · ") : "없음"}</dd></div>
-                <div><dt>차단 항목</dt><dd>{currentExportPlan.blockers?.length ? currentExportPlan.blockers.map((blocker) => blocker.message || blocker.id || blocker.kind).join(" · ") : "없음"}</dd></div>
+                <div><dt>포함될 에셋</dt><dd>{exportAssetSummaryText(currentExportPlan.includedAssets)}</dd></div>
+                <div><dt>차단 항목</dt><dd>{exportBlockerSummaryText(currentExportPlan.blockers)}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentExportPlan.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentExportPlan.retryable ? "가능" : "불필요"}</dd></div>
-                <div><dt>다음 행동</dt><dd>{currentExportPlan.nextAction || "내보내기를 실행하세요."}</dd></div>
+                <div><dt>다음 작업</dt><dd>{currentExportPlan.nextAction || "내보내기를 실행하세요."}</dd></div>
               </dl>
-              <p className="page-muted">실패 상태가 완료 상태로 오인되지 않습니다: {currentExportPlan.state === "failed" || currentExportPlan.state === "blocked" ? "완료 아님" : currentExportPlan.state || "확인 전"}</p>
+              <p className="page-muted">현재 실행 상태: {exportPlanStateLabel(currentExportPlan.state)}</p>
               {incompleteImageJobs.length ? (
                 <ul className="compact-list">
-                  {incompleteImageJobs.map((job) => <li key={job.id}>필수 이미지 미완료: {imageJobKindLabel(job.kind)} · {job.id}</li>)}
+                  {incompleteImageJobs.map((job) => <li key={job.id || job.outputAssetId || imageJobKindLabel(job.kind)}>필수 이미지 미완료: {imageJobKindLabel(job.kind)}</li>)}
                 </ul>
               ) : <p className="page-muted">필수 배경 화면/CG 작업이 완료됐거나 필요하지 않습니다.</p>}
               <div className="button-row">
@@ -1404,15 +1424,15 @@ export function ProjectDetailView({
                   내보내기 실행
                 </Button>
                 <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
-                  다음 action: 프리뷰 확인
+                  다음 작업: 프리뷰 확인
                 </Button>
               </div>
-              <p className="page-muted">EXPORT_BLOCKED 상태는 검증 실패나 필수 이미지 작업 미완료일 때 표시됩니다.</p>
-              <DiagnosticDrawer summary="내보내기 진단">
+              <p className="page-muted">검증 실패나 필수 이미지 작업이 미완료이면 내보내기가 차단됩니다.</p>
+              <DiagnosticDrawer summary="내보내기 세부 진단">
                 <dl className="summary-list">
-                  <div><dt>githubPagesTarget</dt><dd>{String(currentExportPlan.githubPagesTarget)}</dd></div>
-                  <div><dt>레거시 대상</dt><dd>GitHub Pages는 레거시 대상이며 이번 내보내기 대상이 아닙니다.</dd></div>
-                  <div><dt>plan state</dt><dd>{currentExportPlan.state || "확인 전"}</dd></div>
+                  <div><dt>대상</dt><dd>로컬 데스크톱형 웹 앱</dd></div>
+                  <div><dt>계획 상태</dt><dd>{exportPlanStateLabel(currentExportPlan.state)}</dd></div>
+                  <div><dt>포함 데이터</dt><dd>{currentExportPlan.includedData?.join(" · ") || "확인 전"}</dd></div>
                 </dl>
               </DiagnosticDrawer>
             </ReadinessPanel>

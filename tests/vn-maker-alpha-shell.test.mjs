@@ -567,7 +567,7 @@ assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)
   "산출물 위치",
   "실행 확인 결과",
   "필수 이미지 미완료",
-  "다음 action",
+  "다음 작업",
   "개발자 상세",
   "runtime JSON",
   "previewReadiness",
@@ -584,12 +584,11 @@ assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)
   "exportPlan",
   "validationSummary",
   "로컬 데스크톱형 웹 앱",
-  "GitHub Pages는 레거시 대상이며 이번 내보내기 대상이 아닙니다.",
-  "githubPagesTarget",
   "포함될 프로젝트 데이터",
   "포함될 에셋",
   "차단 항목",
-  "실패 상태가 완료 상태로 오인되지 않습니다"
+  "현재 실행 상태",
+  "내보내기가 차단됩니다"
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `ProjectDetailView 프리뷰/내보내기 탭에 '${requiredText}' 흐름이 있어야 합니다.`);
