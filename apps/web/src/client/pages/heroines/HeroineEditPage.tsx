@@ -36,6 +36,7 @@ export function HeroineEditPage() {
   const [draft, setDraft] = useState<HeroineDraft>(() => createEmptyHeroineDraft());
   const [original, setOriginal] = useState<HeroineDraft>(() => createEmptyHeroineDraft());
   const [revision, setRevision] = useState<HeroineRevisionRef | undefined>();
+  const [validationSubmitted, setValidationSubmitted] = useState(false);
   const validationIssues = validateHeroineDraft(draft, "edit");
   const dirty = useMemo(() => editableSnapshot(draft) !== editableSnapshot(original), [draft, original]);
   const canSave = state !== "saving" && dirty && validationIssues.length === 0;
@@ -77,6 +78,9 @@ export function HeroineEditPage() {
 
   async function save(navigateAfterSave = false): Promise<void> {
     if (!canSave) {
+      if (validationIssues.length > 0) {
+        setValidationSubmitted(true);
+      }
       setStatus(actionSummary);
       return;
     }
@@ -165,6 +169,7 @@ export function HeroineEditPage() {
       summary={actionSummary}
       title="히로인 수정"
       titleId="heroineEditTitle"
+      validationSubmitted={validationSubmitted}
     />
   );
 }

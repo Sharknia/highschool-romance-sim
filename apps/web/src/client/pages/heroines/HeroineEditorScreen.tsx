@@ -1,5 +1,5 @@
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { Button, StatusBanner } from "../../components/ui";
+import { Button, StatusBanner, StatusRegion } from "../../components/ui";
 import { HeroineActionBar } from "./HeroineActionBar";
 import { HeroineFormPanel } from "./HeroineFormPanel";
 import { HeroinePortraitPanel } from "./HeroinePortraitPanel";
@@ -34,6 +34,7 @@ interface HeroineEditorScreenProps {
   onReload?: () => void;
   onRetry?: () => void;
   onSaveAndExit?: () => void;
+  validationSubmitted?: boolean;
 }
 
 export function HeroineEditorScreen({
@@ -63,7 +64,8 @@ export function HeroineEditorScreen({
   statusTone,
   summary,
   title,
-  titleId
+  titleId,
+  validationSubmitted = false
 }: HeroineEditorScreenProps) {
   const showEditor = !loading && !notFound && !error;
 
@@ -78,9 +80,11 @@ export function HeroineEditorScreen({
       </header>
 
       {status ? (
-        <StatusBanner tone={statusTone}>
-          <span className="page-status">{status}</span>
-        </StatusBanner>
+        <StatusRegion>
+          <StatusBanner tone={statusTone}>
+            <span className="page-status">{status}</span>
+          </StatusBanner>
+        </StatusRegion>
       ) : null}
 
       {notFound ? (
@@ -102,7 +106,7 @@ export function HeroineEditorScreen({
         <>
           <section className="heroine-editor-layout">
             <article className="page-panel heroine-editor-main">
-              <HeroineFormPanel draft={draft} existingIds={existingIds} mode={mode} onChange={onChange} />
+              <HeroineFormPanel draft={draft} existingIds={existingIds} mode={mode} onChange={onChange} showAllValidationErrors={validationSubmitted} />
             </article>
             <HeroinePortraitPanel
               busy={saving}

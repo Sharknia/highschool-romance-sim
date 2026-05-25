@@ -34,6 +34,7 @@ export function HeroineCreatePage() {
   const [draft, setDraft] = useState<HeroineDraft>(() => createEmptyHeroineDraft());
   const draftRef = useRef(draft);
   const [existingIds, setExistingIds] = useState<string[]>([]);
+  const [validationSubmitted, setValidationSubmitted] = useState(false);
   const [stagedPortraitRef, setStagedPortraitRef] = useState<HeroineLibraryResult["stagedPortraitRef"]>();
   const emptyDraft = useMemo(() => createEmptyHeroineDraft(), []);
   const dirty = editableCreateSnapshot(draft) !== editableCreateSnapshot(emptyDraft);
@@ -81,6 +82,9 @@ export function HeroineCreatePage() {
 
   async function save(navigateAfterSave = false): Promise<void> {
     if (!canSave) {
+      if (allIssues.length > 0) {
+        setValidationSubmitted(true);
+      }
       setStatus(actionSummary);
       return;
     }
@@ -158,6 +162,7 @@ export function HeroineCreatePage() {
       summary={actionSummary}
       title="새 히로인 만들기"
       titleId="heroineCreateTitle"
+      validationSubmitted={validationSubmitted}
     />
   );
 }

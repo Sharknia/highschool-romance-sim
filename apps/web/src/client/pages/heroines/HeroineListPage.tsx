@@ -1,8 +1,8 @@
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Edit3, Eye, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, ContentList, StatusBanner, type ContentListState } from "../../components/ui";
+import { Button, ContentList, StatusBanner, StatusChip, StatusRegion, type ContentListState } from "../../components/ui";
 import { deleteHeroine, failureText, listHeroines } from "./heroineApi";
 import { HeroineDeleteDialog, type HeroineDeleteConfirmation } from "./HeroineDeleteDialog";
 import type { HeroineDraft, HeroineListState } from "./heroinePageTypes";
@@ -125,9 +125,11 @@ export function HeroineListPage() {
         </div>
       </header>
 
-      <StatusBanner tone={statusTone(state)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
+      <StatusRegion>
+        <StatusBanner tone={statusTone(state)}>
+          <span className="page-status">{status}</span>
+        </StatusBanner>
+      </StatusRegion>
 
       {heroineListStateConfig ? (
         <ContentList
@@ -154,15 +156,23 @@ export function HeroineListPage() {
               description: heroine.summary || heroine.description,
               meta: formatUpdatedAt(heroine.updatedAt),
               onSelect: () => navigate(`/heroines/${encodeURIComponent(heroine.id)}`),
+              state: <StatusChip tone={portraitUri ? "success" : "neutral"}>{portraitUri ? "포트레이트 있음" : "원본 정보"}</StatusChip>,
               actions: (
-                <button
-                  aria-label={`${heroine.name} 삭제`}
-                  className="icon-button icon-button-danger"
-                  onClick={() => setDeleteTarget(heroine)}
-                  type="button"
-                >
-                  <Trash2 size={17} aria-hidden="true" />
-                </button>
+                <>
+                  <Button aria-label={`${heroine.name} 상세보기`} icon={<Eye size={16} />} onClick={() => navigate(`/heroines/${encodeURIComponent(heroine.id)}`)}>
+                    상세보기
+                  </Button>
+                  <Button aria-label={`${heroine.name} 수정`} icon={<Edit3 size={16} />} onClick={() => navigate(`/heroines/${encodeURIComponent(heroine.id)}/edit`)} variant="quiet">
+                    수정
+                  </Button>
+                  <Button
+                    aria-label={`${heroine.name} 삭제`}
+                    icon={<Trash2 size={17} />}
+                    iconOnly
+                    onClick={() => setDeleteTarget(heroine)}
+                    variant="danger"
+                  />
+                </>
               )
             };
           })}

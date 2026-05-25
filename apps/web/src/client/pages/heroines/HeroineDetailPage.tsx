@@ -2,7 +2,7 @@ import { ArrowLeft, Database, Edit3, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, StatusBanner } from "../../components/ui";
+import { ActionPanel, Button, DiagnosticDrawer, EntitySummaryHeader, StatusBanner, StatusChip, StatusRegion } from "../../components/ui";
 import { createProjectFromHeroine, deleteHeroine, failureText, getHeroine } from "./heroineApi";
 import { HeroineDeleteDialog, type HeroineDeleteConfirmation } from "./HeroineDeleteDialog";
 import type { HeroineDraft, HeroineLoadState } from "./heroinePageTypes";
@@ -81,9 +81,11 @@ export function HeroineDetailPage() {
         </div>
       </header>
 
-      <StatusBanner tone={statusTone(state)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
+      <StatusRegion>
+        <StatusBanner tone={statusTone(state)}>
+          <span className="page-status">{status}</span>
+        </StatusBanner>
+      </StatusRegion>
 
       {state === "notFound" ? (
         <section className="page-panel">
@@ -104,10 +106,24 @@ export function HeroineDetailPage() {
       {heroine && (state === "ready" || state === "saving" || state === "deleting" || state === "conflict") ? (
         <section className="heroine-detail-layout">
           <article className="page-panel">
-            <h2>원본 정보</h2>
+            <EntitySummaryHeader
+              eyebrow="Library Source"
+              title={heroine.name}
+              status={<StatusChip tone={heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0] ? "success" : "neutral"}>{heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0] ? "포트레이트 있음" : "원본 정보"}</StatusChip>}
+              description={heroine.description}
+              primaryAction={(
+                <Button disabled={state === "saving"} icon={<Database size={16} />} onClick={() => void createProject()} variant="primary">
+                  히로인 기반 프로젝트 생성
+                </Button>
+              )}
+              actions={(
+                <Button icon={<Edit3 size={16} />} onClick={() => navigate(`/heroines/${encodeURIComponent(heroine.id)}/edit`)}>
+                  수정
+                </Button>
+              )}
+            />
+            <h2>캐릭터 정의</h2>
             <dl className="summary-list detail-summary">
-              <div><dt>이름</dt><dd>{heroine.name}</dd></div>
-              <div><dt>설명</dt><dd>{heroine.description}</dd></div>
               <div><dt>성격</dt><dd>{heroine.personality}</dd></div>
               <div><dt>말투</dt><dd>{heroine.speechStyle}</dd></div>
               <div><dt>외형 설명</dt><dd>{heroine.appearance}</dd></div>
@@ -116,23 +132,41 @@ export function HeroineDetailPage() {
             <div className="inline-status">
               이 화면은 라이브러리 원본 히로인을 수정합니다. 이미 만든 프로젝트에 복사된 히로인 스냅샷은 자동으로 바뀌지 않습니다.
             </div>
+            <DiagnosticDrawer summary="히로인 진단 정보">
+              <dl className="summary-list detail-summary">
+                <div><dt>내부 식별자</dt><dd>{heroine.id}</dd></div>
+                <div><dt>revision</dt><dd>{heroine.heroineRevision?.value || "기록 없음"}</dd></div>
+                <div><dt>기본 포트레이트 에셋</dt><dd>{heroine.defaultPortraitAssetId || "없음"}</dd></div>
+              </dl>
+            </DiagnosticDrawer>
           </article>
-          <aside className="page-panel">
-            <h2>작업</h2>
+          <aside>
+            <ActionPanel
+              title="이동"
+              description="목록으로 돌아가거나 라이브러리 원본을 수정합니다."
+            >
             <div className="panel-actions vertical-actions">
               <Button icon={<ArrowLeft size={16} />} onClick={() => navigate("/heroines")}>
                 목록으로 돌아가기
               </Button>
-              <Button icon={<Edit3 size={16} />} onClick={() => navigate(`/heroines/${encodeURIComponent(heroine.id)}/edit`)} variant="primary">
+              <Button icon={<Edit3 size={16} />} onClick={() => navigate(`/heroines/${encodeURIComponent(heroine.id)}/edit`)}>
                 수정
               </Button>
-              <Button disabled={state === "saving"} icon={<Database size={16} />} onClick={() => void createProject()}>
-                히로인 기반 프로젝트 생성
-              </Button>
-              <Button disabled={state === "deleting"} icon={<Trash2 size={16} />} onClick={() => setDeleteOpen(true)}>
+            </div>
+            </ActionPanel>
+            <ActionPanel
+              title="위험 작업"
+              description="삭제는 라이브러리 원본에 영향을 주며, 확인 dialog에서 영향 범위를 다시 확인합니다."
+              tone="danger"
+            >
+            <div className="panel-actions vertical-actions">
+              <Button disabled={state === "deleting"} icon={<Trash2 size={16} />} onClick={() => setDeleteOpen(true)} variant="danger">
                 삭제
               </Button>
             </div>
+            </ActionPanel>
+            <section className="page-panel">
+              <h2>포트레이트</h2>
             {heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0] ? (
               <div className="preview-area portrait-preview">
                 <img alt={`${heroine.name} 기본 포트레이트`} src={heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0]} />
@@ -140,6 +174,7 @@ export function HeroineDetailPage() {
             ) : (
               <div className="portrait-placeholder">기본 포트레이트가 없습니다.</div>
             )}
+            </section>
           </aside>
         </section>
       ) : null}
