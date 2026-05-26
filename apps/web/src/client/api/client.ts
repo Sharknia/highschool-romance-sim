@@ -104,7 +104,7 @@ export async function readCodexSession(): Promise<CodexSessionResult> {
         ok: false,
         connected: false,
         mode: null,
-        error: result.error || "Codex OAuth 상태를 확인할 수 없습니다."
+        error: result.error || "Codex 연결 상태를 확인할 수 없습니다."
       };
     }
 
