@@ -203,7 +203,7 @@ a {
   color: #fbf7ef;
   background: #24221e;
   cursor: pointer;
-  white-space: normal;
+  white-space: nowrap;
   text-align: center;
   line-height: 1.2;
 }
@@ -752,6 +752,11 @@ a {
 .dummy-target-list small,
 .diagnostic-value {
   overflow-wrap: anywhere;
+}
+
+.dummy-fallback-warning .button,
+.asset-job-list .button {
+  white-space: normal;
 }
 
 .job-board {

@@ -955,7 +955,7 @@ export function ProjectDetailView({
       }
       setAssetStatus(result.assets?.length
         ? replaceCompleted ? "실제 이미지 교체 요청이 완료되었습니다. 결과 에셋이 프로젝트에 연결되었습니다." : "이미지 생성 완료. 결과 에셋이 프로젝트에 연결되었습니다."
-        : "완료된 작업은 다시 호출하지 않습니다. 결과 에셋을 유지했습니다.");
+        : replaceCompleted ? "실제 이미지 교체 요청을 완료했으나 연결된 결과 에셋이 없습니다." : "완료된 작업은 다시 호출하지 않습니다. 결과 에셋을 유지했습니다.");
     } catch (error) {
       setAssetStatus(`이미지 만들기 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {

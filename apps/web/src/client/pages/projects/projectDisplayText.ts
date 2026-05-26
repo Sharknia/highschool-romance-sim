@@ -48,11 +48,20 @@ export function generationProviderText(provider?: string): string {
   return "연결된 생성 서비스";
 }
 
+function isProjectGenerationJob(item: ProjectAsset | ProjectGenerationJob): item is ProjectGenerationJob {
+  return "status" in item
+    || "provider" in item
+    || "prompt" in item
+    || "targetId" in item
+    || "outputAssetId" in item
+    || "dummy" in item;
+}
+
 function itemAsset(item: DummyFallbackItem): ProjectAsset | null {
   if (!item) {
     return null;
   }
-  return "asset" in item ? item.asset || null : item;
+  return isProjectGenerationJob(item) ? item.asset || null : item;
 }
 
 function itemFallbackReason(item: DummyFallbackItem): string | undefined {
