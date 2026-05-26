@@ -1028,6 +1028,10 @@ a {
   grid-column: 1 / -1;
 }
 
+.project-detail-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .content-list,
 .recent-project-list,
 .tab-list {
@@ -2334,6 +2338,8 @@ pre {
   }
 
   .tab-list {
+    width: 100%;
+    max-width: 100%;
     display: flex;
     overflow-x: auto;
     padding-bottom: 4px;
@@ -2344,6 +2350,12 @@ pre {
     flex: 0 0 min(160px, 45vw);
     min-width: 136px;
     scroll-snap-align: start;
+  }
+
+  .project-detail-panel,
+  .detail-tab-body {
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .detail-tab-grid {

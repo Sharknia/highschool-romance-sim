@@ -373,10 +373,10 @@ assert.doesNotMatch(overviewBranch, /projectDirectory \|\| "저장 위치 미연
   "kind: \"background\"",
   "/api/generation/jobs",
   "/api/generation/jobs/run",
-  "OAuth",
-  "app-server",
-  "adapter",
-  "응답 파싱",
+  "연결 인증",
+  "생성 서버",
+  "생성 처리",
+  "응답 형식",
   "다시 시도",
   "backgroundAssetId",
   "저장 위치/에셋 연결 상태",
@@ -453,6 +453,11 @@ assert.match(
   clientStylesSource,
   /@media \(max-width: 560px\)[\s\S]*\.tab-list-item\s*{[\s\S]*min-width: 136px/,
   "tab-list는 모바일 폭에서 과도한 줄바꿈을 막는 최소 폭을 가져야 합니다."
+);
+assert.match(
+  clientStylesSource,
+  /@media \(max-width: 560px\)[\s\S]*\.project-detail-panel,\s*\.detail-tab-body\s*{[\s\S]*overflow-x: hidden/,
+  "프로젝트 상세 본문은 모바일 탭 레일 때문에 옆으로 밀리면 안 됩니다."
 );
 assert.match(
   clientStylesSource,

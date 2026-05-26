@@ -13,7 +13,7 @@
     "typecheck": "npm run legacy:typecheck && npm run typecheck:maker",
     "legacy:test": "npm run legacy:build:engine && node tests/engine-regression.test.mjs",
     "test:engine": "npm run legacy:test",
-    "test:maker": "npm run build:maker && node tests/vn-maker-domain.test.mjs && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-beta.test.mjs && node tests/vn-maker-regression.test.mjs && node tests/vn-maker-alpha-sandbox.test.mjs && node tests/vn-maker-alpha-shell.test.mjs && node tests/vn-maker-alpha-ui-state.test.mjs && node tests/vn-maker-uxui-foundation.test.mjs",
+    "test:maker": "npm run build:maker && node tests/vn-maker-domain.test.mjs && node tests/vn-maker-use-cases.test.mjs && node tests/vn-maker-beta.test.mjs && node tests/vn-maker-regression.test.mjs && node tests/vn-maker-alpha-sandbox.test.mjs && node tests/vn-maker-alpha-shell.test.mjs && node tests/vn-maker-alpha-ui-state.test.mjs && node tests/vn-maker-uxui-foundation.test.mjs && node tests/vn-maker-ux-quality-gate.test.mjs",
     "legacy:build:engine": "npx esbuild src/engine/index.ts --bundle --format=iife --global-name=VisualNovelEngine --target=es2018 --outfile=dist/visual-novel-engine.js",
     "build:engine": "npm run legacy:build:engine",
     "build:html": "node scripts/embed-engine.mjs",

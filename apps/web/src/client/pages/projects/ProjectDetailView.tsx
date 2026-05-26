@@ -30,6 +30,15 @@ import {
   primaryActionDisplayLabel,
   primaryActionTabFromSummary
 } from "./projectDetailState";
+import {
+  backgroundAssetDisplayLabel,
+  backgroundConnectionText,
+  backgroundSceneConnectionText,
+  displayWorkflowStep,
+  generationProviderText,
+  imageJobKindLabel,
+  jobStatusLabel
+} from "./projectDisplayText";
 
 interface ProjectDetailViewProps {
   activeTab: ProjectTabId;
@@ -46,8 +55,6 @@ type PendingEventPatch = ProjectApiResult & Required<Pick<ProjectApiResult, "req
 type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "partialFailed";
 type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
 type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
-type WorkflowStep = NonNullable<ProjectWorkflowSummary["steps"]>[number];
-type DisplayWorkflowStep = WorkflowStep & { displayLabel: string; displayState: WorkflowStep["state"] };
 
 const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
 
@@ -84,13 +91,6 @@ function workflowStepStateLabel(value?: string): string {
   if (value === "blocked") return "차단";
   if (value === "waiting") return "대기";
   return "확인 필요";
-}
-
-function displayWorkflowStep(step: WorkflowStep): DisplayWorkflowStep {
-  if (step.id === "studio") {
-    return { ...step, displayLabel: "제작 준비 중", displayState: "waiting" };
-  }
-  return { ...step, displayLabel: step.label, displayState: step.state };
 }
 
 function projectTabFromValue(value?: string): ProjectTabId {
@@ -155,16 +155,6 @@ function isVisualImageJob(job: ProjectGenerationJob): boolean {
   return job.kind === "background" || job.kind === "cg";
 }
 
-function imageJobKindLabel(kind?: string): string {
-  if (kind === "background") {
-    return "배경 화면";
-  }
-  if (kind === "cg") {
-    return "이벤트 CG";
-  }
-  return "이미지";
-}
-
 function assetState(jobs: ProjectGenerationJob[]): AssetState {
   if (jobs.length === 0) return "empty";
   if (jobs.some((job) => job.status === "running")) return "running";
@@ -185,62 +175,13 @@ function assetStateLabel(value: AssetState): string {
   return "완료";
 }
 
-function jobStatusLabel(value?: string): string {
-  if (value === "planned") return "작업 예정";
-  if (value === "running") return "생성 중";
-  if (value === "failed") return "실패";
-  if (value === "completed") return "완료";
-  return value || "확인 필요";
-}
-
-function generationProviderText(provider?: string): string {
-  if (!provider) {
-    return "생성 연결 확인 필요";
-  }
-  if (provider === "codex" || provider === "openai" || provider === "imageGeneration") {
-    return "이미지 생성 연결";
-  }
-  return "연결된 생성 서비스";
-}
-
-function backgroundConnectionText(asset: ProjectAsset | null, job: ProjectGenerationJob | null): string {
-  if (asset?.id) {
-    return "배경 연결됨";
-  }
-  if (job?.status === "completed") {
-    return "생성 결과 확인 필요";
-  }
-  if (job) {
-    return `${imageJobKindLabel(job.kind)} ${jobStatusLabel(job.status)}`;
-  }
-  return "생성 전";
-}
-
-function backgroundSceneConnectionText(scene: NonNullable<ProjectData["scenes"]>[number] | null): string {
-  if (!scene) {
-    return "연결할 장면 없음";
-  }
-  if (scene.backgroundAssetId) {
-    return scene.label ? `${scene.label}에 연결됨` : "기본 장면에 연결됨";
-  }
-  return scene.label ? `${scene.label} 연결 대기` : "기본 장면 연결 대기";
-}
-
-function backgroundAssetDisplayLabel(asset: ProjectAsset): string {
-  const label = asset.label?.trim();
-  if (label && !label.includes("@") && !/fixture|sandbox/i.test(label)) {
-    return label;
-  }
-  return "생성된 배경";
-}
-
-function generationErrorCategory(result: ProjectApiResult): "OAuth" | "app-server" | "adapter" | "응답 파싱" {
-  if (result.code === "OAUTH_REQUIRED" || result.httpStatus === 401) return "OAuth";
-  if (result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE") return "응답 파싱";
+function generationErrorCategory(result: ProjectApiResult): "연결 인증" | "생성 서버" | "생성 처리" | "응답 형식" {
+  if (result.code === "OAUTH_REQUIRED" || result.httpStatus === 401) return "연결 인증";
+  if (result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE") return "응답 형식";
   const message = `${result.message || ""} ${result.error || ""} ${(result.errors || []).join(" ")}`;
-  if (message.includes("OAuth 로그인이 필요")) return "OAuth";
-  if (message.includes("app-server")) return "app-server";
-  return "adapter";
+  if (message.includes("OAuth 로그인이 필요")) return "연결 인증";
+  if (message.includes("app-server")) return "생성 서버";
+  return "생성 처리";
 }
 
 function backgroundAsset(project: ProjectData | null): ProjectAsset | null {
@@ -757,7 +698,7 @@ export function ProjectDetailView({
       setBackgroundStatus(nextJobs.some((job) => job.kind === "background") ? "배경 작업 상태를 불러왔습니다." : "배경 생성 전 확인 정보를 검토하세요.");
     } catch (error) {
       setAssetStatus(`이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
-      setBackgroundStatus(`app-server: 이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setBackgroundStatus(`생성 서버: 이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setAssetBusy(false);
     }
@@ -765,12 +706,12 @@ export function ProjectDetailView({
 
   async function runBackgroundGeneration(): Promise<void> {
     if (!currentProject) {
-      setBackgroundStatus("adapter: 배경을 생성할 프로젝트가 없습니다.");
+      setBackgroundStatus("프로젝트 확인: 배경을 생성할 프로젝트가 없습니다.");
       return;
     }
     const prompt = backgroundPrompt.trim();
     if (!prompt) {
-      setBackgroundStatus("adapter: 생성할 배경 설명을 입력하세요.");
+      setBackgroundStatus("입력 확인: 생성할 배경 설명을 입력하세요.");
       return;
     }
     const jobId = backgroundJobId.trim() || suggestedBackgroundJobId;
@@ -818,7 +759,7 @@ export function ProjectDetailView({
         ? "저장 위치/에셋 연결 상태: 배경 생성 완료. 기본 장면에 연결되었습니다."
         : "저장 위치/에셋 연결 상태: 완료된 배경 결과를 유지했습니다.");
     } catch (error) {
-      setBackgroundStatus(`app-server: 배경 화면 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setBackgroundStatus(`생성 서버: 배경 화면 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
       setBackgroundErrors([error instanceof Error ? error.message : String(error)]);
     } finally {
       setBackgroundBusy(false);
@@ -1316,7 +1257,7 @@ export function ProjectDetailView({
                   {backgroundErrors.map((error) => <li key={error}>{error}</li>)}
                 </ul>
               ) : (
-                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 연결 인증, 생성 서버, 생성 어댑터, 응답 형식 중 하나로 분류됩니다.</p>
+                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 연결 인증, 생성 서버, 생성 처리, 응답 형식 중 하나로 분류됩니다.</p>
               )}
               <dl className="summary-list">
                 <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri ? "생성된 배경 경로는 진단에서 확인" : "생성 전"}</dd></div>
