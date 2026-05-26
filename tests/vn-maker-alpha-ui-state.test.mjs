@@ -51,7 +51,7 @@ try {
     }
   });
   assert.equal(ready.exportState, "ready");
-  assert.equal(ready.previewCanRun, true);
+  assert.equal("previewCanRun" in ready, false);
   assert.match(ready.exportStatus, /내보내기를 실행할 수 있습니다/);
 
   const completedAlias = createPreviewExportResetState({
@@ -64,7 +64,7 @@ try {
     }
   });
   assert.equal(completedAlias.exportState, "completed");
-  assert.equal(completedAlias.previewCanRun, true);
+  assert.equal("previewCanRun" in completedAlias, false);
   assert.match(completedAlias.exportStatus, /내보내기를 실행할 수 있습니다|완료/);
 
   const dtoMissing = createPreviewExportResetState({
@@ -72,7 +72,7 @@ try {
     workflowSummary: null
   });
   assert.equal(dtoMissing.previewState, "empty");
-  assert.equal(dtoMissing.previewCanRun, false);
+  assert.equal("previewCanRun" in dtoMissing, false);
   assert.equal(dtoMissing.exportState, "empty");
   assert.doesNotMatch(dtoMissing.exportStatus, /완료되지 않은 이미지 작업/);
 } finally {

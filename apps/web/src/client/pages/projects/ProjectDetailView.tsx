@@ -22,9 +22,7 @@ import {
   type ProjectWorkflowSummary
 } from "./projectPageTypes";
 import {
-  createExportPlanFallback,
   createPreviewExportResetState,
-  createPreviewReadinessFallback,
   emptyExportPlan,
   emptyPreviewReadiness,
   primaryActionDisplayLabel,
@@ -45,7 +43,9 @@ interface ProjectDetailViewProps {
   currentProject: ProjectData | null;
   onProjectResult: (result: ProjectApiResult) => void;
   projectDirectory: string;
+  projectExportPlan: ProjectExportPlan | null;
   projectId?: string;
+  projectPreviewReadiness: ProjectPreviewReadiness | null;
   shellProjectTitle: string;
   workflowSummary: ProjectWorkflowSummary | null;
 }
@@ -299,7 +299,9 @@ export function ProjectDetailView({
   currentProject: loadedProject,
   onProjectResult,
   projectDirectory,
+  projectExportPlan,
   projectId,
+  projectPreviewReadiness,
   shellProjectTitle,
   workflowSummary
 }: ProjectDetailViewProps) {
@@ -327,7 +329,6 @@ export function ProjectDetailView({
   const [backgroundJobId, setBackgroundJobId] = useState("");
   const [backgroundErrors, setBackgroundErrors] = useState<string[]>([]);
   const [previewState, setPreviewState] = useState<PreviewState>("empty");
-  const [fallbackPreviewCanRun, setFallbackPreviewCanRun] = useState(false);
   const [previewStatus, setPreviewStatus] = useState("프리뷰 생성 전입니다.");
   const [previewRuntime, setPreviewRuntime] = useState<ProjectRuntime | null>(null);
   const [previewSceneId, setPreviewSceneId] = useState("");
@@ -388,9 +389,9 @@ export function ProjectDetailView({
   const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
   const showHeaderPrimaryAction = Boolean(detailProjectId) && !tabsWithLocalPrimaryAction.has(activeTab);
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
-  const currentPreviewReadiness = previewReadiness || createPreviewReadinessFallback(currentProject, summary, hasBackgroundAsset, incompleteImageJobs, primaryActionTab, emptyPreviewReadiness);
-  const previewRunBlocked = currentPreviewReadiness.canRun === false || (!previewReadiness && !fallbackPreviewCanRun && currentPreviewReadiness.canRun !== true);
-  const currentExportPlan = exportPlan || createExportPlanFallback(currentProject, summary, hasBackgroundAsset, incompleteImageJobs, primaryActionTab, emptyExportPlan);
+  const currentPreviewReadiness = previewReadiness || projectPreviewReadiness || emptyPreviewReadiness;
+  const previewRunBlocked = currentPreviewReadiness.canRun !== true;
+  const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
   const previewResolutionActions = [
     ...(currentPreviewReadiness.nextActions || []).map((action) => ({
       label: action.label || "해결 탭으로 이동",
@@ -401,7 +402,7 @@ export function ProjectDetailView({
       tab: projectTabFromValue(item.tab)
     }))
   ].filter((action, index, actions) => actions.findIndex((candidate) => candidate.tab === action.tab) === index);
-  const exportRunReady = Boolean(currentProject && (currentExportPlan.canExport === true || exportState === "ready" || exportState === "completed") && exportState !== "blocked" && exportState !== "failed");
+  const exportRunReady = Boolean(currentProject && currentExportPlan.canExport === true && exportState !== "blocked" && exportState !== "failed");
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -497,7 +498,13 @@ export function ProjectDetailView({
     }
   }, [activeTab, backgroundJobId, backgroundPrompt, currentProject, suggestedBackgroundJobId, suggestedBackgroundPrompt]);
 
-  function resetPreviewAndExportState(input: { previewStatus?: string; project?: ProjectData | null; workflowSummary?: ProjectWorkflowSummary | null } = {}): void {
+  function resetPreviewAndExportState(input: {
+    exportPlan?: ProjectExportPlan | null;
+    previewReadiness?: ProjectPreviewReadiness | null;
+    previewStatus?: string;
+    project?: ProjectData | null;
+    workflowSummary?: ProjectWorkflowSummary | null;
+  } = {}): void {
     const nextState = createPreviewExportResetState({
       project: input.project ?? currentProject,
       workflowSummary: input.workflowSummary ?? workflowSummary,
@@ -506,12 +513,11 @@ export function ProjectDetailView({
     setPreviewRuntime(null);
     setPreviewSceneId("");
     setPreviewIssues([]);
-    setPreviewReadiness(null);
+    setPreviewReadiness(input.previewReadiness || null);
     setPreviewState(nextState.previewState);
-    setFallbackPreviewCanRun(nextState.previewCanRun);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
-    setExportPlan(null);
+    setExportPlan(input.exportPlan || null);
     setSmokeResult(null);
     setExportState(nextState.exportState);
     setExportStatus(nextState.exportStatus);
@@ -521,8 +527,11 @@ export function ProjectDetailView({
     setAssetJobs([]);
     setAssetErrors([]);
     setAssetStatus("배경 화면 작업과 이벤트 CG 작업을 확인합니다.");
-    resetPreviewAndExportState();
-  }, [currentProject?.id]);
+    resetPreviewAndExportState({
+      exportPlan: projectExportPlan,
+      previewReadiness: projectPreviewReadiness
+    });
+  }, [currentProject?.id, projectExportPlan, projectPreviewReadiness]);
 
   useEffect(() => {
     if (activeTab !== "background" || !currentProject) {
@@ -549,6 +558,8 @@ export function ProjectDetailView({
       }
       onProjectResult(result);
       resetPreviewAndExportState({
+        exportPlan: result.exportPlan || null,
+        previewReadiness: result.previewReadiness || null,
         previewStatus: "히로인 변경으로 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
         workflowSummary: result.workflowSummary
@@ -639,6 +650,8 @@ export function ProjectDetailView({
       }
       onProjectResult(result);
       resetPreviewAndExportState({
+        exportPlan: result.exportPlan || null,
+        previewReadiness: result.previewReadiness || null,
         previewStatus: "프로젝트 이벤트가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
         workflowSummary: result.workflowSummary
@@ -744,6 +757,8 @@ export function ProjectDetailView({
       if (run.project) {
         onProjectResult(run);
         resetPreviewAndExportState({
+          exportPlan: run.exportPlan || null,
+          previewReadiness: run.previewReadiness || null,
           previewStatus: "배경 화면이 생성되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: run.project,
           workflowSummary: run.workflowSummary
@@ -793,6 +808,8 @@ export function ProjectDetailView({
       if (result.project) {
         onProjectResult(result);
         resetPreviewAndExportState({
+          exportPlan: result.exportPlan || null,
+          previewReadiness: result.previewReadiness || null,
           previewStatus: "배경 화면 작업이 추가되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
           workflowSummary: result.workflowSummary
@@ -829,6 +846,8 @@ export function ProjectDetailView({
       if (result.project) {
         onProjectResult(result);
         resetPreviewAndExportState({
+          exportPlan: result.exportPlan || null,
+          previewReadiness: result.previewReadiness || null,
           previewStatus: "이미지 결과가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
           workflowSummary: result.workflowSummary
@@ -867,41 +886,34 @@ export function ProjectDetailView({
     const result = await postAuthedJson<ProjectApiResult>("/api/project/validate", { projectDirectory });
     const issues = validationIssues(result);
     const messages = issues.map(issueText);
+    const nextReadiness = result.previewReadiness || currentPreviewReadiness;
+    if (result.exportPlan) {
+      setExportPlan(result.exportPlan);
+    }
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       setPreviewState("failed");
-      setFallbackPreviewCanRun(false);
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewIssues(messages);
-      setPreviewReadiness({
-        ...currentPreviewReadiness,
-        state: "failed",
-        availableState: "failed",
-        failureCause: result.error || messages[0] || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.",
-        retryable: false,
-        nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
-      });
+      setPreviewReadiness(nextReadiness);
       setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
       return false;
     }
     setPreviewIssues(messages);
-    setFallbackPreviewCanRun(true);
-    setPreviewReadiness({
-      ...currentPreviewReadiness,
-      state: "prepared",
-      availableState: "ready",
-      canRun: true,
-      failureCause: "",
-      retryable: false,
-      nextAction: "프리뷰를 실행할 수 있습니다."
-    });
+    setPreviewReadiness(nextReadiness);
+    if (nextReadiness.canRun !== true) {
+      setPreviewState("blocked");
+      setPreviewStatus(nextReadiness.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다.");
+      return false;
+    }
+    setPreviewState("ready");
+    setPreviewStatus(nextReadiness.nextAction || "프리뷰를 실행할 수 있습니다.");
     return true;
   }
 
   async function runPreview(startSceneId?: string): Promise<void> {
     setPreviewBusy(true);
     setPreviewState("running");
-    setFallbackPreviewCanRun(false);
     setPreviewReadiness({ ...currentPreviewReadiness, state: "running", availableState: "running" });
     setPreviewStatus("검증 실행 후 프리뷰 생성 중입니다.");
     try {
@@ -916,9 +928,9 @@ export function ProjectDetailView({
       if (result.ok === false) {
         const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false;
         setPreviewState(blocked ? "blocked" : "failed");
-        setFallbackPreviewCanRun(false);
         setPreviewRuntime(null);
         setPreviewSceneId("");
+        setExportPlan(result.exportPlan || null);
         setPreviewReadiness(result.previewReadiness || {
           ...currentPreviewReadiness,
           state: blocked ? "blocked" : "failed",
@@ -937,13 +949,12 @@ export function ProjectDetailView({
       const nextReadiness = result.previewReadiness || null;
       const blocked = nextReadiness?.canRun === false;
       setPreviewReadiness(nextReadiness);
+      setExportPlan(result.exportPlan || null);
       setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
-      setFallbackPreviewCanRun(!blocked && result.validation?.ok !== false && result.runtime?.validation?.ok !== false);
       setPreviewStatus(blocked ? nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");
-      setFallbackPreviewCanRun(false);
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewReadiness({

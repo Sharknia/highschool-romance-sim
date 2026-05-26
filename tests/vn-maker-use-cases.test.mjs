@@ -434,6 +434,18 @@ await assert.rejects(
 );
 const openedAfterBlockedHeroineCreate = await useCases.openProject({ projectDirectory });
 assert.equal(openedAfterBlockedHeroineCreate.project.id, created.project.id);
+assert.equal(openedAfterBlockedHeroineCreate.previewReadiness.state, "blocked");
+assert.equal(openedAfterBlockedHeroineCreate.previewReadiness.canRun, false);
+assert.equal(openedAfterBlockedHeroineCreate.previewReadiness.missingItems.some((item) => item.tab === "background"), true);
+assert.equal(openedAfterBlockedHeroineCreate.exportPlan.state, "blocked");
+assert.equal(openedAfterBlockedHeroineCreate.exportPlan.canExport, false);
+assert.equal(openedAfterBlockedHeroineCreate.exportPlan.blockers.some((blocker) => blocker.id === "background"), true);
+const validatedAfterBlockedHeroineCreate = await useCases.validateProject({ projectDirectory });
+assert.equal(validatedAfterBlockedHeroineCreate.action, "validateProject");
+assert.equal(validatedAfterBlockedHeroineCreate.previewReadiness.state, "blocked");
+assert.equal(validatedAfterBlockedHeroineCreate.previewReadiness.canRun, false);
+assert.equal(validatedAfterBlockedHeroineCreate.exportPlan.state, "blocked");
+assert.equal(validatedAfterBlockedHeroineCreate.exportPlan.canExport, false);
 
 const recentMissFailure = useCasesModule.projectActionFailureFromError(
   new useCasesModule.RecentProjectIndexMissError("missing-recent-contract"),

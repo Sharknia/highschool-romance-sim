@@ -15,7 +15,15 @@ import {
   removeProject as removeProjectApi,
   restoreProject as restoreProjectApi
 } from "./projects/projectApi";
-import { normalizeTab, type ProjectApiResult, type ProjectData, type ProjectWorkflowSummary, type RecentProject } from "./projects/projectPageTypes";
+import {
+  normalizeTab,
+  type ProjectApiResult,
+  type ProjectData,
+  type ProjectExportPlan,
+  type ProjectPreviewReadiness,
+  type ProjectWorkflowSummary,
+  type RecentProject
+} from "./projects/projectPageTypes";
 
 type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";
 type DeleteDialogMode = "list" | "files";
@@ -152,6 +160,8 @@ export function ProjectStartPage() {
   const [projectListMeta, setProjectListMeta] = useState({ count: 0, missingCount: 0, loadedAt: "", sort: "lastOpenedAtDesc" });
   const [currentProject, setCurrentProject] = useState<ProjectData | null>(null);
   const [workflowSummary, setWorkflowSummary] = useState<ProjectWorkflowSummary | null>(null);
+  const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
+  const [exportPlan, setExportPlan] = useState<ProjectExportPlan | null>(null);
   const [reconnectProjectId, setReconnectProjectId] = useState<string | null>(null);
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
   const [removedProject, setRemovedProject] = useState<RecentProject | null>(null);
@@ -211,6 +221,8 @@ export function ProjectStartPage() {
     const nextDirectory = typeof result.projectDirectory === "string" ? result.projectDirectory : fallbackDirectory;
     setCurrentProject(nextProject);
     setWorkflowSummary(result.workflowSummary || null);
+    setPreviewReadiness(result.previewReadiness || null);
+    setExportPlan(result.exportPlan || null);
     setProjectDirectoryInput(nextDirectory);
     setShellState({
       projectDirectory: nextDirectory,
@@ -225,6 +237,8 @@ export function ProjectStartPage() {
     const nextReconnectId = result.projectId || result.expectedProjectId || result.recentProject?.projectId || projectId || null;
     setReconnectProjectId(nextReconnectId);
     setStatus(`${label} 실패: ${message}`);
+    setPreviewReadiness(result.previewReadiness || null);
+    setExportPlan(result.exportPlan || null);
     if (projectId) {
       setCurrentProject(null);
       setWorkflowSummary(null);
@@ -439,6 +453,8 @@ export function ProjectStartPage() {
     if (currentProject?.id && currentProject.id !== projectId) {
       setCurrentProject(null);
       setWorkflowSummary(null);
+      setPreviewReadiness(null);
+      setExportPlan(null);
     }
     if (tab && normalizeTab(tab) !== tab) {
       navigate(`/projects/${projectId}/${normalizeTab(tab)}`, { replace: true });
@@ -470,6 +486,8 @@ export function ProjectStartPage() {
       }}
       projectId={projectId}
       projectDirectory={shellState.projectDirectory}
+      projectExportPlan={exportPlan}
+      projectPreviewReadiness={previewReadiness}
       shellProjectTitle={shellState.projectTitle}
       workflowSummary={workflowSummary}
     />

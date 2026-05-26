@@ -131,6 +131,7 @@ assert.match(recentProjectListSource, /경로 복사/, "프로젝트 목록 긴 
 
 const projectDetailSource = readText("apps/web/src/client/pages/projects/ProjectDetailView.tsx");
 const projectDetailStateSource = readText("apps/web/src/client/pages/projects/projectDetailState.ts");
+const useCasesSource = readText("packages/use-cases/src/index.ts");
 assert.match(projectDetailSource, /DiagnosticDrawer/, "프로젝트 상세는 raw 저장 위치와 ID를 공통 DiagnosticDrawer로 접어야 합니다.");
 assert.match(projectDetailSource, /ReadinessPanel/, "프로젝트 상세 프리뷰/내보내기는 공통 ReadinessPanel을 사용해야 합니다.");
 assert.match(projectDetailSource, /tabShellStatus/, "프로젝트 상세 탭 라벨은 탭별 완료/필요/차단 상태를 표시해야 합니다.");
@@ -155,18 +156,19 @@ assert.doesNotMatch(projectDetailSource, /실패하면 OAuth, app-server, adapte
 assert.doesNotMatch(projectDetailSource, /생성 어댑터|setBackgroundStatus\("adapter:/, "배경 기본 본문은 adapter 계열 내부 용어를 노출하면 안 됩니다.");
 assert.match(projectDetailSource, /배경 교체 생성/, "기존 배경이 있는 상태의 생성 버튼은 교체 동작을 명확히 말해야 합니다.");
 assert.match(projectDetailSource, /previewResolutionActions/, "프리뷰 누락 항목은 nextActions가 없어도 missingItems의 tab으로 해결 이동 버튼을 만들어야 합니다.");
-assert.match(projectDetailSource, /fallbackPreviewCanRun/, "프리뷰 실행 버튼은 previewReadiness DTO가 없어도 workflow summary ready 상태를 fallback으로 반영해야 합니다.");
-assert.match(projectDetailSource, /createPreviewReadinessFallback/, "프로젝트 상세는 중앙 상태 모듈의 preview readiness fallback을 사용해야 합니다.");
-assert.match(projectDetailStateSource, /createPreviewReadinessFallback/, "프리뷰 readiness DTO가 없을 때 화면에 모순된 empty DTO 대신 프로젝트와 workflow summary 기반 fallback을 중앙 상태 모듈에서 만들어야 합니다.");
-assert.match(projectDetailSource, /createExportPlanFallback/, "프로젝트 상세는 중앙 상태 모듈의 export plan fallback을 사용해야 합니다.");
-assert.match(projectDetailStateSource, /createExportPlanFallback/, "내보내기 plan DTO가 없을 때 화면에 모순된 empty DTO 대신 프로젝트와 workflow summary 기반 fallback을 중앙 상태 모듈에서 만들어야 합니다.");
+assert.match(projectDetailSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 use-case/API previewReadiness DTO의 canRun만 실행 가능 조건으로 삼아야 합니다.");
+assert.match(projectDetailSource, /currentExportPlan\.canExport === true/, "내보내기 실행 버튼은 use-case/API exportPlan DTO의 canExport만 실행 가능 조건으로 삼아야 합니다.");
+assert.doesNotMatch(projectDetailSource, /fallbackPreviewCanRun/, "ProjectDetailView는 workflow summary로 preview readiness를 fallback 재계산하면 안 됩니다.");
+assert.doesNotMatch(projectDetailSource, /createPreviewReadinessFallback|createExportPlanFallback/, "프로젝트 상세는 preview/export readiness를 프론트 fallback으로 계산하면 안 됩니다.");
+assert.doesNotMatch(projectDetailStateSource, /createPreviewReadinessFallback|createExportPlanFallback/, "projectDetailState는 preview/export 도메인 readiness fallback 계산을 소유하면 안 됩니다.");
+assert.match(useCasesSource, /withActionState\("validateProject"[\s\S]*previewReadiness[\s\S]*exportPlan/, "validateProject use-case/API 응답은 preview/export DTO를 함께 제공해야 합니다.");
 assert.doesNotMatch(projectDetailSource, /프로젝트 상태 DTO를 기다리는 중입니다/, "프로젝트 상세는 내부 DTO 대기 문구를 사용자 화면 fallback으로 노출하면 안 됩니다.");
 assert.match(projectDetailSource, /tabsWithLocalPrimaryAction/, "프로젝트 상세 헤더 CTA는 탭 본문 primary action과 경쟁하지 않도록 로컬 CTA 탭에서 숨겨야 합니다.");
 assert.match(projectDetailSource, /showHeaderPrimaryAction/, "프로젝트 상세는 헤더 CTA 노출 조건을 명시해야 합니다.");
 assert.match(projectDetailSource, /준비 상태/, "프리뷰 readiness 라벨은 내부 DTO 이름 대신 사용자용 문구여야 합니다.");
 assert.doesNotMatch(projectDetailSource, /<dt>previewReadiness<\/dt>/, "프리뷰 본문은 previewReadiness 같은 내부 DTO 이름을 그대로 노출하면 안 됩니다.");
 assert.doesNotMatch(projectDetailSource, /availableState: \{currentPreviewReadiness/, "프리뷰 본문은 availableState 같은 내부 필드명을 그대로 노출하면 안 됩니다.");
-assert.match(projectDetailSource, /setPreviewReadiness\(\{[\s\S]*state: "prepared"[\s\S]*canRun: true[\s\S]*nextAction: "프리뷰를 실행할 수 있습니다\."/m, "프리뷰 검증 성공은 이전 blocked readiness DTO를 실행 가능 상태로 갱신해야 합니다.");
+assert.match(projectDetailSource, /setPreviewReadiness\(nextReadiness\)/, "프리뷰 검증 성공은 프론트 합성 DTO가 아니라 use-case/API가 반환한 readiness DTO를 반영해야 합니다.");
 assert.match(projectDetailSource, /exportRunReady/, "내보내기 실행 primary는 readiness가 준비된 상태에서만 활성화되어야 합니다.");
 assert.match(projectDetailSource, /다음 작업: 프리뷰 확인/, "내보내기 보조 이동 버튼은 다음 action 대신 한국어 작업 용어를 사용해야 합니다.");
 assert.match(projectDetailSource, /exportValidationSummaryText/, "내보내기 검증 요약은 validationSummary 원문 대신 사용자용 문구로 변환해야 합니다.");

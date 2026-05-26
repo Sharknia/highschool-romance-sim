@@ -189,6 +189,7 @@ assert.match(heroineDeleteDialogSource, /requiresConfirmation:\s*false/, "히로
 assert.doesNotMatch(projectStartSource, /ProjectDeleteDialog/, "ProjectStartPage는 별도 ProjectDeleteDialog를 만들면 안 됩니다.");
 const recentProjectListPath = "apps/web/src/client/pages/projects/RecentProjectList.tsx";
 const projectDetailViewPath = "apps/web/src/client/pages/projects/ProjectDetailView.tsx";
+const projectDetailStateSource = readText("apps/web/src/client/pages/projects/projectDetailState.ts");
 const projectNewPagePath = "apps/web/src/client/pages/projects/ProjectNewPage.tsx";
 const projectApiPath = "apps/web/src/client/pages/projects/projectApi.ts";
 assert.ok(existsSync(join(root, projectDetailViewPath)), "프로젝트 상세 탭은 별도 ProjectDetailView 컴포넌트로 분리해야 합니다.");
@@ -321,6 +322,8 @@ const legacyProjectTabClassPattern = new RegExp(`${["project", "tab"].join("-")}
 assert.doesNotMatch(projectDetailViewSource, legacyProjectTabClassPattern, "ProjectDetailView는 로컬 프로젝트 탭 class를 렌더링하면 안 됩니다.");
 assert.match(projectDetailViewSource, /<TabList/, "ProjectDetailView는 중앙 TabList를 사용해야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /function fallbackWorkflowSummary|function fallbackPreviewReadiness|function fallbackExportPlan/, "ProjectDetailView는 workflow/readiness/export 도메인 상태를 fallback으로 재계산하면 안 됩니다.");
+assert.doesNotMatch(projectDetailViewSource, /createPreviewReadinessFallback|createExportPlanFallback/, "ProjectDetailView는 preview/export readiness를 프론트 fallback으로 계산하지 말고 use case/API DTO만 표시해야 합니다.");
+assert.doesNotMatch(projectDetailStateSource, /createPreviewReadinessFallback|createExportPlanFallback/, "projectDetailState는 preview/export 도메인 readiness fallback 계산을 소유하면 안 됩니다.");
 assert.match(projectDetailViewSource, /emptyWorkflowSummary/, "ProjectDetailView는 DTO가 없을 때 표시 전용 workflow placeholder만 사용해야 합니다.");
 assert.match(projectDetailViewSource, /emptyPreviewReadiness/, "ProjectDetailView는 DTO가 없을 때 표시 전용 preview readiness placeholder만 사용해야 합니다.");
 assert.match(projectDetailViewSource, /emptyExportPlan/, "ProjectDetailView는 DTO가 없을 때 표시 전용 export plan placeholder만 사용해야 합니다.");
@@ -610,7 +613,7 @@ assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)
 });
 assert.match(projectDetailViewSource, /severity === "error"/, "프리뷰 검증은 warning이 아니라 error severity만 차단해야 합니다.");
 assert.match(projectDetailViewSource, /result\.code === "PREVIEW_BLOCKED"/, "프리뷰 차단 응답은 failed가 아니라 blocked 상태로 표시해야 합니다.");
-assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun === false/, "프리뷰 실행 버튼은 previewReadiness.canRun=false일 때 비활성화해야 합니다.");
+assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 previewReadiness.canRun=true가 아닐 때 비활성화해야 합니다.");
 assert.match(projectDetailViewSource, /const blocked = result\.code === "PREVIEW_BLOCKED"[\s\S]{0,900}setPreviewRuntime\(null\)/, "프리뷰 차단/실패 응답은 이전 runtime 플레이 화면을 비워야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /프리뷰 탭입니다\. 플레이 검증을 연결합니다\./, "프리뷰 탭은 placeholder가 아니라 실제 runtime 확인 흐름이어야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /내보내기 탭입니다\. export와 실행 확인 결과를 연결합니다\./, "내보내기 탭은 placeholder가 아니라 실제 export/smoke 흐름이어야 합니다.");
