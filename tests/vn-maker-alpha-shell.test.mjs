@@ -607,6 +607,16 @@ assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `ProjectDetailView는 더미 이미지 fallback UX를 노출해야 합니다: ${requiredText}`);
 });
+[
+  "isSafeDummyAssetLocation",
+  "javascript:",
+  "http:",
+  "https:",
+  "file:"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `목 이미지 파일 위치 열기는 안전한 URI scheme만 열어야 합니다: ${requiredText}`);
+});
 assert.match(
   `${projectDetailViewSource}\n${projectDisplayTextSource}`,
   /Codex 미연결 상태라 패키징된 목 이미지를 연결했습니다/,

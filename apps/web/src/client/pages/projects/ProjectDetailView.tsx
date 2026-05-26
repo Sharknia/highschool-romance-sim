@@ -274,6 +274,22 @@ function buildDummyFallbackTargets(jobs: ProjectGenerationJob[], assets: Project
   return targets;
 }
 
+function isSafeDummyAssetLocation(location?: string): boolean {
+  const value = location?.trim();
+  if (!value) {
+    return false;
+  }
+  if (value.toLowerCase().startsWith("javascript:")) {
+    return false;
+  }
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "file:";
+  } catch {
+    return false;
+  }
+}
+
 function previewStateLabel(value: PreviewState): string {
   if (value === "empty") return "프리뷰 없음";
   if (value === "blocked") return "차단";
@@ -669,11 +685,16 @@ export function ProjectDetailView({
   }
 
   function openDummyAssetLocation(location?: string): void {
-    if (!location) {
+    const safeLocation = location?.trim();
+    if (!safeLocation) {
       setDummyActionStatus("열 목 이미지 파일 위치가 아직 없습니다.");
       return;
     }
-    window.open(location, "_blank", "noopener,noreferrer");
+    if (!isSafeDummyAssetLocation(safeLocation)) {
+      setDummyActionStatus("안전하지 않은 목 이미지 파일 위치라 열지 않았습니다.");
+      return;
+    }
+    window.open(safeLocation, "_blank", "noopener,noreferrer");
     setDummyActionStatus("목 이미지 파일 위치 열기를 요청했습니다.");
   }
 
