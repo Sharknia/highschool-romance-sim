@@ -717,7 +717,7 @@ export function ProjectDetailView({
     const jobId = backgroundJobId.trim() || suggestedBackgroundJobId;
     setBackgroundBusy(true);
     setBackgroundErrors([]);
-    setBackgroundStatus("Codex 이미지 생성 연결로 배경 작업을 준비합니다.");
+    setBackgroundStatus("이미지 생성 연결로 배경 작업을 준비합니다.");
     try {
       const created = await postAuthedJson<ProjectApiResult>("/api/generation/jobs", {
         projectDirectory,
@@ -1203,9 +1203,9 @@ export function ProjectDetailView({
               <dl className="summary-list">
                 <div><dt>제목</dt><dd>{currentProject?.title || shellProjectTitle}</dd></div>
                 <div><dt>기존 배경 교체</dt><dd>{backgroundReplaceText}</dd></div>
-                <div><dt>생성 연결</dt><dd>Codex 이미지 생성 연결</dd></div>
+                <div><dt>생성 연결</dt><dd>이미지 생성 연결</dd></div>
               </dl>
-              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. 연결, 생성 서버, 어댑터, 응답 형식 오류를 구분해 표시합니다.</p>
+              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. 연결 인증, 생성 서버, 생성 처리, 응답 형식 오류를 구분해 표시합니다.</p>
               <DiagnosticDrawer summary="배경 대상 진단">
                 <dl className="summary-list">
                   <div><dt>프로젝트 ID</dt><dd>{detailProjectId || "확인 필요"}</dd></div>

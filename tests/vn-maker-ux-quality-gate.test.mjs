@@ -62,8 +62,10 @@ assert.doesNotMatch(projectDetailSource, /function jobStatusLabel/, "ProjectDeta
   /<h3>runtime 플레이<\/h3>/,
   /imageGeneration 가능/,
   /imageGeneration 상태/,
+  /Codex 이미지 생성 연결/,
   /provider 확인 필요/,
   /생성 어댑터/,
+  /어댑터, 응답 형식/,
   /setBackgroundStatus\("adapter:/,
   /backgroundAssetId \$\{backgroundLinkedScene/,
   /<div><dt>에셋 연결<\/dt><dd>\{currentBackgroundAsset\?\.id/,
@@ -97,3 +99,15 @@ assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*\.detail-tab-grid\
 const heroinePortraitSource = readText("apps/web/src/client/pages/heroines/HeroinePortraitPanel.tsx");
 assert.match(heroinePortraitSource, /이미지 생성 가능/, "히로인 포트레이트 기본 화면은 사용자용 이미지 생성 문구를 써야 합니다.");
 assert.doesNotMatch(heroinePortraitSource, /imageGeneration 가능|imageGeneration 상태/, "히로인 포트레이트 기본 화면은 내부 imageGeneration 용어를 노출하면 안 됩니다.");
+
+const projectNewSource = readText("apps/web/src/client/pages/projects/ProjectNewPage.tsx");
+assert.doesNotMatch(projectNewSource, />프로젝트 ID</, "새 프로젝트 기본 화면은 raw ID 용어 대신 사용자용 저장 식별자 문구를 써야 합니다.");
+assert.doesNotMatch(projectNewSource, /프로젝트 ID는 변경할 수 없습니다/, "새 프로젝트 안내 문구는 raw ID 용어를 기본 본문에 노출하면 안 됩니다.");
+assert.doesNotMatch(projectNewSource, /url-safe-project-id/, "새 프로젝트 기본 화면 placeholder는 내부 slug 형식을 직접 노출하면 안 됩니다.");
+assert.doesNotMatch(projectNewSource, />premise</, "새 프로젝트 기본 화면은 DTO 필드명 premise를 노출하면 안 됩니다.");
+
+const recentProjectListSource = readText("apps/web/src/client/pages/projects/RecentProjectList.tsx");
+assert.doesNotMatch(recentProjectListSource, /placeholder="[^"]*projectId[^"]*"/, "프로젝트 목록 필터 placeholder는 projectId 내부 이름을 노출하면 안 됩니다.");
+assert.doesNotMatch(recentProjectListSource, /· \{entry\.projectId\}/, "프로젝트 목록 기본 메타는 raw project id 값을 노출하면 안 됩니다.");
+assert.doesNotMatch(recentProjectListSource, />missing</, "프로젝트 목록 상태 chip은 raw missing 상태값을 노출하면 안 됩니다.");
+assert.doesNotMatch(recentProjectListSource, />ready</, "프로젝트 목록 상태 chip은 raw ready 상태값을 노출하면 안 됩니다.");

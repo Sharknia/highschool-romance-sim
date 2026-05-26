@@ -167,7 +167,7 @@ export function ProjectList({
       <div className="recent-project-toolbar">
         <label className="search-row">
           <Search size={16} />
-          <input aria-label="프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
+          <input aria-label="프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, 저장 식별자로 필터" value={query} />
         </label>
         <div className="recent-project-counts">
           <span>총 {totalCount}개</span>
@@ -196,13 +196,13 @@ export function ProjectList({
           ),
           meta: (
             <>
-              <Clock3 size={14} /> 마지막 작업 시각 {formatRecentProjectDate(entry.lastOpenedAt)} · 최근 수정 {formatRecentProjectDate(entry.lastValidatedAt)} · {entry.projectId}
+              <Clock3 size={14} /> 마지막 작업 시각 {formatRecentProjectDate(entry.lastOpenedAt)} · 최근 수정 {formatRecentProjectDate(entry.lastValidatedAt)}
             </>
           ),
           state: entry.missing ? (
-            <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
+            <span className="state-chip state-warning"><AlertTriangle size={14} /> 재연결 필요</span>
           ) : (
-            <span className="state-chip">ready</span>
+            <span className="state-chip">열기 가능</span>
           ),
           onSelect: () => openFromCard(entry),
           actions: (
