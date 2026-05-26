@@ -8,7 +8,7 @@ function getSafeNextPath(search: string): string {
 
   try {
     const parsed = new URL(next, window.location.origin);
-    if (parsed.origin !== window.location.origin || parsed.pathname === "/login") {
+    if (parsed.origin !== window.location.origin || parsed.pathname.replace(/\/$/, "") === "/login") {
       return "/settings";
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
