@@ -101,6 +101,10 @@ assert.throws(
   () => codexGeneration.resolvePackagedMockImagePackAssetPath("../outside.png"),
   /pack filePath/
 );
+assert.throws(
+  () => codexGeneration.resolvePackagedMockImagePackAssetPath("C:/outside.png"),
+  /pack filePath/
+);
 
 const imageJob = core.createImageGenerationJob({
   id: "job-portrait-haru",

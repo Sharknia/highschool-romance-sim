@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   describeEventExpansionPolicy,
@@ -160,7 +160,7 @@ export async function readPackagedMockImagePackManifest(): Promise<MockImagePack
 
 export function resolvePackagedMockImagePackAssetPath(filePath: string): string {
   const normalized = filePath.replaceAll("\\", "/");
-  if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
+  if (normalized.startsWith("/") || isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error("pack filePath는 mock image pack 내부 상대 경로여야 합니다.");
   }
   return join(PACKAGED_MOCK_IMAGE_PACK_DIRECTORY, normalized);
