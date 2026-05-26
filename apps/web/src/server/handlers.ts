@@ -7,7 +7,7 @@ import {
   createAlphaSandboxImageAdapter,
   createAlphaSandboxSession
 } from "@vn-maker/alpha-sandbox";
-import { sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSession } from "@vn-maker/generation-codex";
+import { createPackagedMockImageAdapter, sharedCodexAppServerClient, type CodexLoginStartResult, type CodexSession } from "@vn-maker/generation-codex";
 import { resolveProjectWorkspacePaths } from "@vn-maker/project-store";
 import {
   createVnMakerUseCases,
@@ -124,6 +124,9 @@ function statusForError(error: unknown): number {
   if (errorRecord.code === "OAUTH_REQUIRED") {
     return 401;
   }
+  if (errorRecord.code === "IMAGE_GENERATION_UNAVAILABLE") {
+    return 503;
+  }
   if (errorRecord.code === "SERVER_ERROR") {
     return 500;
   }
@@ -213,7 +216,8 @@ class ApiServices {
         || (this.codex.generateEventExpansionPlan
           ? { generateEventExpansionPlan: (input) => this.codex.generateEventExpansionPlan!(input) }
           : createCodexRequiredEventTextAdapter()),
-      image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) }
+      image: { generateImageAsset: (input) => this.codex.generateImageAsset(input) },
+      imageFallback: createPackagedMockImageAdapter()
     });
   }
 

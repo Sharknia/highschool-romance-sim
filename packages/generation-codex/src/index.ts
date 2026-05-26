@@ -5,18 +5,23 @@ import { fileURLToPath } from "node:url";
 import {
   describeEventExpansionPolicy,
   createImageGenerationJob,
+  MOCK_IMAGE_PACK_ADAPTER,
   parseMockImagePackManifest,
   type MockImagePackManifest,
   type AssetKind,
   type EventExpansionPlan,
   type EventExpansionRequest,
   type VnMakerAsset,
+  type VnMakerAssetProvenance,
   type VnMakerGenerationJob,
   type VnMakerProject
 } from "@vn-maker/engine-core";
 import type {
   EventTextGenerationAdapter,
-  EventTextGenerationAttempt
+  EventTextGenerationAttempt,
+  ProjectImageGenerationAdapter,
+  ProjectImageGenerationInput,
+  ProjectImageGenerationResult
 } from "@vn-maker/use-cases";
 
 type JsonObject = Record<string, unknown>;
@@ -164,6 +169,115 @@ export function resolvePackagedMockImagePackAssetPath(filePath: string): string 
     throw new Error("pack filePath는 mock image pack 내부 상대 경로여야 합니다.");
   }
   return join(PACKAGED_MOCK_IMAGE_PACK_DIRECTORY, normalized);
+}
+
+function mimeTypeForPackAsset(filePath: string): string {
+  const extension = extname(filePath).toLowerCase();
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+  return "image/png";
+}
+
+function extensionForPackAsset(filePath: string): string {
+  const extension = extname(filePath).replace(/^\./, "").toLowerCase();
+  return extension || "png";
+}
+
+function selectPackagedMockAsset(manifest: MockImagePackManifest, input: ProjectImageGenerationInput): MockImagePackManifest["assets"][number] {
+  return manifest.assets.find((asset) => asset.kind === input.kind && asset.target === input.targetId)
+    || manifest.assets.find((asset) => asset.kind === input.kind)
+    || manifest.assets[0];
+}
+
+export function createPackagedMockImageAdapter(): ProjectImageGenerationAdapter {
+  return {
+    async generateImageAsset(input): Promise<ProjectImageGenerationResult> {
+      const manifest = await readPackagedMockImagePackManifest();
+      const manifestAsset = selectPackagedMockAsset(manifest, input);
+      const sourcePath = resolvePackagedMockImagePackAssetPath(manifestAsset.filePath);
+      const source = await readFile(sourcePath);
+      const extension = extensionForPackAsset(manifestAsset.filePath);
+      const mimeType = mimeTypeForPackAsset(manifestAsset.filePath);
+      const kind = input.kind || manifestAsset.kind;
+      const outputAssetId = input.outputAssetId || `asset-mock-${kind}-${input.targetId}`;
+      const jobId = input.jobId || `job-mock-${kind}-${input.targetId}`;
+      const fileName = `${outputAssetId}.${extension}`;
+      const filePath = join(input.outputDirectory, fileName);
+      const uri = input.publicPathPrefix ? normalizePublicPath(input.publicPathPrefix, fileName) : filePath;
+      const fallbackReason = input.fallbackReason || manifestAsset.provenance.fallbackReason || "PACKAGED_MOCK_IMAGE";
+      const sourceGeneratedBy = manifest.sourceGeneratedBy || manifestAsset.provenance.sourceGeneratedBy;
+
+      await mkdir(input.outputDirectory, { recursive: true });
+      await writeFile(filePath, source);
+
+      const provenance: VnMakerAssetProvenance = {
+        ...manifestAsset.provenance,
+        adapter: MOCK_IMAGE_PACK_ADAPTER,
+        fallbackReason,
+        packId: manifest.id,
+        packVersion: manifest.version,
+        sourceGeneratedBy
+      };
+      const job = createImageGenerationJob({
+        id: jobId,
+        kind,
+        targetId: input.targetId,
+        prompt: input.prompt,
+        style: input.style,
+        outputAssetId
+      });
+      job.provider = MOCK_IMAGE_PACK_ADAPTER;
+      job.status = "completed";
+      job.dummy = true;
+      job.fallbackReason = fallbackReason;
+      job.packVersion = manifest.version;
+      job.sourceGeneratedBy = sourceGeneratedBy;
+
+      const b64Json = source.toString("base64");
+      const dataUrl = `data:${mimeType};base64,${b64Json}`;
+      const asset: VnMakerAsset = {
+        id: outputAssetId,
+        kind,
+        label: `${manifestAsset.label} (${manifest.id}@${manifest.version})`,
+        uri,
+        source: "mock",
+        generationJobId: job.id,
+        provenance
+      };
+
+      return {
+        adapter: MOCK_IMAGE_PACK_ADAPTER,
+        dummy: true,
+        fallbackReason,
+        packVersion: manifest.version,
+        sourceGeneratedBy,
+        job,
+        asset,
+        image: {
+          mimeType,
+          b64Json,
+          dataUrl,
+          fileName,
+          filePath,
+          uri,
+          codexSavedPath: null,
+          revisedPrompt: null
+        },
+        raw: {
+          adapter: MOCK_IMAGE_PACK_ADAPTER,
+          packId: manifest.id,
+          version: manifest.version,
+          manifestAssetId: manifestAsset.id,
+          filePath: manifestAsset.filePath,
+          fallbackReason
+        }
+      };
+    }
+  };
 }
 
 export interface CodexAppServerClientOptions {

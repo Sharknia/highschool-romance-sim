@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -32,6 +32,47 @@ const bundledProjectStartPagePath = join(tempRoot, "project-start-page.mjs");
 const bundledSceneWorkbenchPath = join(tempRoot, "scene-workbench.mjs");
 const bundledWorkspacePagePath = join(tempRoot, "workspace-page.mjs");
 const webDevEnvKeys = ["PORT", "API_PORT", "VITE_API_PORT", "VN_MAKER_ALPHA_SANDBOX"];
+
+async function createFakeLoggedOutCodexBin(root) {
+  const binDirectory = join(root, "fake-codex-bin");
+  const codexPath = join(binDirectory, "codex");
+  await mkdir(binDirectory, { recursive: true });
+  await writeFile(codexPath, `#!/usr/bin/env node
+process.stdin.setEncoding("utf8");
+let buffer = "";
+function write(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+function handle(message) {
+  if (!("id" in message)) return;
+  if (message.method === "initialize") {
+    write({ id: message.id, result: {} });
+    return;
+  }
+  if (message.method === "account/read") {
+    write({ id: message.id, result: { account: null, requiresOpenaiAuth: true } });
+    return;
+  }
+  if (message.method === "modelProvider/capabilities/read") {
+    write({ id: message.id, result: { imageGeneration: true, namespaceTools: false, webSearch: false } });
+    return;
+  }
+  write({ id: message.id, error: { message: "fake logged out codex" } });
+}
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    handle(JSON.parse(line));
+  }
+});
+`);
+  await chmod(codexPath, 0o755);
+  return binDirectory;
+}
 async function loadWebViteConfigWithEnv(env) {
   const previousEnv = new Map(webDevEnvKeys.map((key) => [key, process.env[key]]));
   for (const key of webDevEnvKeys) {
@@ -828,6 +869,90 @@ assert.equal(reopenedProject.assets.some((asset) => asset.id === apiImage.body.a
 assert.equal(reopenedProject.generationJobs.some((job) => job.id === apiImage.body.job.id), true);
 reopenedStore.close();
 
+const loggedOutFallbackApi = webHandlers.createApiRequestHandler({
+  codex: {
+    ...mockCodex,
+    async generateImageAsset() {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+  },
+  recentProjectIndexFile: apiRecentProjectIndexFile
+});
+const apiFallbackImage = await loggedOutFallbackApi({
+  method: "POST",
+  path: "/api/generation/images",
+  body: {
+    projectDirectory,
+    kind: "cg",
+    targetId: "scene-opening",
+    prompt: "logged out packaged fallback cg",
+    outputAssetId: "asset-api-oauth-fallback"
+  }
+});
+assert.equal(apiFallbackImage.status, 200);
+assert.equal(apiFallbackImage.body.ok, true);
+assert.equal(apiFallbackImage.body.dummy, true);
+assert.equal(apiFallbackImage.body.fallbackReason, "OAUTH_REQUIRED");
+assert.equal(apiFallbackImage.body.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+assert.equal(apiFallbackImage.body.job.outputAssetId, "asset-api-oauth-fallback");
+assert.equal(apiFallbackImage.body.asset.source, "mock");
+assert.equal(apiFallbackImage.body.asset.provenance.packVersion, codexGeneration.PACKAGED_MOCK_IMAGE_PACK_VERSION);
+assert.equal(existsSync(join(projectDirectory, "assets", "generated", "asset-api-oauth-fallback.png")), true);
+
+const fakeLoggedOutCodexPath = await createFakeLoggedOutCodexBin(tempRoot);
+const cliFallbackDirectory = join(tempRoot, "CliPackagedFallback.vnmaker");
+const cliFallbackCreated = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-project-from-heroine"], {
+  input: JSON.stringify({
+    projectDirectory: cliFallbackDirectory,
+    heroine: {
+      id: "cli-fallback-haru",
+      name: "CLI Fallback 하루",
+      description: "CLI 미연결 fallback 검증.",
+      personality: "차분하다.",
+      speechStyle: "짧게 말한다.",
+      appearance: "교복 차림."
+    },
+    title: "CLI fallback",
+    premise: "CLI 미연결 상태에서 패키징 목 이미지 fallback을 쓴다."
+  }),
+  encoding: "utf8"
+}));
+assert.equal(cliFallbackCreated.ok, true);
+const cliFallbackJob = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "create-image-job"], {
+  input: JSON.stringify({
+    projectDirectory: cliFallbackDirectory,
+    job: {
+      id: "job-cli-oauth-fallback",
+      kind: "cg",
+      targetId: cliFallbackCreated.project.scenes[0].id,
+      prompt: "cli logged out fallback cg",
+      outputAssetId: "asset-cli-oauth-fallback"
+    }
+  }),
+  encoding: "utf8"
+}));
+assert.equal(cliFallbackJob.ok, true);
+const cliFallbackImage = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "generate-image"], {
+  input: JSON.stringify({
+    projectDirectory: cliFallbackDirectory,
+    jobId: "job-cli-oauth-fallback"
+  }),
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${fakeLoggedOutCodexPath}:${process.env.PATH || ""}`
+  }
+}));
+assert.equal(cliFallbackImage.ok, true);
+assert.equal(cliFallbackImage.dummy, true);
+assert.equal(cliFallbackImage.fallbackReason, "OAUTH_REQUIRED");
+assert.equal(cliFallbackImage.generationJobId, "job-cli-oauth-fallback");
+assert.equal(cliFallbackImage.outputAssetId, "asset-cli-oauth-fallback");
+assert.equal(cliFallbackImage.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+assert.equal(cliFallbackImage.asset.source, "mock");
+assert.equal(cliFallbackImage.asset.generationJobId, "job-cli-oauth-fallback");
+assert.equal(existsSync(join(cliFallbackDirectory, "assets", "generated", "asset-cli-oauth-fallback.png")), true);
+
 const previousAlphaSandboxEnv = process.env.VN_MAKER_ALPHA_SANDBOX;
 process.env.VN_MAKER_ALPHA_SANDBOX = "1";
 try {
@@ -889,9 +1014,13 @@ const unavailableHeroinePortraitApi = await webHandlers.createApiRequestHandler(
     }
   }
 });
-assert.equal(unavailableHeroinePortraitApi.status, 503);
-assert.equal(unavailableHeroinePortraitApi.body.ok, false);
-assert.equal(unavailableHeroinePortraitApi.body.code, "IMAGE_GENERATION_UNAVAILABLE");
+assert.equal(unavailableHeroinePortraitApi.status, 200);
+assert.equal(unavailableHeroinePortraitApi.body.ok, true);
+assert.equal(unavailableHeroinePortraitApi.body.dummy, true);
+assert.equal(unavailableHeroinePortraitApi.body.fallbackReason, "IMAGE_GENERATION_UNAVAILABLE");
+assert.equal(unavailableHeroinePortraitApi.body.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+assert.equal(unavailableHeroinePortraitApi.body.asset.source, "mock");
+assert.equal(unavailableHeroinePortraitApi.body.asset.provenance.fallbackReason, "IMAGE_GENERATION_UNAVAILABLE");
 
 const haruHeroine = core.createHeroineProfile({
   id: "haru",

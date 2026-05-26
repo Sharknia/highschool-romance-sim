@@ -122,6 +122,7 @@ export interface ProjectImageGenerationInput {
   outputDirectory: string;
   publicPathPrefix: string;
   cwd: string;
+  fallbackReason?: "OAUTH_REQUIRED" | "IMAGE_GENERATION_UNAVAILABLE" | string;
 }
 
 export interface ProjectImageGenerationResult {
@@ -271,6 +272,7 @@ export type ProjectActionFailureCode =
   | "PREVIEW_BLOCKED"
   | "EXPORT_BLOCKED"
   | "OAUTH_REQUIRED"
+  | "IMAGE_GENERATION_UNAVAILABLE"
   | "SERVER_ERROR";
 
 export interface ProjectActionFailureDto {
@@ -375,6 +377,11 @@ const projectFailureContracts: Record<ProjectActionFailureCode, Omit<ProjectFail
     nextAction: "Codex에 로그인하세요.",
     retryable: true
   },
+  IMAGE_GENERATION_UNAVAILABLE: {
+    message: "현재 Codex app-server가 이미지 생성 기능을 제공하지 않습니다.",
+    nextAction: "설정에서 Codex 연결과 이미지 생성 가능 상태를 확인하세요.",
+    retryable: true
+  },
   SERVER_ERROR: {
     message: "서버 오류",
     nextAction: "잠시 후 다시 시도하세요.",
@@ -394,6 +401,7 @@ export interface VnMakerUseCaseOptions {
   recentProjectIndexFile?: string;
   eventText?: EventTextGenerationAdapter;
   image?: ProjectImageGenerationAdapter;
+  imageFallback?: ProjectImageGenerationAdapter;
 }
 
 export interface ExpandNaturalLanguageEventInput {
@@ -984,12 +992,16 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
     || code === "PREVIEW_BLOCKED"
     || code === "EXPORT_BLOCKED"
     || code === "OAUTH_REQUIRED"
+    || code === "IMAGE_GENERATION_UNAVAILABLE"
   ) {
     return code;
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("OAuth 로그인이 필요")) {
     return "OAUTH_REQUIRED";
+  }
+  if (message.includes("imageGeneration")) {
+    return "IMAGE_GENERATION_UNAVAILABLE";
   }
   if (message.includes("현재 프로젝트가 패치 적용 직후 상태와 달라")) {
     return "PATCH_STALE";
@@ -999,7 +1011,11 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
 
 function imageGenerationFailureFromMessages(messages: string[]): Pick<ProjectActionFailureDto, "code" | "message" | "error" | "retryable"> {
   const message = messages.find((item) => item.trim()) || "이미지 생성 작업이 실패했습니다.";
-  const code = message.includes("OAuth 로그인이 필요") ? "OAUTH_REQUIRED" : "SERVER_ERROR";
+  const code = message.includes("OAuth 로그인이 필요")
+    ? "OAUTH_REQUIRED"
+    : message.includes("imageGeneration")
+      ? "IMAGE_GENERATION_UNAVAILABLE"
+      : "SERVER_ERROR";
   return {
     code,
     message,
@@ -2051,6 +2067,40 @@ function withWorkspacePreviewUri(result: ProjectImageGenerationResult): ProjectI
   };
 }
 
+function imageFallbackReasonFromError(error: unknown): "OAUTH_REQUIRED" | "IMAGE_GENERATION_UNAVAILABLE" | null {
+  const record = asRecord(error);
+  if (record.code === "OAUTH_REQUIRED") {
+    return "OAUTH_REQUIRED";
+  }
+  if (record.code === "IMAGE_GENERATION_UNAVAILABLE") {
+    return "IMAGE_GENERATION_UNAVAILABLE";
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("OAuth 로그인이 필요")) {
+    return "OAUTH_REQUIRED";
+  }
+  if (message.includes("imageGeneration")) {
+    return "IMAGE_GENERATION_UNAVAILABLE";
+  }
+  return null;
+}
+
+async function generateImageWithFallback(
+  image: ProjectImageGenerationAdapter,
+  imageFallback: ProjectImageGenerationAdapter | undefined,
+  input: ProjectImageGenerationInput
+): Promise<ProjectImageGenerationResult> {
+  try {
+    return await image.generateImageAsset(input);
+  } catch (error) {
+    const fallbackReason = imageFallbackReasonFromError(error);
+    if (!fallbackReason || !imageFallback) {
+      throw error;
+    }
+    return imageFallback.generateImageAsset({ ...input, fallbackReason });
+  }
+}
+
 export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
   const defaultProjectDirectory = options.defaultProjectDirectory || getDefaultProjectDirectory();
   const recentProjects = new RecentProjectIndexStore({ indexFilePath: options.recentProjectIndexFile });
@@ -3081,7 +3131,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           try {
             store.markGenerationJobStatus(jobId, "running");
             const generationInput = selectGenerationInput(store.requireProject(), store, { ...record, jobId });
-            const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
+            const result = withWorkspacePreviewUri(await generateImageWithFallback(options.image, options.imageFallback, generationInput));
             const savedProject = await store.storeGenerationResult(result);
             const savedJob = savedProject.generationJobs.find((job) => job.id === result.job.id) || result.job;
             jobs.push(savedJob);
@@ -3154,7 +3204,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         });
         let result: ProjectImageGenerationResult;
         try {
-          result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
+          result = withWorkspacePreviewUri(await generateImageWithFallback(options.image, options.imageFallback, generationInput));
         } catch (error) {
           return heroineImageGenerationFailure(input, error);
         }
@@ -3172,6 +3222,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             projectDirectory: store.paths.projectDirectory,
             ...withHeroineContract(store, heroineForResponse(store, heroine)),
             asset: result.asset,
+            job: result.job,
+            dummy: result.dummy,
+            fallbackReason: result.fallbackReason,
+            packVersion: result.packVersion,
+            sourceGeneratedBy: result.sourceGeneratedBy,
             generationState: "completed" as const
           };
         }
@@ -3187,6 +3242,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           ok: true,
           projectDirectory: store.paths.projectDirectory,
           asset: result.asset,
+          job: result.job,
+          dummy: result.dummy,
+          fallbackReason: result.fallbackReason,
+          packVersion: result.packVersion,
+          sourceGeneratedBy: result.sourceGeneratedBy,
           stagedPortraitRef: {
             id: stagedPortrait.id,
             expiresAt: stagedPortrait.expiresAt,
@@ -3211,12 +3271,14 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           if (generationInput.jobId) {
             store.markGenerationJobStatus(generationInput.jobId, "running");
           }
-          const result = withWorkspacePreviewUri(await options.image.generateImageAsset(generationInput));
+          const result = withWorkspacePreviewUri(await generateImageWithFallback(options.image, options.imageFallback, generationInput));
           const savedProject = await store.storeGenerationResult(result);
           return {
             ok: true,
             projectDirectory: store.paths.projectDirectory,
             project: savedProject,
+            generationJobId: result.job.id,
+            outputAssetId: result.asset.id,
             ...result,
             ...(result.asset.kind === "background" ? { backgroundPolicy: backgroundPolicy(savedProject) } : {})
           };

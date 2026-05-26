@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const core = await import("../packages/engine-core/dist/index.js");
+const codexGeneration = await import("../packages/generation-codex/dist/index.js");
 const projectStoreModule = await import("../packages/project-store/dist/index.js");
 const useCasesModule = await import("../packages/use-cases/dist/index.js");
 
@@ -400,6 +401,65 @@ const unavailablePortrait = await unavailableImageUseCases.generateHeroinePortra
 assert.equal(unavailablePortrait.ok, false);
 assert.equal(unavailablePortrait.code, "IMAGE_GENERATION_UNAVAILABLE");
 assert.equal(unavailablePortrait.retryable, true);
+
+const fallbackUseCases = useCasesModule.createVnMakerUseCases({
+  image: {
+    async generateImageAsset() {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+  },
+  imageFallback: codexGeneration.createPackagedMockImageAdapter()
+});
+const fallbackProjectDirectory = join(tempRoot, "PackagedFallback.vnmaker");
+const fallbackCreated = await fallbackUseCases.createProjectFromHeroine({
+  projectDirectory: fallbackProjectDirectory,
+  heroine,
+  title: "패키징 fallback",
+  premise: "미연결 상태에서 목 이미지 pack으로 생성한다."
+});
+assert.equal(fallbackCreated.ok, true);
+const fallbackJob = await fallbackUseCases.createGenerationJob({
+  projectDirectory: fallbackProjectDirectory,
+  id: "job-fallback-cg",
+  kind: "cg",
+  targetId: fallbackCreated.project.scenes[0].id,
+  prompt: "fallback cg",
+  outputAssetId: "asset-fallback-cg"
+});
+assert.equal(fallbackJob.ok, true);
+const fallbackGenerated = await fallbackUseCases.generateImage({
+  projectDirectory: fallbackProjectDirectory,
+  jobId: "job-fallback-cg"
+});
+assert.equal(fallbackGenerated.ok, true);
+assert.equal(fallbackGenerated.dummy, true);
+assert.equal(fallbackGenerated.fallbackReason, "OAUTH_REQUIRED");
+assert.equal(fallbackGenerated.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+assert.equal(fallbackGenerated.job.outputAssetId, "asset-fallback-cg");
+assert.equal(fallbackGenerated.asset.source, "mock");
+assert.equal(fallbackGenerated.asset.provenance.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
+assert.equal(fallbackGenerated.asset.provenance.fallbackReason, "OAUTH_REQUIRED");
+assert.equal(existsSync(join(fallbackProjectDirectory, "assets", "generated", "asset-fallback-cg.png")), true);
+const fallbackOpened = await fallbackUseCases.openProject({ projectDirectory: fallbackProjectDirectory });
+assert.equal(fallbackOpened.project.generationJobs.some((job) => job.id === "job-fallback-cg" && job.dummy === true), true);
+assert.equal(fallbackOpened.project.assets.some((asset) => asset.id === "asset-fallback-cg" && asset.source === "mock"), true);
+
+const unavailableFallbackUseCases = useCasesModule.createVnMakerUseCases({
+  image: {
+    async generateImageAsset() {
+      throw new Error("현재 Codex app-server가 imageGeneration 기능을 제공하지 않습니다.");
+    }
+  },
+  imageFallback: codexGeneration.createPackagedMockImageAdapter()
+});
+const unavailableFallbackRun = await unavailableFallbackUseCases.runGenerationJobs({
+  projectDirectory: fallbackProjectDirectory,
+  jobIds: ["job-fallback-cg"],
+  replaceCompleted: true
+});
+assert.equal(unavailableFallbackRun.ok, true);
+assert.equal(unavailableFallbackRun.assets[0].source, "mock");
+assert.equal(unavailableFallbackRun.jobs[0].fallbackReason, "IMAGE_GENERATION_UNAVAILABLE");
 
 const created = await useCases.createProjectFromHeroine({
   projectDirectory,

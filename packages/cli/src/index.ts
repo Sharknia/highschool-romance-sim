@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import {
+  createPackagedMockImageAdapter,
   sharedCodexAppServerClient
 } from "@vn-maker/generation-codex";
 import {
@@ -116,7 +117,8 @@ const useCases = createVnMakerUseCases({
   },
   image: sandboxImage || {
     generateImageAsset: (input) => sharedCodexAppServerClient.generateImageAsset(input)
-  }
+  },
+  imageFallback: createPackagedMockImageAdapter()
 });
 
 function printCapabilities(): void {
