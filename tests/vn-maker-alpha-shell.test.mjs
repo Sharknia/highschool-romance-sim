@@ -199,6 +199,7 @@ const recentProjectListSource = existsSync(join(root, recentProjectListPath))
   : projectStartSource;
 const projectDetailViewSource = readText(projectDetailViewPath);
 const projectPageTypesSource = readText("apps/web/src/client/pages/projects/projectPageTypes.ts");
+const projectDisplayTextSource = readText("apps/web/src/client/pages/projects/projectDisplayText.ts");
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
 const useCasesSource = readText("packages/use-cases/src/index.ts");
@@ -562,6 +563,64 @@ assert.doesNotMatch(projectDetailViewSource, /currentProject\?\.id\s*\|\|\s*proj
 assert.match(projectDetailViewSource, /assetJobs\.length > 0 \? assetJobs : currentProject\?\.generationJobs/, "배경 화면 생성 탭은 project generationJobs fallback으로 승인 직후 CG 작업을 보여야 합니다.");
 assert.match(projectDetailViewSource, /runImageJobs\(plannedImageJobIds\)/, "배경 화면 생성 탭은 승인된 이벤트 CG planned 작업을 실행하는 버튼을 노출해야 합니다.");
 assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)/, "배경 화면 생성 탭은 실패한 이벤트 CG 작업 재시도 버튼을 노출해야 합니다.");
+[
+  "ProjectAssetProvenance",
+  "provenance?: ProjectAssetProvenance",
+  "dummy?: boolean",
+  "fallbackReason?: string",
+  "packVersion?: string",
+  "sourceGeneratedBy?: string",
+  "generationJobId?: string",
+  "outputAssetId?: string"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectPageTypesSource, pattern, `Project page 타입은 더미 fallback 진단 필드를 표현해야 합니다: ${requiredText}`);
+});
+[
+  "isDummyAsset",
+  "isDummyGenerationJob",
+  "dummyFallbackSummaryText",
+  "dummyFallbackDetailText",
+  "dummyFallbackTargetText",
+  "dummyPackVersionText",
+  "fallbackReasonText"
+].forEach((exportName) => {
+  assert.match(projectDisplayTextSource, new RegExp(`export function ${exportName}\\b`), `${exportName}는 표시 helper 모듈에서 export되어야 합니다.`);
+});
+[
+  "dummyImageAssets",
+  "dummyFallbackWarning",
+  "dummyFallbackTargets",
+  "목 이미지",
+  "더미 이미지",
+  "Codex 연결하러 가기",
+  "실제 이미지로 교체",
+  "더미 유지하고 프리뷰로 이동",
+  "목 이미지 파일 위치 복사",
+  "fallbackReason",
+  "packVersion",
+  "outputAssetId",
+  "raw payload",
+  "Alpha 프리뷰는 목 이미지를 포함해 실행할 수 있습니다.",
+  "Alpha 검증 목적 내보내기는 더미 이미지를 차단하지 않습니다."
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView는 더미 이미지 fallback UX를 노출해야 합니다: ${requiredText}`);
+});
+assert.match(
+  `${projectDetailViewSource}\n${projectDisplayTextSource}`,
+  /Codex 미연결 상태라 패키징된 목 이미지를 연결했습니다/,
+  "더미 fallback 사용자 문구에는 Codex 미연결 상태 설명이 있어야 합니다."
+);
+[
+  ".dummy-fallback-warning",
+  ".dummy-badge-row",
+  ".dummy-target-list",
+  ".diagnostic-value"
+].forEach((selector) => {
+  const pattern = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(clientStylesSource, pattern, `${selector} style must exist for dummy fallback UI.`);
+});
 [
   "/api/project/preview",
   "/api/project/validate",
