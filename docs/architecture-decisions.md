@@ -5,7 +5,7 @@
 ## 현재 기준
 
 - 제품 목표는 GitHub Pages용 단일 HTML 게임이 아니라 로컬 데스크톱형 미연시 제작 프로그램이다.
-- 중심 구조는 `VN Maker Core + CLI + Web App + Codex OAuth + 생성 어댑터`다.
+- 중심 구조는 `VN Maker Core + CLI + Web App + Codex ChatGPT OAuth + 생성 어댑터`다.
 - 프론트, 백엔드, 엔진, CLI의 도메인 상태, 외부 I/O, 검증, 권한, 라우팅, 오류 처리, 생성 어댑터는 단일 소유자와 공통 경계로 중앙화한다.
 
 ## 아키텍처 리뷰 기준
