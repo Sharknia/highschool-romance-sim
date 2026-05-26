@@ -20,8 +20,8 @@ export function HeroinePortraitPanel({ busy, heroine, onGenerate, session }: Her
       ? `Codex 연결됨${session.account?.email ? ` · ${session.account.email}` : ""}`
       : session.error || "Codex 연결이 필요합니다.";
   const generationText = imageGenerationAvailable
-    ? "imageGeneration 가능"
-    : "생성 불가: 설정에서 Codex 연결과 imageGeneration 상태를 확인하세요.";
+    ? "이미지 생성 가능"
+    : "생성 불가: 설정에서 Codex 연결과 이미지 생성 상태를 확인하세요.";
   const portraitText = previewUri
     ? "기본 포트레이트가 연결되었습니다."
     : heroine.defaultPortraitAssetId

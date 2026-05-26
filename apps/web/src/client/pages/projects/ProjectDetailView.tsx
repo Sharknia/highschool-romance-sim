@@ -2,7 +2,7 @@ import { ArrowRight, CheckCircle2, Heart, Image as ImageIcon, Play, RefreshCw } 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, TabList } from "../../components/ui";
+import { AssetStatePanel, Button, DiagnosticDrawer, EmptyState, ReadinessPanel, StatusChip, TabList, TabStatusList } from "../../components/ui";
 import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePageTypes";
 import {
   detailTabs,
@@ -21,7 +21,24 @@ import {
   type ProjectTabId,
   type ProjectWorkflowSummary
 } from "./projectPageTypes";
-import { createPreviewExportResetState } from "./projectDetailState";
+import {
+  createExportPlanFallback,
+  createPreviewExportResetState,
+  createPreviewReadinessFallback,
+  emptyExportPlan,
+  emptyPreviewReadiness,
+  primaryActionDisplayLabel,
+  primaryActionTabFromSummary
+} from "./projectDetailState";
+import {
+  backgroundAssetDisplayLabel,
+  backgroundConnectionText,
+  backgroundSceneConnectionText,
+  displayWorkflowStep,
+  generationProviderText,
+  imageJobKindLabel,
+  jobStatusLabel
+} from "./projectDisplayText";
 
 interface ProjectDetailViewProps {
   activeTab: ProjectTabId;
@@ -39,9 +56,11 @@ type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "pa
 type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
 type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
 
+const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
+
 const emptyWorkflowSummary: ProjectWorkflowSummary = {
   primaryAction: "goToHeroine",
-  primaryLabel: "프로젝트 상태 DTO를 기다리는 중입니다.",
+  primaryLabel: "프로젝트 제작 상태를 확인하세요.",
   blockingIssues: [],
   validationState: "unknown",
   generationState: "empty",
@@ -50,56 +69,55 @@ const emptyWorkflowSummary: ProjectWorkflowSummary = {
   steps: []
 };
 
-const emptyPreviewReadiness: ProjectPreviewReadiness = {
-  state: "blocked",
-  availableState: "empty",
-  canRun: false,
-  requiredData: {
-    heroine: "missing",
-    background: "missing",
-    event: "missing",
-    validation: "unknown",
-    generationJobs: "unknown"
-  },
-  missingItems: [],
-  blockingIssues: [],
-  nextActions: [],
-  failureCause: "프로젝트 상태 DTO를 기다리는 중입니다.",
-  retryable: false,
-  nextAction: "프로젝트를 먼저 열어 주세요."
-};
-
-const emptyExportPlan: ProjectExportPlan = {
-  state: "blocked",
-  canExport: false,
-  target: "localDesktopWebApp",
-  githubPagesTarget: false,
-  validationSummary: {
-    ok: false,
-    issueCount: 0,
-    errors: [],
-    warnings: []
-  },
-  includedData: [],
-  includedAssets: [],
-  blockers: [],
-  warnings: [],
-  failureCause: "프로젝트 상태 DTO를 기다리는 중입니다.",
-  retryable: false,
-  nextAction: "프로젝트를 먼저 열어 주세요."
-};
-
 function stateLabel(value?: string): string {
   if (!value) {
     return "확인 필요";
   }
   if (value === "valid") return "문제 없음";
   if (value === "error") return "문제 확인 필요";
+  if (value === "empty") return "비어 있음";
   if (value === "planned") return "작업 예정";
+  if (value === "ready") return "준비됨";
+  if (value === "waiting") return "대기";
   if (value === "completed") return "완료";
   if (value === "blocked") return "차단";
   if (value === "stale") return "다시 확인 필요";
   return value;
+}
+
+function workflowStepStateLabel(value?: string): string {
+  if (value === "done") return "완료";
+  if (value === "current") return "진행 필요";
+  if (value === "blocked") return "차단";
+  if (value === "waiting") return "대기";
+  return "확인 필요";
+}
+
+function projectTabFromValue(value?: string): ProjectTabId {
+  return detailTabs.some((tab) => tab.id === value) ? value as ProjectTabId : "overview";
+}
+
+function tabShellStatus(tab: ProjectTabId, summary: ProjectWorkflowSummary, project: ProjectData | null, hasBackgroundAsset: boolean): string {
+  if (tab === "overview") {
+    return summary.blockingIssues?.length ? "확인 필요" : "정상";
+  }
+  if (tab === "heroine") {
+    return project?.characters?.length ? "연결됨" : "필요";
+  }
+  if (tab === "background") {
+    return hasBackgroundAsset ? "완료" : stateLabel(summary.generationState);
+  }
+  if (tab === "preview") {
+    return stateLabel(summary.previewState);
+  }
+  if (tab === "export") {
+    return stateLabel(summary.exportState);
+  }
+  if (tab === "studio") {
+    return "준비 중";
+  }
+  const step = summary.steps?.find((item) => item.id === tab);
+  return workflowStepStateLabel(step?.state);
 }
 
 function eventStateLabel(value: EventTabState): string {
@@ -137,16 +155,6 @@ function isVisualImageJob(job: ProjectGenerationJob): boolean {
   return job.kind === "background" || job.kind === "cg";
 }
 
-function imageJobKindLabel(kind?: string): string {
-  if (kind === "background") {
-    return "배경 화면";
-  }
-  if (kind === "cg") {
-    return "이벤트 CG";
-  }
-  return "이미지";
-}
-
 function assetState(jobs: ProjectGenerationJob[]): AssetState {
   if (jobs.length === 0) return "empty";
   if (jobs.some((job) => job.status === "running")) return "running";
@@ -167,21 +175,13 @@ function assetStateLabel(value: AssetState): string {
   return "완료";
 }
 
-function jobStatusLabel(value?: string): string {
-  if (value === "planned") return "작업 예정";
-  if (value === "running") return "생성 중";
-  if (value === "failed") return "실패";
-  if (value === "completed") return "완료";
-  return value || "확인 필요";
-}
-
-function generationErrorCategory(result: ProjectApiResult): "OAuth" | "app-server" | "adapter" | "응답 파싱" {
-  if (result.code === "OAUTH_REQUIRED" || result.httpStatus === 401) return "OAuth";
-  if (result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE") return "응답 파싱";
+function generationErrorCategory(result: ProjectApiResult): "연결 인증" | "생성 서버" | "생성 처리" | "응답 형식" {
+  if (result.code === "OAUTH_REQUIRED" || result.httpStatus === 401) return "연결 인증";
+  if (result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE") return "응답 형식";
   const message = `${result.message || ""} ${result.error || ""} ${(result.errors || []).join(" ")}`;
-  if (message.includes("OAuth 로그인이 필요")) return "OAuth";
-  if (message.includes("app-server")) return "app-server";
-  return "adapter";
+  if (message.includes("OAuth 로그인이 필요")) return "연결 인증";
+  if (message.includes("app-server")) return "생성 서버";
+  return "생성 처리";
 }
 
 function backgroundAsset(project: ProjectData | null): ProjectAsset | null {
@@ -205,9 +205,30 @@ function previewStateLabel(value: PreviewState): string {
 
 function previewReadinessStateLabel(value?: string): string {
   if (value === "prepared") return "준비됨";
+  if (value === "ready") return "준비됨";
+  if (value === "empty") return "확인 전";
+  if (value === "stale") return "다시 확인 필요";
   if (value === "running") return "생성 중";
   if (value === "failed") return "실패";
   if (value === "blocked") return "차단";
+  return value || "확인 전";
+}
+
+function requiredDataNameLabel(name: string): string {
+  if (name === "heroine") return "히로인";
+  if (name === "background") return "배경";
+  if (name === "event") return "장면";
+  if (name === "validation") return "검증";
+  if (name === "generationJobs") return "이미지 작업";
+  return name;
+}
+
+function requiredDataValueLabel(value?: string): string {
+  if (value === "ready" || value === "valid" || value === "completed") return "준비됨";
+  if (value === "missing") return "필요";
+  if (value === "waiting" || value === "planned" || value === "running") return "진행 중";
+  if (value === "error" || value === "failed" || value === "blocked") return "확인 필요";
+  if (value === "empty" || value === "unknown") return "확인 전";
   return value || "확인 전";
 }
 
@@ -220,20 +241,50 @@ function exportStateLabel(value: ExportState): string {
   return "준비됨";
 }
 
-function tabFromAction(action?: string): ProjectTabId {
-  if (action === "goToHeroine") return "heroine";
-  if (action === "goToBackground") return "background";
-  if (action === "goToStudio") return "studio";
-  if (action === "goToExport") return "export";
-  return "preview";
+function exportPlanStateLabel(value?: string): string {
+  if (value === "ready") return "준비됨";
+  if (value === "blocked") return "차단";
+  if (value === "running") return "실행 중";
+  if (value === "complete" || value === "completed") return "완료";
+  if (value === "failed") return "실패";
+  return "확인 전";
 }
 
-function primaryActionDisplayLabel(tab: ProjectTabId): string {
-  if (tab === "heroine") return "히로인 스냅샷으로 이동";
-  if (tab === "background") return "배경 화면 생성으로 이동";
-  if (tab === "studio") return "제작으로 이동";
-  if (tab === "export") return "내보내기로 이동";
-  return "프리뷰 확인";
+function exportValidationSummaryText(plan: ProjectExportPlan): string {
+  const issueCount = plan.validationSummary?.issueCount ?? 0;
+  const status = plan.validationSummary?.ok ? "검증 통과" : "검증 확인 필요";
+  return issueCount > 0 ? `${status} · 문제 ${issueCount}건` : `${status} · 문제 없음`;
+}
+
+function assetKindSummaryLabel(kind?: string): string {
+  if (kind === "portrait") return "포트레이트";
+  if (kind === "background") return "배경 화면";
+  if (kind === "cg") return "이벤트 CG";
+  return "에셋";
+}
+
+function exportAssetSummaryText(assets?: ProjectAsset[]): string {
+  if (!assets?.length) {
+    return "없음";
+  }
+  const counts = assets.reduce<Record<string, number>>((summary, asset) => {
+    const label = assetKindSummaryLabel(asset.kind);
+    summary[label] = (summary[label] || 0) + 1;
+    return summary;
+  }, {});
+  return Object.entries(counts).map(([label, count]) => `${label} ${count}개`).join(" · ");
+}
+
+function exportBlockerSummaryText(blockers?: ProjectExportPlan["blockers"]): string {
+  if (!blockers?.length) {
+    return "없음";
+  }
+  return blockers.map((blocker) => {
+    if (blocker.kind === "generationJob") {
+      return "필수 이미지 작업이 완료되지 않았습니다.";
+    }
+    return blocker.message || "확인이 필요합니다.";
+  }).join(" · ");
 }
 
 function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): ProjectRuntimeScene | null {
@@ -276,6 +327,7 @@ export function ProjectDetailView({
   const [backgroundJobId, setBackgroundJobId] = useState("");
   const [backgroundErrors, setBackgroundErrors] = useState<string[]>([]);
   const [previewState, setPreviewState] = useState<PreviewState>("empty");
+  const [fallbackPreviewCanRun, setFallbackPreviewCanRun] = useState(false);
   const [previewStatus, setPreviewStatus] = useState("프리뷰 생성 전입니다.");
   const [previewRuntime, setPreviewRuntime] = useState<ProjectRuntime | null>(null);
   const [previewSceneId, setPreviewSceneId] = useState("");
@@ -305,8 +357,9 @@ export function ProjectDetailView({
     assignedHeroine.appearance && sourceHeroine?.appearance && assignedHeroine.appearance !== sourceHeroine.appearance ? "외형" : ""
   ].filter(Boolean) : [];
   const snapshotSavedAt = assignedHeroine?.sourceSnapshotCreatedAt || "마지막 수정 시각 정보 없음";
-  const doneSteps = summary.steps?.filter((step) => step.state === "done").length || 0;
-  const remainingSteps = (summary.steps?.length || 0) - doneSteps;
+  const visibleWorkflowSteps = (summary.steps || []).map(displayWorkflowStep);
+  const doneSteps = visibleWorkflowSteps.filter((step) => step.displayState === "done").length;
+  const remainingSteps = visibleWorkflowSteps.length - doneSteps;
   const projectRoutes = currentProject?.routes || [];
   const projectScenes = currentProject?.scenes || [];
   const currentRoute = useMemo(() => projectRoutes.find((route) => route.id === selectedRouteId) || projectRoutes[0] || null, [projectRoutes, selectedRouteId]);
@@ -329,10 +382,26 @@ export function ProjectDetailView({
   const activeBackgroundJob = backgroundJobs.find((job) => job.status !== "completed") || backgroundJobs[0] || null;
   const hasBackgroundAsset = Boolean(currentBackgroundAsset);
   const hasBackgroundJob = backgroundJobs.length > 0;
+  const detailProjectId = projectId || currentProject?.id || "";
+  const primaryActionTab = primaryActionTabFromSummary(summary);
+  const primaryActionLabel = summary.primaryLabel || primaryActionDisplayLabel(primaryActionTab);
+  const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
+  const showHeaderPrimaryAction = Boolean(detailProjectId) && !tabsWithLocalPrimaryAction.has(activeTab);
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
-  const currentPreviewReadiness = previewReadiness || emptyPreviewReadiness;
-  const previewRunBlocked = currentPreviewReadiness.canRun === false;
-  const currentExportPlan = exportPlan || emptyExportPlan;
+  const currentPreviewReadiness = previewReadiness || createPreviewReadinessFallback(currentProject, summary, hasBackgroundAsset, incompleteImageJobs, primaryActionTab, emptyPreviewReadiness);
+  const previewRunBlocked = currentPreviewReadiness.canRun === false || (!previewReadiness && !fallbackPreviewCanRun && currentPreviewReadiness.canRun !== true);
+  const currentExportPlan = exportPlan || createExportPlanFallback(currentProject, summary, hasBackgroundAsset, incompleteImageJobs, primaryActionTab, emptyExportPlan);
+  const previewResolutionActions = [
+    ...(currentPreviewReadiness.nextActions || []).map((action) => ({
+      label: action.label || "해결 탭으로 이동",
+      tab: projectTabFromValue(action.tab)
+    })),
+    ...(currentPreviewReadiness.missingItems || []).map((item) => ({
+      label: `${item.label || item.id || "누락 항목"} 해결`,
+      tab: projectTabFromValue(item.tab)
+    }))
+  ].filter((action, index, actions) => actions.findIndex((candidate) => candidate.tab === action.tab) === index);
+  const exportRunReady = Boolean(currentProject && (currentExportPlan.canExport === true || exportState === "ready" || exportState === "completed") && exportState !== "blocked" && exportState !== "failed");
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -340,18 +409,6 @@ export function ProjectDetailView({
       : eventState;
   const canExpandEvent = Boolean(assignedHeroine && currentRoute?.id && currentEventScene?.id && eventPrompt.trim() && !pendingPatch && !eventBusy);
   const canApproveEvent = Boolean(pendingPatch && pendingPatch.validation?.ok !== false && !eventBusy);
-  const detailProjectId = projectId || currentProject?.id || "";
-  const primaryActionTab: ProjectTabId = summary.primaryAction === "goToHeroine"
-    ? "heroine"
-    : summary.primaryAction === "goToBackground"
-      ? "background"
-      : summary.primaryAction === "goToStudio"
-        ? "studio"
-        : summary.primaryAction === "goToExport"
-          ? "export"
-          : "preview";
-  const primaryActionLabel = summary.primaryLabel || primaryActionDisplayLabel(primaryActionTab);
-  const activeTabLabel = detailTabs.find((tab) => tab.id === activeTab)?.label || activeTab;
   const suggestedBackgroundJobId = currentProject?.id ? `job-background-${currentProject.id}` : "job-background";
   const suggestedBackgroundAssetId = currentProject?.id ? `asset-background-${currentProject.id}` : "asset-background";
   const suggestedBackgroundPrompt = [
@@ -368,7 +425,7 @@ export function ProjectDetailView({
     || null;
   const backgroundPreviewUri = currentBackgroundAsset?.uri || activeBackgroundJob?.asset?.uri;
   const backgroundReplaceText = currentBackgroundAsset
-    ? `기존 배경 교체: ${currentBackgroundAsset.id}`
+    ? `기존 배경 교체: ${backgroundAssetDisplayLabel(currentBackgroundAsset)}`
     : "기존 배경 교체: 생성된 배경이 아직 없습니다.";
 
   const heroineState = useMemo(() => {
@@ -451,6 +508,7 @@ export function ProjectDetailView({
     setPreviewIssues([]);
     setPreviewReadiness(null);
     setPreviewState(nextState.previewState);
+    setFallbackPreviewCanRun(nextState.previewCanRun);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
     setExportPlan(null);
@@ -640,7 +698,7 @@ export function ProjectDetailView({
       setBackgroundStatus(nextJobs.some((job) => job.kind === "background") ? "배경 작업 상태를 불러왔습니다." : "배경 생성 전 확인 정보를 검토하세요.");
     } catch (error) {
       setAssetStatus(`이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
-      setBackgroundStatus(`app-server: 이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setBackgroundStatus(`생성 서버: 이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setAssetBusy(false);
     }
@@ -648,18 +706,18 @@ export function ProjectDetailView({
 
   async function runBackgroundGeneration(): Promise<void> {
     if (!currentProject) {
-      setBackgroundStatus("adapter: 배경을 생성할 프로젝트가 없습니다.");
+      setBackgroundStatus("프로젝트 확인: 배경을 생성할 프로젝트가 없습니다.");
       return;
     }
     const prompt = backgroundPrompt.trim();
     if (!prompt) {
-      setBackgroundStatus("adapter: 생성할 배경 설명을 입력하세요.");
+      setBackgroundStatus("입력 확인: 생성할 배경 설명을 입력하세요.");
       return;
     }
     const jobId = backgroundJobId.trim() || suggestedBackgroundJobId;
     setBackgroundBusy(true);
     setBackgroundErrors([]);
-    setBackgroundStatus("Codex app-server의 ChatGPT managed OAuth와 imageGeneration 경로로 배경 작업을 준비합니다.");
+    setBackgroundStatus("이미지 생성 연결로 배경 작업을 준비합니다.");
     try {
       const created = await postAuthedJson<ProjectApiResult>("/api/generation/jobs", {
         projectDirectory,
@@ -698,10 +756,10 @@ export function ProjectDetailView({
       }
       const resultAsset = run.assets?.find((asset) => asset.kind === "background");
       setBackgroundStatus(resultAsset
-        ? `저장 위치/에셋 연결 상태: ${resultAsset.id} 생성 완료. backgroundAssetId가 장면에 연결되었습니다.`
+        ? "저장 위치/에셋 연결 상태: 배경 생성 완료. 기본 장면에 연결되었습니다."
         : "저장 위치/에셋 연결 상태: 완료된 배경 결과를 유지했습니다.");
     } catch (error) {
-      setBackgroundStatus(`app-server: 배경 화면 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setBackgroundStatus(`생성 서버: 배경 화면 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
       setBackgroundErrors([error instanceof Error ? error.message : String(error)]);
     } finally {
       setBackgroundBusy(false);
@@ -811,6 +869,7 @@ export function ProjectDetailView({
     const messages = issues.map(issueText);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       setPreviewState("failed");
+      setFallbackPreviewCanRun(false);
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewIssues(messages);
@@ -820,18 +879,29 @@ export function ProjectDetailView({
         availableState: "failed",
         failureCause: result.error || messages[0] || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.",
         retryable: false,
-        nextAction: "다음 행동: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
+        nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
       });
       setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
       return false;
     }
     setPreviewIssues(messages);
+    setFallbackPreviewCanRun(true);
+    setPreviewReadiness({
+      ...currentPreviewReadiness,
+      state: "prepared",
+      availableState: "ready",
+      canRun: true,
+      failureCause: "",
+      retryable: false,
+      nextAction: "프리뷰를 실행할 수 있습니다."
+    });
     return true;
   }
 
   async function runPreview(startSceneId?: string): Promise<void> {
     setPreviewBusy(true);
     setPreviewState("running");
+    setFallbackPreviewCanRun(false);
     setPreviewReadiness({ ...currentPreviewReadiness, state: "running", availableState: "running" });
     setPreviewStatus("검증 실행 후 프리뷰 생성 중입니다.");
     try {
@@ -846,6 +916,7 @@ export function ProjectDetailView({
       if (result.ok === false) {
         const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false;
         setPreviewState(blocked ? "blocked" : "failed");
+        setFallbackPreviewCanRun(false);
         setPreviewRuntime(null);
         setPreviewSceneId("");
         setPreviewReadiness(result.previewReadiness || {
@@ -867,10 +938,12 @@ export function ProjectDetailView({
       const blocked = nextReadiness?.canRun === false;
       setPreviewReadiness(nextReadiness);
       setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
+      setFallbackPreviewCanRun(!blocked && result.validation?.ok !== false && result.runtime?.validation?.ok !== false);
       setPreviewStatus(blocked ? nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");
+      setFallbackPreviewCanRun(false);
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewReadiness({
@@ -879,7 +952,7 @@ export function ProjectDetailView({
         availableState: "failed",
         failureCause: message,
         retryable: true,
-        nextAction: "다음 행동: API 응답과 네트워크 상태를 확인한 뒤 다시 시도하세요."
+        nextAction: "다음 작업: API 응답과 네트워크 상태를 확인한 뒤 다시 시도하세요."
       });
       setPreviewStatus(`프리뷰 생성 실패: ${message}`);
     } finally {
@@ -935,21 +1008,21 @@ export function ProjectDetailView({
           <p className="eyebrow">Project Detail</p>
           <h2 id="projectDetailTitle">{currentProject?.title || (projectId ? projectId : shellProjectTitle)}</h2>
         </div>
-        <span className="state-chip">{activeTabLabel}</span>
-        <div className="page-primary-action">
-          <span>{primaryActionLabel}</span>
-          <Button icon={primaryActionTab === "heroine" ? <Heart size={16} /> : <ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${primaryActionTab}`)} variant="primary">
-            {primaryActionLabel}
-          </Button>
-        </div>
+        <StatusChip>{activeTabLabel}</StatusChip>
+        {showHeaderPrimaryAction ? (
+          <div className="page-primary-action">
+            <span>{primaryActionLabel}</span>
+            <Button icon={primaryActionTab === "heroine" ? <Heart size={16} /> : <ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${primaryActionTab}`)} variant="primary">
+              {primaryActionLabel}
+            </Button>
+          </div>
+        ) : null}
       </div>
       <dl className="summary-list detail-summary">
-        <div><dt>저장 위치</dt><dd>{projectDirectory || "저장 위치 미연결"}</dd></div>
         <div><dt>현재 상태</dt><dd>{currentProject ? "프로젝트 열림" : "복원 중"}</dd></div>
         <div><dt>상태 요약</dt><dd>{summary.primaryLabel || "프로젝트 제작 상태를 확인하세요."}</dd></div>
         {currentProject ? (
           <>
-            <div><dt>ID</dt><dd>{currentProject.id}</dd></div>
             <div><dt>개요</dt><dd>{currentProject.premise || "개요 없음"}</dd></div>
             <div><dt>히로인</dt><dd>{currentProject.characters?.length ?? 0}명</dd></div>
             <div><dt>루트/씬</dt><dd>{currentProject.routes?.length ?? 0}개 / {currentProject.scenes?.length ?? 0}개</dd></div>
@@ -959,6 +1032,14 @@ export function ProjectDetailView({
       {!currentProject ? (
         <p className="page-muted">상세 URL의 프로젝트를 복원하는 중입니다.</p>
       ) : null}
+      <DiagnosticDrawer summary="프로젝트 정보와 진단">
+        <dl className="summary-list detail-summary">
+          <div><dt>저장 위치</dt><dd>{projectDirectory || "저장 위치 미연결"}</dd></div>
+          <div><dt>프로젝트 ID</dt><dd>{currentProject?.id || detailProjectId || "확인 필요"}</dd></div>
+          <div><dt>검증 상태</dt><dd>{stateLabel(summary.validationState)}</dd></div>
+          <div><dt>이미지 작업</dt><dd>{stateLabel(summary.generationState)}</dd></div>
+        </dl>
+      </DiagnosticDrawer>
       <TabList
         ariaLabel="프로젝트 상세 탭"
         items={detailTabs.map((item) => ({
@@ -966,7 +1047,7 @@ export function ProjectDetailView({
           label: item.label,
           to: `/projects/${detailProjectId}/${item.id}`,
           badge: item.id === "background" && currentProject?.assets?.some((asset) => asset.kind === "background") ? "1/1" : undefined,
-          status: item.id === "heroine" && currentProject?.characters?.length ? "연결됨" : undefined
+          status: tabShellStatus(item.id, summary, currentProject, hasBackgroundAsset)
         }))}
         onBeforeNavigate={(item) => hasUnsavedProjectDraft ? window.confirm(`${item.label} 탭으로 이동할까요? 저장하지 않은 변경은 유지되지 않습니다.`) : true}
       />
@@ -981,40 +1062,45 @@ export function ProjectDetailView({
                   {summary.blockingIssues.map((issue) => <li key={issue}>{issue}</li>)}
                 </ul>
               ) : <p className="page-muted">차단된 항목이 없습니다.</p>}
-              <div className="button-row">
-                <Button icon={primaryActionTab === "heroine" ? <Heart size={16} /> : <ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${primaryActionTab}`)} variant="primary">
-                  {primaryActionLabel}
-                </Button>
-              </div>
+              <p className="page-muted">현재 권장 작업은 이 카드와 관련 탭의 기본 버튼에서 실행합니다.</p>
             </section>
             <section className="detail-card">
               <h3>해결해야 할 차단 항목</h3>
               {summary.blockingIssues?.length ? (
-                <ul className="compact-list">
-                  {summary.blockingIssues.map((issue) => <li key={issue}>{issue}</li>)}
-                </ul>
+                <>
+                  <ul className="compact-list">
+                    {summary.blockingIssues.map((issue) => <li key={issue}>{issue}</li>)}
+                  </ul>
+                  <div className="button-row">
+                    <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${primaryActionTab}`)} variant="primary">
+                      {primaryActionDisplayLabel(primaryActionTab)}
+                    </Button>
+                  </div>
+                </>
               ) : <p className="page-muted">차단된 항목이 없습니다.</p>}
             </section>
             <section className="detail-card">
               <h3>완료된 단계 / 남은 단계</h3>
               <p>완료된 단계 {doneSteps}개 · 남은 단계 {remainingSteps}개</p>
               <ol className="stepper">
-                {summary.steps?.map((step) => <li className={`step-${step.state}`} key={step.id}>{step.label}</li>)}
+                {visibleWorkflowSteps.map((step) => <li className={`step-${step.displayState}`} key={step.id}>{step.displayLabel}</li>)}
               </ol>
             </section>
             <section className="detail-card">
               <h3>상태 요약</h3>
-              <dl className="summary-list">
-                <div><dt aria-label="validationState">문제 확인</dt><dd>{stateLabel(summary.validationState)}</dd></div>
-                <div><dt aria-label="generationState">이미지 작업</dt><dd>{stateLabel(summary.generationState)}</dd></div>
-                <div><dt aria-label="previewState">프리뷰</dt><dd>{stateLabel(summary.previewState)}</dd></div>
-                <div><dt aria-label="exportState">내보내기</dt><dd>{stateLabel(summary.exportState)}</dd></div>
-              </dl>
+              <TabStatusList
+                items={[
+                  { id: "validationState", label: "문제 확인", status: stateLabel(summary.validationState), tone: summary.validationState === "valid" ? "success" : "warning" },
+                  { id: "generationState", label: "이미지 작업", status: stateLabel(summary.generationState), tone: summary.generationState === "completed" ? "success" : "warning" },
+                  { id: "previewState", label: "프리뷰", status: stateLabel(summary.previewState), tone: summary.previewState === "ready" ? "success" : "neutral" },
+                  { id: "exportState", label: "내보내기", status: stateLabel(summary.exportState), tone: summary.exportState === "completed" || summary.exportState === "ready" ? "success" : "neutral" }
+                ]}
+              />
             </section>
           </div>
         ) : null}
         {activeTab === "heroine" ? (
-          <div className="detail-tab-grid">
+          <div className="detail-tab-grid snapshot-comparison-grid">
             <section className="detail-card">
               <h3>히로인 스냅샷</h3>
               {heroineState === "loading" ? <p>히로인 라이브러리를 불러오는 중입니다.</p> : null}
@@ -1044,11 +1130,16 @@ export function ProjectDetailView({
                   <dl className="summary-list">
                     <div><dt>프로젝트에 저장된 표시 이름</dt><dd>{assignedHeroine.displayName || "이름 없음"}</dd></div>
                     <div><dt>라이브러리 원본 이름</dt><dd>{sourceHeroine?.name || assignedHeroine.sourceHeroineName || "원본 이름 정보 없음"}</dd></div>
-                    <div><dt>원본 히로인 ID</dt><dd>{assignedHeroine.sourceHeroineId || assignedHeroine.id}</dd></div>
                     <div><dt>스냅샷 생성 시각</dt><dd>{assignedHeroine.sourceSnapshotCreatedAt || "기록 없음"}</dd></div>
                     <div><dt>저장 상태</dt><dd>{currentProject ? "프로젝트에 저장됨" : "저장 상태 확인 필요"}</dd></div>
                     <div><dt>마지막 수정 시각</dt><dd>{sourceHeroine?.updatedAt || snapshotSavedAt}</dd></div>
                   </dl>
+                  <DiagnosticDrawer summary="히로인 스냅샷 진단">
+                    <dl className="summary-list">
+                      <div><dt>원본 히로인 ID</dt><dd>{assignedHeroine.sourceHeroineId || assignedHeroine.id}</dd></div>
+                      <div><dt>프로젝트 캐릭터 ID</dt><dd>{assignedHeroine.id || "기록 없음"}</dd></div>
+                    </dl>
+                  </DiagnosticDrawer>
                   <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/background`)} variant="primary">
                     배경 화면 생성으로 이동
                   </Button>
@@ -1063,7 +1154,6 @@ export function ProjectDetailView({
                   <dl className="summary-list">
                     <div><dt>원본과 다른 필드</dt><dd>{snapshotDifferences.length ? snapshotDifferences.join(", ") : "현재 감지된 차이 없음"}</dd></div>
                     <div><dt>원본 설명</dt><dd>{sourceHeroine?.summary || sourceHeroine?.description || assignedHeroine.description || "원본 설명 정보 없음"}</dd></div>
-                    <div><dt>프로젝트 캐릭터 ID</dt><dd>{assignedHeroine.id || "기록 없음"}</dd></div>
                   </dl>
                   <p className="page-muted">Alpha는 프로젝트당 히로인 1명만 사용합니다. 라이브러리 원본이 바뀌어도 기존 프로젝트 스냅샷은 자동 변경되지 않습니다.</p>
                   <div className="button-row">
@@ -1091,14 +1181,16 @@ export function ProjectDetailView({
         {activeTab === "studio" ? (
           <div className="detail-tab-grid" data-testid="studio-under-construction">
             <section className="detail-card detail-card-wide">
-              <h3>제작 탭은 준비 중입니다.</h3>
-              <p>Alpha에서는 시나리오 작성, 분기 편집, 장면 구성 흐름이 이 영역에 들어올 예정입니다.</p>
+              <EmptyState
+                title="제작 탭은 준비 중입니다."
+                description="Alpha에서는 시나리오 작성, 분기 편집, 장면 구성 흐름이 이 영역에 들어올 예정입니다."
+              />
               <ul className="compact-list">
                 <li>시나리오 작성: 프로젝트 스냅샷과 배경 에셋을 바탕으로 장면 초안을 다룹니다.</li>
                 <li>분기 편집: 선택지와 엔딩 도달 상태를 시각적으로 조정합니다.</li>
                 <li>장면 구성: 대사, 배경, 캐릭터 표시를 한 장면 단위로 편집합니다.</li>
               </ul>
-              <div className="inline-status">실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
+              <div className="inline-status">제작으로 이동 상태: 준비 중. 실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
             </section>
           </div>
         ) : null}
@@ -1106,16 +1198,21 @@ export function ProjectDetailView({
           <div className="detail-tab-grid">
             <section className="detail-card">
               <h3>대상 프로젝트</h3>
-              <span className="state-chip">배경 {hasBackgroundAsset ? "1/1" : "0/1"}</span>
+              <StatusChip tone={hasBackgroundAsset ? "success" : "warning"}>배경 {hasBackgroundAsset ? "1/1" : "0/1"}</StatusChip>
               <p className="page-muted">Alpha에서는 프로젝트당 배경 1개만 생성할 수 있습니다.</p>
               <dl className="summary-list">
                 <div><dt>제목</dt><dd>{currentProject?.title || shellProjectTitle}</dd></div>
-                <div><dt>프로젝트 ID</dt><dd>{detailProjectId || "확인 필요"}</dd></div>
-                <div><dt>저장될 결과 위치</dt><dd>{backgroundOutputLocation}</dd></div>
                 <div><dt>기존 배경 교체</dt><dd>{backgroundReplaceText}</dd></div>
-                <div><dt>생성 경로</dt><dd>Codex app-server · ChatGPT managed OAuth · imageGeneration</dd></div>
+                <div><dt>생성 연결</dt><dd>이미지 생성 연결</dd></div>
               </dl>
-              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. OAuth, app-server, adapter, 응답 파싱 오류를 구분해 표시합니다.</p>
+              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. 연결 인증, 생성 서버, 생성 처리, 응답 형식 오류를 구분해 표시합니다.</p>
+              <DiagnosticDrawer summary="배경 대상 진단">
+                <dl className="summary-list">
+                  <div><dt>프로젝트 ID</dt><dd>{detailProjectId || "확인 필요"}</dd></div>
+                  <div><dt>저장될 결과 위치</dt><dd>{backgroundOutputLocation}</dd></div>
+                  <div><dt>생성 경로</dt><dd>Codex app-server · ChatGPT managed OAuth · imageGeneration</dd></div>
+                </dl>
+              </DiagnosticDrawer>
             </section>
             <section className="detail-card">
               <h3>생성할 배경 설명</h3>
@@ -1123,25 +1220,35 @@ export function ProjectDetailView({
                 <span>프롬프트</span>
                 <textarea className="event-prompt-input" disabled={backgroundBusy} onChange={(event) => setBackgroundPrompt(event.target.value)} placeholder={suggestedBackgroundPrompt} value={backgroundPrompt} />
               </label>
-              <dl className="summary-list">
-                <div><dt>작업 ID</dt><dd>{backgroundJobId || suggestedBackgroundJobId}</dd></div>
-                <div><dt>결과 에셋 ID</dt><dd>{suggestedBackgroundAssetId}</dd></div>
-                <div><dt>backgroundAssetId</dt><dd>{backgroundLinkedScene?.backgroundAssetId || "생성 후 기본 장면에 연결"}</dd></div>
-              </dl>
+              <DiagnosticDrawer summary="배경 생성 작업 진단">
+                <dl className="summary-list">
+                  <div><dt>작업 ID</dt><dd>{backgroundJobId || suggestedBackgroundJobId}</dd></div>
+                  <div><dt>결과 에셋 ID</dt><dd>{suggestedBackgroundAssetId}</dd></div>
+                  <div><dt>backgroundAssetId</dt><dd>{backgroundLinkedScene?.backgroundAssetId || "생성 후 기본 장면에 연결"}</dd></div>
+                </dl>
+              </DiagnosticDrawer>
               <div className="button-row">
-                <Button disabled={backgroundBusy || !currentProject} icon={<ImageIcon size={16} />} onClick={() => void runBackgroundGeneration()} variant="primary">
-                  배경 생성
-                </Button>
+                {hasBackgroundAsset ? (
+                  <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="primary">
+                    프리뷰로 이동
+                  </Button>
+                ) : (
+                  <Button disabled={backgroundBusy || !currentProject} icon={<ImageIcon size={16} />} onClick={() => void runBackgroundGeneration()} variant="primary">
+                    배경 생성
+                  </Button>
+                )}
                 <Button disabled={backgroundBusy || !currentProject} icon={<RefreshCw size={16} />} onClick={() => void runBackgroundGeneration()}>
-                  다시 시도
+                  {hasBackgroundAsset ? "배경 교체 생성" : "다시 시도"}
                 </Button>
                 <Button disabled={assetBusy || backgroundBusy} icon={<RefreshCw size={16} />} onClick={() => void loadGenerationJobs()} variant="ghost">
                   새로고침
                 </Button>
               </div>
             </section>
-            <section className="detail-card detail-card-wide">
-              <h3>저장 위치/에셋 연결 상태</h3>
+            <AssetStatePanel
+              title="저장 위치/에셋 연결 상태"
+              tone={backgroundErrors.length ? "warning" : hasBackgroundAsset ? "success" : "neutral"}
+            >
               <div className={backgroundErrors.length ? "inline-status warning" : "inline-status success"}>
                 {backgroundStatus}
               </div>
@@ -1150,24 +1257,31 @@ export function ProjectDetailView({
                   {backgroundErrors.map((error) => <li key={error}>{error}</li>)}
                 </ul>
               ) : (
-                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 OAuth, app-server, adapter, 응답 파싱 중 하나로 분류됩니다.</p>
+                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 연결 인증, 생성 서버, 생성 처리, 응답 형식 중 하나로 분류됩니다.</p>
               )}
               <dl className="summary-list">
-                <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri || backgroundOutputLocation}</dd></div>
-                <div><dt>에셋 연결</dt><dd>{currentBackgroundAsset?.id || activeBackgroundJob?.outputAssetId || suggestedBackgroundAssetId}</dd></div>
-                <div><dt>장면 연결</dt><dd>{backgroundLinkedScene ? `${backgroundLinkedScene.label || backgroundLinkedScene.id} · backgroundAssetId ${backgroundLinkedScene.backgroundAssetId || "대기 중"}` : "연결할 장면 없음"}</dd></div>
+                <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri ? "생성된 배경 경로는 진단에서 확인" : "생성 전"}</dd></div>
+                <div><dt>에셋 연결</dt><dd>{backgroundConnectionText(currentBackgroundAsset, activeBackgroundJob)}</dd></div>
+                <div><dt>장면 연결</dt><dd>{backgroundSceneConnectionText(backgroundLinkedScene)}</dd></div>
               </dl>
+              <DiagnosticDrawer summary="배경 에셋 경로 진단">
+                <dl className="summary-list">
+                  <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri || backgroundOutputLocation}</dd></div>
+                  <div><dt>에셋 ID</dt><dd>{currentBackgroundAsset?.id || activeBackgroundJob?.outputAssetId || suggestedBackgroundAssetId}</dd></div>
+                  <div><dt>asset uri</dt><dd>{currentBackgroundAsset?.uri || activeBackgroundJob?.asset?.uri || "생성 후 확인"}</dd></div>
+                </dl>
+              </DiagnosticDrawer>
               {backgroundPreviewUri ? <img className="asset-preview-image" alt={currentBackgroundAsset?.label || "생성된 배경 미리보기"} src={backgroundPreviewUri} /> : <p className="page-muted">성공 시 생성된 배경 미리보기가 여기에 표시됩니다.</p>}
               {backgroundJobs.length ? (
                 <ul className="asset-job-list">
                   {backgroundJobs.map((job) => (
                     <li key={job.id || job.outputAssetId}>
-                      {job.asset?.uri ? <img alt={job.asset.label || job.outputAssetId || "결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
+                      {job.asset?.uri ? <img alt={job.asset.label || "생성된 결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
                       <div>
-                        <strong>{job.id || imageJobKindLabel(job.kind)}</strong>
-                        <span>{imageJobKindLabel(job.kind)} · {jobStatusLabel(job.status)} · {job.provider || "provider 확인 필요"}</span>
+                        <strong>{imageJobKindLabel(job.kind)}</strong>
+                        <span>{jobStatusLabel(job.status)} · {generationProviderText(job.provider)}</span>
                         <p>{job.prompt || "프롬프트 없음"}</p>
-                        <small>결과 에셋: {job.outputAssetId || job.asset?.id || "대기 중"}</small>
+                        <small>{job.asset?.uri ? "결과 에셋 연결됨" : "결과 에셋 대기 중"}</small>
                         {job.failureMessage ? <small>{job.failureMessage}</small> : null}
                       </div>
                     </li>
@@ -1177,7 +1291,7 @@ export function ProjectDetailView({
                 <p className="page-muted">배경 생성 전에는 작업 목록이 비어 있습니다.</p>
               )}
               <div className="button-row">
-                <Button disabled={assetBusy || backgroundBusy || plannedImageJobIds.length === 0} icon={<Play size={16} />} onClick={() => void runImageJobs(plannedImageJobIds)} variant="primary">
+                <Button disabled={assetBusy || backgroundBusy || plannedImageJobIds.length === 0} icon={<Play size={16} />} onClick={() => void runImageJobs(plannedImageJobIds)}>
                   이미지 만들기
                 </Button>
                 <Button disabled={assetBusy || backgroundBusy || failedImageJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(failedImageJobIds, true)}>
@@ -1187,24 +1301,27 @@ export function ProjectDetailView({
                   프리뷰로 이동
                 </Button>
               </div>
-            </section>
+            </AssetStatePanel>
           </div>
         ) : null}
         {activeTab === "preview" ? (
           <div className="detail-tab-grid">
-            <section className="detail-card">
-              <h3>프리뷰 생성</h3>
+            <ReadinessPanel
+              title="프리뷰 생성"
+              description="필수 데이터와 검증 상태를 확인한 뒤 플레이 가능한 프리뷰로 전환합니다."
+              tone={previewState === "failed" || previewState === "blocked" ? "warning" : "success"}
+            >
               <span className="state-chip">{previewStateLabel(previewState)}</span>
               <div className={previewState === "failed" || previewState === "blocked" ? "inline-status warning" : "inline-status success"}>
                 {previewStatus}
               </div>
-              <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. availableState: {currentPreviewReadiness.availableState || "unknown"}</p>
+              <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. 현재 상태: {previewReadinessStateLabel(currentPreviewReadiness.availableState || currentPreviewReadiness.state)}</p>
               <dl className="summary-list">
-                <div><dt>previewReadiness</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
-                <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${name}: ${value}`).join(" · ") || "확인 전"}</dd></div>
+                <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
+                <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${requiredDataNameLabel(name)}: ${requiredDataValueLabel(value)}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>
-                <div><dt>다음 행동</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
+                <div><dt>다음 작업</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
               </dl>
               {currentPreviewReadiness.missingItems?.length ? (
                 <div>
@@ -1213,9 +1330,9 @@ export function ProjectDetailView({
                     {currentPreviewReadiness.missingItems.map((item) => <li key={`${item.id}-${item.tab}`}>{item.label || item.id}</li>)}
                   </ul>
                   <div className="button-row">
-                    {(currentPreviewReadiness.nextActions || []).map((action) => (
-                      <Button key={`${action.tab}-${action.label}`} icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${action.tab || tabFromAction(summary.primaryAction)}`)} variant="ghost">
-                        해결 탭으로 이동
+                    {previewResolutionActions.map((action) => (
+                      <Button key={`${action.tab}-${action.label}`} icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/${action.tab}`)} variant="ghost">
+                        {action.label}
                       </Button>
                     ))}
                   </div>
@@ -1243,9 +1360,9 @@ export function ProjectDetailView({
                   {previewIssues.map((issue) => <li key={issue}>{issue}</li>)}
                 </ul>
               ) : <p className="page-muted">검증 문제 없음</p>}
-            </section>
+            </ReadinessPanel>
             <section className="detail-card">
-              <h3>runtime 플레이</h3>
+              <h3>실행 화면</h3>
               {currentPreviewScene ? (
                 <div className="runtime-preview">
                   {currentPreviewScene.cgAsset?.uri ? <img alt={currentPreviewScene.cgAsset.label || "CG"} src={currentPreviewScene.cgAsset.uri} /> : null}
@@ -1260,50 +1377,58 @@ export function ProjectDetailView({
                   {currentPreviewScene.ending ? <small>엔딩: {currentPreviewScene.ending.title}</small> : null}
                 </div>
               ) : (
-                <p className="page-muted">프리뷰를 생성하면 runtime 플레이 화면이 표시됩니다.</p>
+                <p className="page-muted">프리뷰를 생성하면 실행 화면이 표시됩니다.</p>
               )}
-              <details className="developer-drawer">
-                <summary>개발자 상세</summary>
+              <DiagnosticDrawer summary="개발자 상세">
                 <pre>{previewRuntime ? JSON.stringify({ label: "runtime JSON", runtime: previewRuntime }, null, 2) : "runtime JSON 없음"}</pre>
-              </details>
+              </DiagnosticDrawer>
             </section>
           </div>
         ) : null}
         {activeTab === "export" ? (
           <div className="detail-tab-grid">
-            <section className="detail-card">
-              <h3>내보내기 실행</h3>
-              <span className="state-chip">{exportStateLabel(exportState)}</span>
+            <ReadinessPanel
+              title="내보내기 실행"
+              description="로컬 데스크톱형 웹 앱 산출물을 만들기 전 차단 항목과 검증 상태를 확인합니다."
+              tone={exportState === "failed" || exportState === "blocked" ? "warning" : "success"}
+            >
+              <StatusChip tone={exportState === "failed" || exportState === "blocked" ? "warning" : exportState === "completed" ? "success" : "neutral"}>{exportStateLabel(exportState)}</StatusChip>
               <div className={exportState === "failed" || exportState === "blocked" ? "inline-status warning" : "inline-status success"}>
                 {exportStatus}
               </div>
-              <p className="page-muted">내보내기 대상: 로컬 데스크톱형 웹 앱 · githubPagesTarget: {String(currentExportPlan.githubPagesTarget)}</p>
-              <p className="page-muted">GitHub Pages는 레거시 대상이며 이번 내보내기 대상이 아닙니다.</p>
+              <p className="page-muted">내보내기 대상: 로컬 데스크톱형 웹 앱</p>
               <dl className="summary-list">
-                <div><dt>검증 요약</dt><dd>validationSummary {currentExportPlan.validationSummary?.ok ? "통과" : "차단"} · issues {currentExportPlan.validationSummary?.issueCount ?? 0}</dd></div>
+                <div><dt>검증 요약</dt><dd>{exportValidationSummaryText(currentExportPlan)}</dd></div>
                 <div><dt>포함될 프로젝트 데이터</dt><dd>{currentExportPlan.includedData?.join(" · ") || "확인 전"}</dd></div>
-                <div><dt>포함될 에셋</dt><dd>{currentExportPlan.includedAssets?.length ? currentExportPlan.includedAssets.map((asset) => `${asset.kind}:${asset.id}`).join(" · ") : "없음"}</dd></div>
-                <div><dt>차단 항목</dt><dd>{currentExportPlan.blockers?.length ? currentExportPlan.blockers.map((blocker) => blocker.message || blocker.id || blocker.kind).join(" · ") : "없음"}</dd></div>
+                <div><dt>포함될 에셋</dt><dd>{exportAssetSummaryText(currentExportPlan.includedAssets)}</dd></div>
+                <div><dt>차단 항목</dt><dd>{exportBlockerSummaryText(currentExportPlan.blockers)}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentExportPlan.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentExportPlan.retryable ? "가능" : "불필요"}</dd></div>
-                <div><dt>다음 행동</dt><dd>{currentExportPlan.nextAction || "내보내기를 실행하세요."}</dd></div>
+                <div><dt>다음 작업</dt><dd>{currentExportPlan.nextAction || "내보내기를 실행하세요."}</dd></div>
               </dl>
-              <p className="page-muted">실패 상태가 완료 상태로 오인되지 않습니다: {currentExportPlan.state === "failed" || currentExportPlan.state === "blocked" ? "완료 아님" : currentExportPlan.state || "확인 전"}</p>
+              <p className="page-muted">현재 실행 상태: {exportPlanStateLabel(currentExportPlan.state)}</p>
               {incompleteImageJobs.length ? (
                 <ul className="compact-list">
-                  {incompleteImageJobs.map((job) => <li key={job.id}>필수 이미지 미완료: {imageJobKindLabel(job.kind)} · {job.id}</li>)}
+                  {incompleteImageJobs.map((job) => <li key={job.id || job.outputAssetId || imageJobKindLabel(job.kind)}>필수 이미지 미완료: {imageJobKindLabel(job.kind)}</li>)}
                 </ul>
               ) : <p className="page-muted">필수 배경 화면/CG 작업이 완료됐거나 필요하지 않습니다.</p>}
               <div className="button-row">
-                <Button disabled={exportBusy || !currentProject} icon={<CheckCircle2 size={16} />} onClick={() => void runExport()} variant="primary">
+                <Button disabled={exportBusy || !exportRunReady} icon={<CheckCircle2 size={16} />} onClick={() => void runExport()} variant={exportRunReady ? "primary" : "secondary"}>
                   내보내기 실행
                 </Button>
                 <Button icon={<ArrowRight size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
-                  다음 action: 프리뷰 확인
+                  다음 작업: 프리뷰 확인
                 </Button>
               </div>
-              <p className="page-muted">EXPORT_BLOCKED 상태는 검증 실패나 필수 이미지 작업 미완료일 때 표시됩니다.</p>
-            </section>
+              <p className="page-muted">검증 실패나 필수 이미지 작업이 미완료이면 내보내기가 차단됩니다.</p>
+              <DiagnosticDrawer summary="내보내기 세부 진단">
+                <dl className="summary-list">
+                  <div><dt>대상</dt><dd>로컬 데스크톱형 웹 앱</dd></div>
+                  <div><dt>계획 상태</dt><dd>{exportPlanStateLabel(currentExportPlan.state)}</dd></div>
+                  <div><dt>포함 데이터</dt><dd>{currentExportPlan.includedData?.join(" · ") || "확인 전"}</dd></div>
+                </dl>
+              </DiagnosticDrawer>
+            </ReadinessPanel>
             <section className="detail-card">
               <h3>산출물 위치</h3>
               {exportResult ? (

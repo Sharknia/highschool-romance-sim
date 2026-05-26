@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock3, Eye, RotateCw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock3, Copy, Eye, RotateCw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button, ContentList, type ContentListState } from "../../components/ui";
 import type { RecentProject } from "./projectPageTypes";
@@ -56,12 +56,16 @@ function projectStatusSummary(entry: RecentProject): string {
   return entry.missing ? "프로젝트 폴더를 찾을 수 없습니다." : validationLabel(entry.validationState);
 }
 
-function renderProjectField(label: string, value: string) {
+function renderProjectField(label: string, value: string, compact = false) {
   return (
-    <span className="recent-project-field">
-      <b>{label}</b> {value}
+    <span className={compact ? "recent-project-field recent-project-field-compact" : "recent-project-field"} title={compact ? value : undefined}>
+      <b>{label}</b> <span>{value}</span>
     </span>
   );
+}
+
+function copyProjectDirectory(entry: RecentProject): void {
+  void navigator.clipboard?.writeText(entry.projectDirectory);
 }
 
 export function ProjectList({
@@ -163,7 +167,7 @@ export function ProjectList({
       <div className="recent-project-toolbar">
         <label className="search-row">
           <Search size={16} />
-          <input aria-label="프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, projectId로 필터" value={query} />
+          <input aria-label="프로젝트 필터" onChange={(event) => setQuery(event.target.value)} placeholder="제목, 경로, 저장 식별자로 필터" value={query} />
         </label>
         <div className="recent-project-counts">
           <span>총 {totalCount}개</span>
@@ -183,7 +187,7 @@ export function ProjectList({
           title: entry.title,
           description: (
             <>
-              {renderProjectField("저장 위치", entry.projectDirectory)}
+              {renderProjectField("저장 위치", entry.projectDirectory, true)}
               {renderProjectField("현재 상태", projectCurrentState(entry))}
               {renderProjectField("상태 요약", projectStatusSummary(entry))}
               {renderProjectField("최근 수정", formatRecentProjectDate(entry.lastValidatedAt))}
@@ -192,18 +196,18 @@ export function ProjectList({
           ),
           meta: (
             <>
-              <Clock3 size={14} /> 마지막 작업 시각 {formatRecentProjectDate(entry.lastOpenedAt)} · 최근 수정 {formatRecentProjectDate(entry.lastValidatedAt)} · {entry.projectId}
+              <Clock3 size={14} /> 마지막 작업 시각 {formatRecentProjectDate(entry.lastOpenedAt)} · 최근 수정 {formatRecentProjectDate(entry.lastValidatedAt)}
             </>
           ),
           state: entry.missing ? (
-            <span className="state-chip state-warning"><AlertTriangle size={14} /> missing</span>
+            <span className="state-chip state-warning"><AlertTriangle size={14} /> 재연결 필요</span>
           ) : (
-            <span className="state-chip">ready</span>
+            <span className="state-chip">열기 가능</span>
           ),
           onSelect: () => openFromCard(entry),
           actions: (
             <>
-              <Button aria-label={`${entry.title} 상세보기 버튼`} disabled={busy} icon={<Eye size={16} />} onClick={() => openFromCard(entry)} variant="primary">
+              <Button aria-label={`${entry.title} 상세보기 버튼`} disabled={busy} icon={<Eye size={16} />} onClick={() => openFromCard(entry)} variant={entry.missing ? "secondary" : "primary"}>
                 상세보기
               </Button>
               {entry.missing ? (
@@ -211,15 +215,17 @@ export function ProjectList({
                   재연결
                 </Button>
               ) : null}
-              <button
+              <Button aria-label={`${entry.title} 저장 위치 복사: ${entry.projectDirectory}`} disabled={busy} icon={<Copy size={16} />} onClick={() => copyProjectDirectory(entry)} variant="quiet">
+                경로 복사
+              </Button>
+              <Button
                 aria-label={`${entry.title} 삭제`}
-                className="icon-button icon-button-danger"
                 disabled={busy}
+                icon={<Trash2 size={17} />}
+                iconOnly
                 onClick={(event) => onPrepareDelete(entry, event.currentTarget)}
-                type="button"
-              >
-                <Trash2 size={17} aria-hidden="true" />
-              </button>
+                variant="danger"
+              />
             </>
           )
         }))}

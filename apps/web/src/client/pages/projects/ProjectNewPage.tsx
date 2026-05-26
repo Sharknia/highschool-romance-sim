@@ -2,7 +2,7 @@ import { ArrowLeft, Database, FolderOpen, Save, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, StatusBanner } from "../../components/ui";
+import { Button, StatusBanner, StatusRegion } from "../../components/ui";
 import { useWorkspaceShell } from "../../components/WorkspaceLayout";
 import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePageTypes";
 import type { ProjectApiResult } from "./projectPageTypes";
@@ -33,7 +33,7 @@ function statusTone(status: string): "neutral" | "waiting" | "success" | "error"
 
 function createProjectErrorMessage(result: ProjectApiResult): string {
   if (result.code === "PROJECT_ID_RESERVED") {
-    return result.message || result.error || "예약된 프로젝트 ID입니다.";
+    return result.message || result.error || "예약된 저장 식별자입니다.";
   }
   if (result.code === "PROJECT_ID_CONFLICT" || result.code === "PROJECT_ID_MISMATCH") {
     return "저장 위치가 이미 존재합니다. 기존 프로젝트 열기, 다른 위치 선택, 생성 취소 중 하나를 선택하세요.";
@@ -118,7 +118,7 @@ export function ProjectNewPage() {
 
   async function createProject(): Promise<void> {
     if (!canSubmit) {
-      setStatus("프로젝트 제목과 프로젝트 ID를 입력해야 합니다.");
+      setStatus("프로젝트 제목과 저장 식별자를 입력해야 합니다.");
       return;
     }
     if (mode === "heroine" && !selectedHeroine) {
@@ -170,7 +170,7 @@ export function ProjectNewPage() {
         <div>
           <p className="eyebrow">New Project</p>
           <h1 id="projectNewTitle">새 프로젝트 만들기</h1>
-          <p>저장 후 프로젝트 ID는 변경할 수 없습니다. 제목 바로 아래에서 ID를 확인하고 저장하세요.</p>
+          <p>저장 후 자동 식별자는 변경할 수 없습니다. 제목 바로 아래에서 확인하고 저장하세요.</p>
         </div>
         <div className="page-primary-action">
           <span>{modeDescription}</span>
@@ -183,9 +183,11 @@ export function ProjectNewPage() {
         </div>
       </header>
 
-      <StatusBanner tone={statusTone(status)}>
-        <span className="page-status">{status}</span>
-      </StatusBanner>
+      <StatusRegion>
+        <StatusBanner tone={statusTone(status)}>
+          <span className="page-status">{status}</span>
+        </StatusBanner>
+      </StatusRegion>
 
       <section className="page-panel-grid project-new-grid">
         <article className="page-panel">
@@ -218,18 +220,18 @@ export function ProjectNewPage() {
             <input onChange={(event) => updateTitle(event.target.value)} placeholder="예: 하루와 도서관" value={title} />
           </label>
           <label className="field-row">
-            <span>프로젝트 ID</span>
+            <span>저장 식별자</span>
             <input
               onChange={(event) => {
                 setProjectIdTouched(true);
                 setProjectId(event.target.value);
               }}
-              placeholder="url-safe-project-id"
+              placeholder="예: haru-library"
               value={projectId}
             />
           </label>
           <label className="field-row">
-            <span>premise</span>
+            <span>작품 전제</span>
             <textarea onChange={(event) => setPremise(event.target.value)} placeholder="프로젝트의 기본 전제를 입력하세요." value={premise} />
           </label>
         </article>

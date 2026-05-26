@@ -34,6 +34,7 @@ export function HeroineCreatePage() {
   const [draft, setDraft] = useState<HeroineDraft>(() => createEmptyHeroineDraft());
   const draftRef = useRef(draft);
   const [existingIds, setExistingIds] = useState<string[]>([]);
+  const [validationSubmitted, setValidationSubmitted] = useState(false);
   const [stagedPortraitRef, setStagedPortraitRef] = useState<HeroineLibraryResult["stagedPortraitRef"]>();
   const emptyDraft = useMemo(() => createEmptyHeroineDraft(), []);
   const dirty = editableCreateSnapshot(draft) !== editableCreateSnapshot(emptyDraft);
@@ -41,8 +42,12 @@ export function HeroineCreatePage() {
   const idConflict = Boolean(draft.id.trim() && existingIds.includes(draft.id.trim()));
   const allIssues = idConflict ? [...validationIssues, "이미 같은 자동 식별자가 있습니다."] : validationIssues;
   const canSave = allIssues.length === 0 && !state.includes("saving");
+  const validationFailureSummary = `필수값을 모두 입력해야 저장할 수 있습니다. ${allIssues.join(" ")}`;
+  const requiredWaitingSummary = "필수 입력 대기: 이름, 설명, 성격, 말투, 외형 설명을 입력하면 저장할 수 있습니다.";
   const actionSummary = allIssues.length > 0
-    ? `필수값을 모두 입력해야 저장할 수 있습니다. ${allIssues.join(" ")}`
+    ? validationSubmitted
+      ? validationFailureSummary
+      : requiredWaitingSummary
     : "저장하면 편집 화면으로 이동합니다. 저장 후 상세보기는 상세 화면으로 이동합니다.";
 
   useUnsavedHeroineNavigationGuard(dirty, allowNavigationRef, "저장하지 않은 히로인 draft가 있습니다. 페이지를 떠나시겠습니까?");
@@ -81,6 +86,11 @@ export function HeroineCreatePage() {
 
   async function save(navigateAfterSave = false): Promise<void> {
     if (!canSave) {
+      if (allIssues.length > 0) {
+        setValidationSubmitted(true);
+        setStatus(validationFailureSummary);
+        return;
+      }
       setStatus(actionSummary);
       return;
     }
@@ -158,6 +168,7 @@ export function HeroineCreatePage() {
       summary={actionSummary}
       title="새 히로인 만들기"
       titleId="heroineCreateTitle"
+      validationSubmitted={validationSubmitted}
     />
   );
 }
