@@ -2,6 +2,9 @@ export type VnMakerProjectVersion = "vn-maker/v1";
 export type ValidationSeverity = "error" | "warning";
 export type AssetKind = "background" | "portrait" | "expression" | "cg" | "audio" | "other";
 export type GenerationJobKind = "character" | "route" | "scene" | "dialogue" | "portrait" | "expression" | "cg" | "background";
+export type AssetSource = "generated" | "imported" | "placeholder" | "dummy" | "mock";
+export const MOCK_IMAGE_PACK_ADAPTER = "mock-image-pack-adapter";
+export type GenerationJobProvider = "codex-text-adapter" | "image-generation-adapter" | "mock-adapter" | typeof MOCK_IMAGE_PACK_ADAPTER;
 
 const GENERATION_JOB_KINDS: readonly GenerationJobKind[] = ["character", "route", "scene", "dialogue", "portrait", "expression", "cg", "background"];
 
@@ -159,8 +162,19 @@ export interface VnMakerAsset {
   kind: AssetKind;
   label: string;
   uri?: string;
-  source?: "generated" | "imported" | "placeholder";
+  source?: AssetSource;
   generationJobId?: string;
+  provenance?: VnMakerAssetProvenance;
+}
+
+export interface VnMakerAssetProvenance {
+  adapter?: GenerationJobProvider | string;
+  fallbackReason?: string;
+  packId?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
+  license?: string;
+  sourceUri?: string;
 }
 
 export interface VnMakerGenerationJob {
@@ -169,10 +183,14 @@ export interface VnMakerGenerationJob {
   targetId: string;
   prompt: string;
   style?: string;
-  provider: "codex-text-adapter" | "image-generation-adapter" | "mock-adapter";
+  provider: GenerationJobProvider;
   status: "planned" | "running" | "completed" | "failed";
   outputAssetId?: string;
   failureMessage?: string;
+  dummy?: boolean;
+  fallbackReason?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
 }
 
 export interface ValidationIssue {
@@ -222,6 +240,24 @@ export interface AssetManifest {
   requiredAssets: VnMakerAsset[];
   missingAssetReferences: string[];
   generationJobs: VnMakerGenerationJob[];
+}
+
+export interface MockImagePackManifestAsset {
+  id: string;
+  kind: Extract<AssetKind, "portrait" | "expression" | "cg" | "background">;
+  target: string;
+  filePath: string;
+  label: string;
+  license?: string;
+  provenance: VnMakerAssetProvenance;
+}
+
+export interface MockImagePackManifest {
+  id: string;
+  version: string;
+  adapter: typeof MOCK_IMAGE_PACK_ADAPTER;
+  sourceGeneratedBy: string;
+  assets: MockImagePackManifestAsset[];
 }
 
 export interface HtmlBuildArtifact {
@@ -507,6 +543,12 @@ function validateOptionalString(record: Record<string, unknown>, key: string, pa
   }
 }
 
+function validateOptionalBoolean(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): void {
+  if (record[key] !== undefined && typeof record[key] !== "boolean") {
+    addSchemaIssue(issues, path, "boolean이어야 합니다.");
+  }
+}
+
 function validateSceneEnding(value: unknown, path: string, issues: ValidationIssue[]): void {
   if (value === undefined) {
     return;
@@ -577,13 +619,27 @@ function parseVnMakerAsset(value: unknown): DtoParseResult<VnMakerAsset> {
   validateOptionalString(value, "uri", "uri", issues);
   validateOptionalString(value, "source", "source", issues);
   validateOptionalString(value, "generationJobId", "generationJobId", issues);
+  validateAssetProvenanceShape(value.provenance, "provenance", issues);
   if (typeof value.kind === "string" && !["background", "portrait", "expression", "cg", "audio", "other"].includes(value.kind)) {
     addSchemaIssue(issues, "kind", `지원하지 않는 에셋 종류입니다: ${value.kind}`);
   }
-  if (typeof value.source === "string" && !["generated", "imported", "placeholder"].includes(value.source)) {
+  if (typeof value.source === "string" && !["generated", "imported", "placeholder", "dummy", "mock"].includes(value.source)) {
     addSchemaIssue(issues, "source", `지원하지 않는 에셋 출처입니다: ${value.source}`);
   }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerAsset);
+}
+
+function validateAssetProvenanceShape(value: unknown, path: string, issues: ValidationIssue[]): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!isRecord(value)) {
+    addSchemaIssue(issues, path, "객체여야 합니다.");
+    return;
+  }
+  ["adapter", "fallbackReason", "packId", "packVersion", "sourceGeneratedBy", "license", "sourceUri"].forEach((key) => {
+    validateOptionalString(value, key, `${path}.${key}`, issues);
+  });
 }
 
 function parseVnMakerGenerationJob(value: unknown): DtoParseResult<VnMakerGenerationJob> {
@@ -600,16 +656,59 @@ function parseVnMakerGenerationJob(value: unknown): DtoParseResult<VnMakerGenera
   validateOptionalString(value, "style", "style", issues);
   validateOptionalString(value, "outputAssetId", "outputAssetId", issues);
   validateOptionalString(value, "failureMessage", "failureMessage", issues);
+  validateOptionalBoolean(value, "dummy", "dummy", issues);
+  validateOptionalString(value, "fallbackReason", "fallbackReason", issues);
+  validateOptionalString(value, "packVersion", "packVersion", issues);
+  validateOptionalString(value, "sourceGeneratedBy", "sourceGeneratedBy", issues);
   if (typeof value.kind === "string" && !GENERATION_JOB_KINDS.includes(value.kind as GenerationJobKind)) {
     addSchemaIssue(issues, "kind", `지원하지 않는 생성 작업 종류입니다: ${value.kind}`);
   }
-  if (typeof value.provider === "string" && !["codex-text-adapter", "image-generation-adapter", "mock-adapter"].includes(value.provider)) {
+  if (typeof value.provider === "string" && !["codex-text-adapter", "image-generation-adapter", "mock-adapter", MOCK_IMAGE_PACK_ADAPTER].includes(value.provider)) {
     addSchemaIssue(issues, "provider", `지원하지 않는 생성 provider입니다: ${value.provider}`);
   }
   if (typeof value.status === "string" && !["planned", "running", "completed", "failed"].includes(value.status)) {
     addSchemaIssue(issues, "status", `지원하지 않는 생성 상태입니다: ${value.status}`);
   }
   return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as VnMakerGenerationJob);
+}
+
+export function parseMockImagePackManifest(value: unknown): DtoParseResult<MockImagePackManifest> {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    return parseFail([{ severity: "error", path: "$", message: "mock image pack manifest는 객체여야 합니다." }]);
+  }
+
+  hasString(value, "id", "id", issues, { nonEmpty: true });
+  hasString(value, "version", "version", issues, { nonEmpty: true });
+  hasString(value, "adapter", "adapter", issues, { nonEmpty: true });
+  hasString(value, "sourceGeneratedBy", "sourceGeneratedBy", issues, { nonEmpty: true });
+  if (typeof value.adapter === "string" && value.adapter !== MOCK_IMAGE_PACK_ADAPTER) {
+    addSchemaIssue(issues, "adapter", `mock image pack adapter는 ${MOCK_IMAGE_PACK_ADAPTER}여야 합니다.`);
+  }
+  if (hasArray(value, "assets", "assets", issues)) {
+    (value.assets as unknown[]).forEach((asset, index) => {
+      const path = `assets.${index}`;
+      if (!isRecord(asset)) {
+        addSchemaIssue(issues, path, "객체여야 합니다.");
+        return;
+      }
+      hasString(asset, "id", `${path}.id`, issues, { nonEmpty: true });
+      hasString(asset, "kind", `${path}.kind`, issues, { nonEmpty: true });
+      hasString(asset, "target", `${path}.target`, issues, { nonEmpty: true });
+      hasString(asset, "filePath", `${path}.filePath`, issues, { nonEmpty: true });
+      hasString(asset, "label", `${path}.label`, issues, { nonEmpty: true });
+      validateOptionalString(asset, "license", `${path}.license`, issues);
+      validateAssetProvenanceShape(asset.provenance, `${path}.provenance`, issues);
+      if (asset.provenance === undefined) {
+        addSchemaIssue(issues, `${path}.provenance`, "목 이미지 pack asset은 provenance가 필요합니다.");
+      }
+      if (typeof asset.kind === "string" && !["portrait", "expression", "cg", "background"].includes(asset.kind)) {
+        addSchemaIssue(issues, `${path}.kind`, `지원하지 않는 목 이미지 종류입니다: ${asset.kind}`);
+      }
+    });
+  }
+
+  return issues.length > 0 ? parseFail(issues) : parseOk(value as unknown as MockImagePackManifest);
 }
 
 function parseVnMakerProjectSettings(value: unknown): DtoParseResult<VnMakerProjectSettings> {
@@ -1981,6 +2080,12 @@ export function validateProject(project: VnMakerProject): ValidationIssue[] {
   if (!routeIds.has(project.settings.defaultRouteId)) {
     issues.push({ severity: "warning", path: "settings.defaultRouteId", message: "기본 루트가 routes에 없습니다." });
   }
+
+  project.assets.forEach((asset, assetIndex) => {
+    if ((asset.source === "dummy" || asset.source === "mock") && !asset.provenance) {
+      issues.push({ severity: "error", path: `assets.${assetIndex}.provenance`, message: "dummy/mock 에셋은 provenance가 필요합니다." });
+    }
+  });
 
   project.characters.forEach((character, characterIndex) => {
     character.portraitAssetIds.forEach((assetId, assetIndex) => {

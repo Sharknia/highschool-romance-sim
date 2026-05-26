@@ -4,8 +4,10 @@ import {
   createDeterministicEventExpansionPlan,
   createHeroineProfile,
   createImageGenerationJob,
+  MOCK_IMAGE_PACK_ADAPTER,
   type EventExpansionPlan,
   type HeroineProfile,
+  type VnMakerAssetProvenance,
   type VnMakerAsset,
   type VnMakerGenerationJob
 } from "@vn-maker/engine-core";
@@ -19,6 +21,7 @@ import type {
 export const ALPHA_SANDBOX_PACK_ID = "alpha-sandbox-pack";
 export const ALPHA_SANDBOX_PACK_VERSION = "0.1.0";
 export const ALPHA_SANDBOX_PROVENANCE = `${ALPHA_SANDBOX_PACK_ID}@${ALPHA_SANDBOX_PACK_VERSION}`;
+export const ALPHA_SANDBOX_FALLBACK_REASON = "alpha-sandbox";
 
 const sandboxPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
@@ -60,6 +63,17 @@ function publicAssetUri(prefix: string, fileName: string, fallback: string): str
     return fallback;
   }
   return `${prefix.replace(/\/+$/g, "")}/${fileName}`;
+}
+
+function alphaSandboxProvenance(): VnMakerAssetProvenance {
+  return {
+    adapter: MOCK_IMAGE_PACK_ADAPTER,
+    fallbackReason: ALPHA_SANDBOX_FALLBACK_REASON,
+    packId: ALPHA_SANDBOX_PACK_ID,
+    packVersion: ALPHA_SANDBOX_PACK_VERSION,
+    sourceGeneratedBy: "alpha-sandbox-fixture",
+    license: "internal alpha sandbox fixture"
+  };
 }
 
 function withAlphaSandboxTerminalEnding(plan: EventExpansionPlan, heroineName: string): EventExpansionPlan {
@@ -129,32 +143,37 @@ export function createAlphaSandboxPack(): AlphaSandboxPack {
         id: "asset-alpha-sandbox-library-bg",
         kind: "background",
         label: "알파 샌드박스 도서관 배경",
-        source: "generated"
+        source: "mock",
+        provenance: alphaSandboxProvenance()
       },
       {
         id: heroine.defaultPortraitAssetId!,
         kind: "portrait",
         label: "하루 샌드박스 기본 포트레이트",
-        source: "generated"
+        source: "mock",
+        provenance: alphaSandboxProvenance()
       },
       {
         id: heroine.expressionAssetIds.happy,
         kind: "expression",
         label: "하루 샌드박스 happy 표정",
-        source: "generated"
+        source: "mock",
+        provenance: alphaSandboxProvenance()
       },
       {
         id: heroine.expressionAssetIds.shy,
         kind: "expression",
         label: "하루 샌드박스 shy 표정",
-        source: "generated"
+        source: "mock",
+        provenance: alphaSandboxProvenance()
       },
       {
         id: cgAssetId,
         kind: "cg",
         label: "하루 샌드박스 도서관 CG",
-        source: "generated",
-        generationJobId: cgJobId
+        source: "mock",
+        generationJobId: cgJobId,
+        provenance: alphaSandboxProvenance()
       }
     ],
     fixtureJob: {
@@ -163,9 +182,13 @@ export function createAlphaSandboxPack(): AlphaSandboxPack {
       targetId: "scene-alpha-sandbox-library-cg",
       prompt: "alpha sandbox library romantic comedy cg fixture",
       style: "deterministic alpha sandbox fixture",
-      provider: "mock-adapter",
+      provider: MOCK_IMAGE_PACK_ADAPTER,
       status: "completed",
-      outputAssetId: cgAssetId
+      outputAssetId: cgAssetId,
+      dummy: true,
+      fallbackReason: ALPHA_SANDBOX_FALLBACK_REASON,
+      packVersion: ALPHA_SANDBOX_PACK_VERSION,
+      sourceGeneratedBy: "alpha-sandbox-fixture"
     }
   };
 }
@@ -227,20 +250,29 @@ export function createAlphaSandboxImageAdapter(): ProjectImageGenerationAdapter 
         style: input.style || "deterministic alpha sandbox fixture",
         outputAssetId
       });
-      job.provider = "mock-adapter";
+      job.provider = MOCK_IMAGE_PACK_ADAPTER;
       job.status = "completed";
+      job.dummy = true;
+      job.fallbackReason = ALPHA_SANDBOX_FALLBACK_REASON;
+      job.packVersion = ALPHA_SANDBOX_PACK_VERSION;
+      job.sourceGeneratedBy = "alpha-sandbox-fixture";
 
       const asset: VnMakerAsset = {
         id: outputAssetId,
         kind,
         label: `${kind} fixture from ${ALPHA_SANDBOX_PROVENANCE}`,
         uri: publicAssetUri(input.publicPathPrefix, fileName, filePath),
-        source: "generated",
-        generationJobId: job.id
+        source: "mock",
+        generationJobId: job.id,
+        provenance: alphaSandboxProvenance()
       };
 
       return {
         adapter: ALPHA_SANDBOX_PROVENANCE,
+        dummy: true,
+        fallbackReason: ALPHA_SANDBOX_FALLBACK_REASON,
+        packVersion: ALPHA_SANDBOX_PACK_VERSION,
+        sourceGeneratedBy: "alpha-sandbox-fixture",
         job,
         asset,
         image: {
@@ -254,7 +286,7 @@ export function createAlphaSandboxImageAdapter(): ProjectImageGenerationAdapter 
           revisedPrompt: null
         },
         raw: {
-          adapter: "mock-adapter",
+          adapter: MOCK_IMAGE_PACK_ADAPTER,
           packId: ALPHA_SANDBOX_PACK_ID,
           version: ALPHA_SANDBOX_PACK_VERSION,
           provenance: ALPHA_SANDBOX_PROVENANCE,

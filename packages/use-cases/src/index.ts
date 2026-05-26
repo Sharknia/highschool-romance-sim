@@ -126,6 +126,10 @@ export interface ProjectImageGenerationInput {
 
 export interface ProjectImageGenerationResult {
   adapter?: string;
+  dummy?: boolean;
+  fallbackReason?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
   job: VnMakerGenerationJob;
   asset: VnMakerAsset;
   image?: {
@@ -237,7 +241,7 @@ export interface ProjectExportPlanDto {
     warnings: ValidationIssue[];
   };
   includedData: Array<"project" | "runtime" | "assetManifest">;
-  includedAssets: Array<Pick<VnMakerAsset, "id" | "kind" | "label" | "uri" | "source" | "generationJobId">>;
+  includedAssets: Array<Pick<VnMakerAsset, "id" | "kind" | "label" | "uri" | "source" | "generationJobId" | "provenance">>;
   blockers: Array<{
     kind: "requiredData" | "validation" | "generationJob";
     id?: string;
@@ -860,7 +864,8 @@ function exportPlanFor(
       label: asset.label,
       uri: asset.uri,
       source: asset.source,
-      generationJobId: asset.generationJobId
+      generationJobId: asset.generationJobId,
+      provenance: asset.provenance
     })),
     blockers,
     warnings: validationSummary.warnings.map((issue) => issue.message),
