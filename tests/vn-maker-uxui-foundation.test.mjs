@@ -135,12 +135,23 @@ assert.match(projectDetailSource, /DiagnosticDrawer/, "프로젝트 상세는 ra
 assert.match(projectDetailSource, /ReadinessPanel/, "프로젝트 상세 프리뷰/내보내기는 공통 ReadinessPanel을 사용해야 합니다.");
 assert.match(projectDetailSource, /tabShellStatus/, "프로젝트 상세 탭 라벨은 탭별 완료/필요/차단 상태를 표시해야 합니다.");
 assert.match(projectDetailSource, /tab === "studio"[\s\S]*return "준비 중"/, "준비 중인 제작 탭은 워크플로 단계 완료 상태를 그대로 표시하지 않아야 합니다.");
+assert.match(projectDetailSource, /displayWorkflowStep/, "프로젝트 개요는 raw workflow 단계 대신 표시용 단계 상태를 사용해야 합니다.");
+assert.match(projectDetailSource, /visibleWorkflowSteps/, "프로젝트 개요 단계 요약은 표시용 workflow steps로 집계해야 합니다.");
+assert.doesNotMatch(projectDetailSource, /summary\.steps\?\.filter\(\(step\) => step\.state === "done"\)/, "프로젝트 개요 완료 집계는 raw workflow step state를 그대로 세면 안 됩니다.");
+assert.doesNotMatch(projectDetailSource, /summary\.steps\?\.map\(\(step\)/, "프로젝트 개요 stepper는 raw workflow steps를 그대로 렌더링하면 안 됩니다.");
 assert.match(projectDetailSource, /TabStatusList/, "프로젝트 개요 상태 요약은 공통 TabStatusList를 사용해야 합니다.");
 assert.match(projectDetailSource, /AssetStatePanel/, "프로젝트 배경/이미지 작업 상태는 공통 AssetStatePanel을 사용해야 합니다.");
 assert.match(projectDetailSource, /snapshot-comparison-grid/, "프로젝트 히로인 탭은 스냅샷과 라이브러리 원본 비교 레이아웃을 명시해야 합니다.");
 assert.match(projectDetailSource, /배경 대상 진단/, "배경 탭의 raw 대상 정보는 진단 drawer에 있어야 합니다.");
 assert.match(projectDetailSource, /배경 생성 작업 진단/, "배경 탭의 job/asset/backgroundAssetId는 진단 drawer에 있어야 합니다.");
 assert.match(projectDetailSource, /생성된 배경 경로는 진단에서 확인/, "배경 탭의 긴 에셋 URI는 기본 본문이 아니라 진단 drawer에서 확인되어야 합니다.");
+assert.match(projectDetailSource, /backgroundConnectionText/, "배경 기본 본문은 raw asset id 대신 사용자용 연결 상태를 보여야 합니다.");
+assert.match(projectDetailSource, /backgroundSceneConnectionText/, "배경 기본 본문은 backgroundAssetId 대신 사용자용 장면 연결 상태를 보여야 합니다.");
+assert.match(projectDetailSource, /backgroundAssetDisplayLabel/, "배경 기본 본문은 생성 provenance가 섞인 에셋 라벨을 사용자용 라벨로 정리해야 합니다.");
+assert.doesNotMatch(projectDetailSource, /backgroundAssetId \$\{backgroundLinkedScene/, "배경 기본 본문은 backgroundAssetId를 그대로 노출하면 안 됩니다.");
+assert.doesNotMatch(projectDetailSource, /<div><dt>에셋 연결<\/dt><dd>\{currentBackgroundAsset\?\.id/, "배경 기본 본문은 에셋 ID를 그대로 노출하면 안 됩니다.");
+assert.doesNotMatch(projectDetailSource, /기존 배경 교체: \$\{currentBackgroundAsset\.id\}/, "배경 기본 본문은 교체 대상에 raw asset id를 노출하면 안 됩니다.");
+assert.doesNotMatch(projectDetailSource, /실패하면 OAuth, app-server, adapter, 응답 파싱/, "배경 기본 본문은 오류 분류를 내부 시스템 용어 그대로 노출하면 안 됩니다.");
 assert.match(projectDetailSource, /배경 교체 생성/, "기존 배경이 있는 상태의 생성 버튼은 교체 동작을 명확히 말해야 합니다.");
 assert.match(projectDetailSource, /previewResolutionActions/, "프리뷰 누락 항목은 nextActions가 없어도 missingItems의 tab으로 해결 이동 버튼을 만들어야 합니다.");
 assert.match(projectDetailSource, /fallbackPreviewCanRun/, "프리뷰 실행 버튼은 previewReadiness DTO가 없어도 workflow summary ready 상태를 fallback으로 반영해야 합니다.");
@@ -168,3 +179,13 @@ assert.doesNotMatch(projectDetailSource, /GitHub Pages/, "내보내기 화면은
 assert.doesNotMatch(projectDetailSource, /plan state/, "내보내기 진단은 plan state 같은 내부 라벨을 그대로 노출하면 안 됩니다.");
 assert.doesNotMatch(projectDetailSource, /이미지 만들기[\s\S]{0,160}variant="primary"/, "배경 탭에서 이미지 만들기는 배경 생성/프리뷰 primary와 경쟁하면 안 됩니다.");
 assert.doesNotMatch(projectDetailSource, /githubPagesTarget: \{String\(currentExportPlan\.githubPagesTarget\)\}/, "GitHub Pages 진단값은 기본 내보내기 본문에 항상 노출되면 안 됩니다.");
+assert.match(projectDetailSource, /<h3>실행 화면<\/h3>/, "프리뷰 기본 본문은 runtime 플레이 대신 실행 화면으로 보여야 합니다.");
+
+const heroinePortraitPanelSource = readText("apps/web/src/client/pages/heroines/HeroinePortraitPanel.tsx");
+assert.match(heroinePortraitPanelSource, /이미지 생성 가능/, "히로인 포트레이트 기본 화면은 imageGeneration 내부 용어 대신 사용자용 문구를 보여야 합니다.");
+assert.doesNotMatch(heroinePortraitPanelSource, /imageGeneration 가능|imageGeneration 상태/, "히로인 포트레이트 기본 화면은 imageGeneration 내부 용어를 노출하면 안 됩니다.");
+
+const clientStylesSource = readText("apps/web/src/client/styles.css");
+assert.match(clientStylesSource, /@media \(max-width: 560px\)[\s\S]*\.tab-list\s*{[\s\S]*overflow-x: auto/, "모바일 탭은 2열 압축 대신 가로 스캔 가능한 레일이어야 합니다.");
+assert.match(clientStylesSource, /@media \(max-width: 560px\)[\s\S]*\.tab-list-item\s*{[\s\S]*min-width: 136px/, "모바일 탭은 과도한 줄바꿈을 막는 최소 폭을 가져야 합니다.");
+assert.match(clientStylesSource, /@media \(max-width: 560px\)[\s\S]*\.detail-tab-grid\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\)/, "모바일 상세 탭 본문은 카드가 옆으로 남지 않도록 1열이어야 합니다.");

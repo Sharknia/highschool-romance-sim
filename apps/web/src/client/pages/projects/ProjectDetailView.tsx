@@ -46,6 +46,8 @@ type PendingEventPatch = ProjectApiResult & Required<Pick<ProjectApiResult, "req
 type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "partialFailed";
 type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
 type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
+type WorkflowStep = NonNullable<ProjectWorkflowSummary["steps"]>[number];
+type DisplayWorkflowStep = WorkflowStep & { displayLabel: string; displayState: WorkflowStep["state"] };
 
 const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
 
@@ -82,6 +84,13 @@ function workflowStepStateLabel(value?: string): string {
   if (value === "blocked") return "차단";
   if (value === "waiting") return "대기";
   return "확인 필요";
+}
+
+function displayWorkflowStep(step: WorkflowStep): DisplayWorkflowStep {
+  if (step.id === "studio") {
+    return { ...step, displayLabel: "제작 준비 중", displayState: "waiting" };
+  }
+  return { ...step, displayLabel: step.label, displayState: step.state };
 }
 
 function projectTabFromValue(value?: string): ProjectTabId {
@@ -182,6 +191,47 @@ function jobStatusLabel(value?: string): string {
   if (value === "failed") return "실패";
   if (value === "completed") return "완료";
   return value || "확인 필요";
+}
+
+function generationProviderText(provider?: string): string {
+  if (!provider) {
+    return "생성 연결 확인 필요";
+  }
+  if (provider === "codex" || provider === "openai" || provider === "imageGeneration") {
+    return "이미지 생성 연결";
+  }
+  return "연결된 생성 서비스";
+}
+
+function backgroundConnectionText(asset: ProjectAsset | null, job: ProjectGenerationJob | null): string {
+  if (asset?.id) {
+    return "배경 연결됨";
+  }
+  if (job?.status === "completed") {
+    return "생성 결과 확인 필요";
+  }
+  if (job) {
+    return `${imageJobKindLabel(job.kind)} ${jobStatusLabel(job.status)}`;
+  }
+  return "생성 전";
+}
+
+function backgroundSceneConnectionText(scene: NonNullable<ProjectData["scenes"]>[number] | null): string {
+  if (!scene) {
+    return "연결할 장면 없음";
+  }
+  if (scene.backgroundAssetId) {
+    return scene.label ? `${scene.label}에 연결됨` : "기본 장면에 연결됨";
+  }
+  return scene.label ? `${scene.label} 연결 대기` : "기본 장면 연결 대기";
+}
+
+function backgroundAssetDisplayLabel(asset: ProjectAsset): string {
+  const label = asset.label?.trim();
+  if (label && !label.includes("@") && !/fixture|sandbox/i.test(label)) {
+    return label;
+  }
+  return "생성된 배경";
 }
 
 function generationErrorCategory(result: ProjectApiResult): "OAuth" | "app-server" | "adapter" | "응답 파싱" {
@@ -366,8 +416,9 @@ export function ProjectDetailView({
     assignedHeroine.appearance && sourceHeroine?.appearance && assignedHeroine.appearance !== sourceHeroine.appearance ? "외형" : ""
   ].filter(Boolean) : [];
   const snapshotSavedAt = assignedHeroine?.sourceSnapshotCreatedAt || "마지막 수정 시각 정보 없음";
-  const doneSteps = summary.steps?.filter((step) => step.state === "done").length || 0;
-  const remainingSteps = (summary.steps?.length || 0) - doneSteps;
+  const visibleWorkflowSteps = (summary.steps || []).map(displayWorkflowStep);
+  const doneSteps = visibleWorkflowSteps.filter((step) => step.displayState === "done").length;
+  const remainingSteps = visibleWorkflowSteps.length - doneSteps;
   const projectRoutes = currentProject?.routes || [];
   const projectScenes = currentProject?.scenes || [];
   const currentRoute = useMemo(() => projectRoutes.find((route) => route.id === selectedRouteId) || projectRoutes[0] || null, [projectRoutes, selectedRouteId]);
@@ -433,7 +484,7 @@ export function ProjectDetailView({
     || null;
   const backgroundPreviewUri = currentBackgroundAsset?.uri || activeBackgroundJob?.asset?.uri;
   const backgroundReplaceText = currentBackgroundAsset
-    ? `기존 배경 교체: ${currentBackgroundAsset.id}`
+    ? `기존 배경 교체: ${backgroundAssetDisplayLabel(currentBackgroundAsset)}`
     : "기존 배경 교체: 생성된 배경이 아직 없습니다.";
 
   const heroineState = useMemo(() => {
@@ -725,7 +776,7 @@ export function ProjectDetailView({
     const jobId = backgroundJobId.trim() || suggestedBackgroundJobId;
     setBackgroundBusy(true);
     setBackgroundErrors([]);
-    setBackgroundStatus("Codex app-server의 ChatGPT managed OAuth와 imageGeneration 경로로 배경 작업을 준비합니다.");
+    setBackgroundStatus("Codex 이미지 생성 연결로 배경 작업을 준비합니다.");
     try {
       const created = await postAuthedJson<ProjectApiResult>("/api/generation/jobs", {
         projectDirectory,
@@ -764,7 +815,7 @@ export function ProjectDetailView({
       }
       const resultAsset = run.assets?.find((asset) => asset.kind === "background");
       setBackgroundStatus(resultAsset
-        ? `저장 위치/에셋 연결 상태: ${resultAsset.id} 생성 완료. backgroundAssetId가 장면에 연결되었습니다.`
+        ? "저장 위치/에셋 연결 상태: 배경 생성 완료. 기본 장면에 연결되었습니다."
         : "저장 위치/에셋 연결 상태: 완료된 배경 결과를 유지했습니다.");
     } catch (error) {
       setBackgroundStatus(`app-server: 배경 화면 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -1091,7 +1142,7 @@ export function ProjectDetailView({
               <h3>완료된 단계 / 남은 단계</h3>
               <p>완료된 단계 {doneSteps}개 · 남은 단계 {remainingSteps}개</p>
               <ol className="stepper">
-                {summary.steps?.map((step) => <li className={`step-${step.state}`} key={step.id}>{step.label}</li>)}
+                {visibleWorkflowSteps.map((step) => <li className={`step-${step.displayState}`} key={step.id}>{step.displayLabel}</li>)}
               </ol>
             </section>
             <section className="detail-card">
@@ -1211,13 +1262,14 @@ export function ProjectDetailView({
               <dl className="summary-list">
                 <div><dt>제목</dt><dd>{currentProject?.title || shellProjectTitle}</dd></div>
                 <div><dt>기존 배경 교체</dt><dd>{backgroundReplaceText}</dd></div>
-                <div><dt>생성 경로</dt><dd>Codex app-server · ChatGPT managed OAuth · imageGeneration</dd></div>
+                <div><dt>생성 연결</dt><dd>Codex 이미지 생성 연결</dd></div>
               </dl>
-              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. OAuth, app-server, adapter, 응답 파싱 오류를 구분해 표시합니다.</p>
+              <p className="page-muted">API key 입력 흐름은 제공하지 않습니다. 연결, 생성 서버, 어댑터, 응답 형식 오류를 구분해 표시합니다.</p>
               <DiagnosticDrawer summary="배경 대상 진단">
                 <dl className="summary-list">
                   <div><dt>프로젝트 ID</dt><dd>{detailProjectId || "확인 필요"}</dd></div>
                   <div><dt>저장될 결과 위치</dt><dd>{backgroundOutputLocation}</dd></div>
+                  <div><dt>생성 경로</dt><dd>Codex app-server · ChatGPT managed OAuth · imageGeneration</dd></div>
                 </dl>
               </DiagnosticDrawer>
             </section>
@@ -1264,12 +1316,12 @@ export function ProjectDetailView({
                   {backgroundErrors.map((error) => <li key={error}>{error}</li>)}
                 </ul>
               ) : (
-                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 OAuth, app-server, adapter, 응답 파싱 중 하나로 분류됩니다.</p>
+                <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 연결 인증, 생성 서버, 생성 어댑터, 응답 형식 중 하나로 분류됩니다.</p>
               )}
               <dl className="summary-list">
                 <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri ? "생성된 배경 경로는 진단에서 확인" : "생성 전"}</dd></div>
-                <div><dt>에셋 연결</dt><dd>{currentBackgroundAsset?.id || activeBackgroundJob?.outputAssetId || suggestedBackgroundAssetId}</dd></div>
-                <div><dt>장면 연결</dt><dd>{backgroundLinkedScene ? `${backgroundLinkedScene.label || backgroundLinkedScene.id} · backgroundAssetId ${backgroundLinkedScene.backgroundAssetId || "대기 중"}` : "연결할 장면 없음"}</dd></div>
+                <div><dt>에셋 연결</dt><dd>{backgroundConnectionText(currentBackgroundAsset, activeBackgroundJob)}</dd></div>
+                <div><dt>장면 연결</dt><dd>{backgroundSceneConnectionText(backgroundLinkedScene)}</dd></div>
               </dl>
               <DiagnosticDrawer summary="배경 에셋 경로 진단">
                 <dl className="summary-list">
@@ -1283,12 +1335,12 @@ export function ProjectDetailView({
                 <ul className="asset-job-list">
                   {backgroundJobs.map((job) => (
                     <li key={job.id || job.outputAssetId}>
-                      {job.asset?.uri ? <img alt={job.asset.label || job.outputAssetId || "결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
+                      {job.asset?.uri ? <img alt={job.asset.label || "생성된 결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
                       <div>
-                        <strong>{job.id || imageJobKindLabel(job.kind)}</strong>
-                        <span>{imageJobKindLabel(job.kind)} · {jobStatusLabel(job.status)} · {job.provider || "provider 확인 필요"}</span>
+                        <strong>{imageJobKindLabel(job.kind)}</strong>
+                        <span>{jobStatusLabel(job.status)} · {generationProviderText(job.provider)}</span>
                         <p>{job.prompt || "프롬프트 없음"}</p>
-                        <small>결과 에셋: {job.outputAssetId || job.asset?.id || "대기 중"}</small>
+                        <small>{job.asset?.uri ? "결과 에셋 연결됨" : "결과 에셋 대기 중"}</small>
                         {job.failureMessage ? <small>{job.failureMessage}</small> : null}
                       </div>
                     </li>
@@ -1369,7 +1421,7 @@ export function ProjectDetailView({
               ) : <p className="page-muted">검증 문제 없음</p>}
             </ReadinessPanel>
             <section className="detail-card">
-              <h3>runtime 플레이</h3>
+              <h3>실행 화면</h3>
               {currentPreviewScene ? (
                 <div className="runtime-preview">
                   {currentPreviewScene.cgAsset?.uri ? <img alt={currentPreviewScene.cgAsset.label || "CG"} src={currentPreviewScene.cgAsset.uri} /> : null}
@@ -1384,7 +1436,7 @@ export function ProjectDetailView({
                   {currentPreviewScene.ending ? <small>엔딩: {currentPreviewScene.ending.title}</small> : null}
                 </div>
               ) : (
-                <p className="page-muted">프리뷰를 생성하면 runtime 플레이 화면이 표시됩니다.</p>
+                <p className="page-muted">프리뷰를 생성하면 실행 화면이 표시됩니다.</p>
               )}
               <DiagnosticDrawer summary="개발자 상세">
                 <pre>{previewRuntime ? JSON.stringify({ label: "runtime JSON", runtime: previewRuntime }, null, 2) : "runtime JSON 없음"}</pre>

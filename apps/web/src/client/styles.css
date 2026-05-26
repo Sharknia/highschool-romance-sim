@@ -2334,7 +2334,20 @@ pre {
   }
 
   .tab-list {
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+  }
+
+  .tab-list-item {
+    flex: 0 0 min(160px, 45vw);
+    min-width: 136px;
+    scroll-snap-align: start;
+  }
+
+  .detail-tab-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .heroine-card-grid,

@@ -114,8 +114,8 @@ export function HeroineStartPage() {
       ? `Codex 연결됨${session.account?.email ? ` · ${session.account.email}` : ""}`
       : session.error || "Codex 연결 필요";
   const imageGenerationText = imageGenerationAvailable
-    ? "imageGeneration 가능"
-    : "생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.";
+    ? "이미지 생성 가능"
+    : "생성 불가: Codex 연결 또는 이미지 생성 지원이 필요합니다.";
   const canGeneratePortrait = profileComplete && !idAlreadyExists && imageGenerationAvailable && !busy;
   const currentPortraitPreviewUri = portraitPreviewUri || draft.defaultPortraitUri || draft.portraitAssetUris?.[0] || "";
 
@@ -229,7 +229,7 @@ export function HeroineStartPage() {
       return;
     }
     if (!imageGenerationAvailable) {
-      setStatus("생성 불가: Codex 연결 또는 imageGeneration 지원이 필요합니다.");
+      setStatus("생성 불가: Codex 연결 또는 이미지 생성 지원이 필요합니다.");
       return;
     }
     setBusy(true);
