@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   describeEventExpansionPolicy,
@@ -165,7 +165,7 @@ export async function readPackagedMockImagePackManifest(): Promise<MockImagePack
 
 export function resolvePackagedMockImagePackAssetPath(filePath: string): string {
   const normalized = filePath.replaceAll("\\", "/");
-  if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
+  if (normalized.startsWith("/") || isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error("pack filePath는 mock image pack 내부 상대 경로여야 합니다.");
   }
   return join(PACKAGED_MOCK_IMAGE_PACK_DIRECTORY, normalized);
@@ -187,7 +187,7 @@ function extensionForPackAsset(filePath: string): string {
   return extension || "png";
 }
 
-function selectPackagedMockAsset(manifest: MockImagePackManifest, input: ProjectImageGenerationInput): MockImagePackManifest["assets"][number] {
+function selectPackagedMockAsset(manifest: MockImagePackManifest, input: ProjectImageGenerationInput): MockImagePackManifest["assets"][number] | undefined {
   return manifest.assets.find((asset) => asset.kind === input.kind && asset.target === input.targetId)
     || manifest.assets.find((asset) => asset.kind === input.kind)
     || manifest.assets[0];
@@ -198,6 +198,9 @@ export function createPackagedMockImageAdapter(): ProjectImageGenerationAdapter 
     async generateImageAsset(input): Promise<ProjectImageGenerationResult> {
       const manifest = await readPackagedMockImagePackManifest();
       const manifestAsset = selectPackagedMockAsset(manifest, input);
+      if (!manifestAsset) {
+        throw new Error("패키징 목 이미지 pack에서 에셋을 찾을 수 없습니다.");
+      }
       const sourcePath = resolvePackagedMockImagePackAssetPath(manifestAsset.filePath);
       const source = await readFile(sourcePath);
       const extension = extensionForPackAsset(manifestAsset.filePath);
@@ -208,8 +211,8 @@ export function createPackagedMockImageAdapter(): ProjectImageGenerationAdapter 
       const fileName = `${outputAssetId}.${extension}`;
       const filePath = join(input.outputDirectory, fileName);
       const uri = input.publicPathPrefix ? normalizePublicPath(input.publicPathPrefix, fileName) : filePath;
-      const fallbackReason = input.fallbackReason || manifestAsset.provenance.fallbackReason || "PACKAGED_MOCK_IMAGE";
-      const sourceGeneratedBy = manifest.sourceGeneratedBy || manifestAsset.provenance.sourceGeneratedBy;
+      const fallbackReason = input.fallbackReason || manifestAsset.provenance?.fallbackReason || "PACKAGED_MOCK_IMAGE";
+      const sourceGeneratedBy = manifest.sourceGeneratedBy || manifestAsset.provenance?.sourceGeneratedBy;
 
       await mkdir(input.outputDirectory, { recursive: true });
       await writeFile(filePath, source);

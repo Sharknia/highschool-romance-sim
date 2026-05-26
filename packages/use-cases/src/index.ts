@@ -2068,19 +2068,9 @@ function withWorkspacePreviewUri(result: ProjectImageGenerationResult): ProjectI
 }
 
 function imageFallbackReasonFromError(error: unknown): "OAUTH_REQUIRED" | "IMAGE_GENERATION_UNAVAILABLE" | null {
-  const record = asRecord(error);
-  if (record.code === "OAUTH_REQUIRED") {
-    return "OAUTH_REQUIRED";
-  }
-  if (record.code === "IMAGE_GENERATION_UNAVAILABLE") {
-    return "IMAGE_GENERATION_UNAVAILABLE";
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("OAuth 로그인이 필요")) {
-    return "OAUTH_REQUIRED";
-  }
-  if (message.includes("imageGeneration")) {
-    return "IMAGE_GENERATION_UNAVAILABLE";
+  const code = failureCodeFromError(error);
+  if (code === "OAUTH_REQUIRED" || code === "IMAGE_GENERATION_UNAVAILABLE") {
+    return code;
   }
   return null;
 }

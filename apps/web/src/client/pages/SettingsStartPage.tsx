@@ -1,27 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { LogOut, RefreshCw, ShieldCheck, SlidersHorizontal, Terminal, UploadCloud } from "lucide-react";
 import { postJson, startBrowserLogin } from "../api/client";
 import type { CodexLoginResponse } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, DiagnosticDrawer, PageHeader, StatusBanner, StatusChip } from "../components/ui";
-import { createSettingsStatusViewModel, type SettingsStatusTone } from "./settingsStatus";
+import { createSettingsStatusViewModel } from "./settingsStatus";
 
 type ActionState = "idle" | "running";
 
-function bannerTone(tone: SettingsStatusTone): "neutral" | "waiting" | "success" | "warning" | "error" {
-  return tone;
-}
-
-function chipTone(tone: SettingsStatusTone): "neutral" | "waiting" | "success" | "warning" | "error" {
-  return tone;
-}
-
-function deviceLoginMessage(result: CodexLoginResponse): string {
+function deviceLoginMessage(result: CodexLoginResponse): ReactNode {
   const login = result.login || {};
   const verificationUrl = login.verificationUrl || login.verificationUri || login.authUrl;
   const userCode = login.userCode ? ` · 코드 ${login.userCode}` : "";
   return verificationUrl
-    ? `device flow 로그인 시작: ${verificationUrl}${userCode}`
+    ? (
+      <span>
+        device flow 로그인 시작:{" "}
+        <a href={verificationUrl} target="_blank" rel="noopener noreferrer">
+          {verificationUrl}
+        </a>
+        {userCode}
+      </span>
+    )
     : "device flow 로그인 요청을 시작했습니다. Codex 인증 안내를 확인하세요.";
 }
 
@@ -29,7 +29,7 @@ export function SettingsStartPage() {
   const { logout, refreshSession, session, status } = useAuth();
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [actionState, setActionState] = useState<ActionState>("idle");
-  const [actionMessage, setActionMessage] = useState("");
+  const [actionMessage, setActionMessage] = useState<ReactNode>("");
   const [actionError, setActionError] = useState("");
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function SettingsStartPage() {
     lastCheckedAt
   }), [lastCheckedAt, session, status]);
 
-  async function runAction(label: string, operation: () => Promise<string>) {
+  async function runAction(label: string, operation: () => Promise<ReactNode>) {
     setActionState("running");
     setActionError("");
     setActionMessage(`${label} 실행 중`);
@@ -68,7 +68,12 @@ export function SettingsStartPage() {
   }
 
   function startBrowserCodexLogin() {
-    const authWindow = window.open("", "_blank", "noopener,noreferrer");
+    const authWindow = window.open("about:blank", "_blank");
+    if (!authWindow) {
+      setActionMessage("");
+      setActionError("팝업 창이 차단되었습니다. 브라우저 설정에서 팝업을 허용해 주세요.");
+      return;
+    }
     void runAction("브라우저 로그인", async () => {
       await startBrowserLogin(authWindow);
       return "브라우저 로그인 창을 열었습니다. 인증 후 상태 갱신을 눌러 연결 상태를 확인하세요.";
@@ -113,7 +118,7 @@ export function SettingsStartPage() {
         )}
       />
 
-      <StatusBanner tone={bannerTone(statusView.statusTone)}>
+      <StatusBanner tone={statusView.statusTone}>
         <span className="page-status">{actionError || actionMessage || statusView.statusText}</span>
       </StatusBanner>
 
@@ -122,7 +127,7 @@ export function SettingsStartPage() {
           <div className="page-panel-icon"><ShieldCheck size={18} /></div>
           <h2>Codex 연결</h2>
           <dl className="settings-list">
-            <div><dt>연결</dt><dd><StatusChip tone={chipTone(statusView.statusTone)}>{statusView.connectionText}</StatusChip></dd></div>
+            <div><dt>연결</dt><dd><StatusChip tone={statusView.statusTone}>{statusView.connectionText}</StatusChip></dd></div>
             <div><dt>계정</dt><dd>{statusView.accountText}</dd></div>
             <div><dt>mode</dt><dd>{statusView.modeText}</dd></div>
             <div><dt>요금제</dt><dd>{statusView.planText}</dd></div>
