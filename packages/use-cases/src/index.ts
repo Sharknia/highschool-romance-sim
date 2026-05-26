@@ -158,6 +158,7 @@ export type MakerActionId =
   | "deleteProjectWorkspace"
   | "restoreProject"
   | "restoreRecentProject"
+  | "validateProject"
   | "expandEvent"
   | "approveEvent"
   | "listGenerationJobs"
@@ -885,6 +886,21 @@ function exportBlockedMessage(validation: { ok?: boolean; issues?: ValidationIss
   return "내보내기 전에 차단 항목을 해결해야 합니다.";
 }
 
+function validationForProjectState(project: VnMakerProject, validation?: { ok?: boolean; issues?: ValidationIssue[] }): { ok: boolean; issues: ValidationIssue[] } {
+  if (validation) {
+    const issues = validation.issues || [];
+    return {
+      ok: validation.ok !== false && issues.every((issue) => issue.severity !== "error"),
+      issues
+    };
+  }
+  const issues = validateProjectSnapshot(project);
+  return {
+    ok: issues.every((issue) => issue.severity !== "error"),
+    issues
+  };
+}
+
 function attachProjectFailureContext(
   error: unknown,
   input: {
@@ -924,10 +940,21 @@ function withActionState<T extends JsonRecord>(
   baseProjectHash?: string;
   projectRevision?: string;
   workflowSummary: MakerWorkflowSummary;
+  previewReadiness?: ProjectPreviewReadinessDto;
+  exportPlan?: ProjectExportPlanDto;
 } {
   const project = options.project || (asRecord(body).project as VnMakerProject | undefined);
   const validation = options.validation || (asRecord(body).validation as { ok?: boolean; issues?: ValidationIssue[] } | undefined);
+  const explicitPreviewReadiness = asRecord(body).previewReadiness as ProjectPreviewReadinessDto | undefined;
+  const explicitExportPlan = asRecord(body).exportPlan as ProjectExportPlanDto | undefined;
+  const stateValidation = project ? validationForProjectState(project, validation) : validation;
   const projectHash = project ? hashProjectSnapshot(project) : undefined;
+  const previewReadiness = project
+    ? explicitPreviewReadiness || previewReadinessFor(project, stateValidation || { ok: true, issues: [] })
+    : explicitPreviewReadiness;
+  const exportPlan = project
+    ? explicitExportPlan || exportPlanFor(project, stateValidation || { ok: true, issues: [] })
+    : explicitExportPlan;
   return {
     ...body,
     ok: body.ok !== false,
@@ -935,7 +962,9 @@ function withActionState<T extends JsonRecord>(
     action,
     baseProjectHash: projectHash,
     projectRevision: projectHash,
-    workflowSummary: createWorkflowSummary(project, validation)
+    workflowSummary: createWorkflowSummary(project, stateValidation),
+    ...(previewReadiness ? { previewReadiness } : {}),
+    ...(exportPlan ? { exportPlan } : {})
   };
 }
 
@@ -2707,12 +2736,14 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const validation = store.validateAndStore();
-        return {
+        const project = store.requireProject();
+        return withActionState("validateProject", {
           ok: validation.ok,
           projectDirectory: store.paths.projectDirectory,
           issues: validation.issues,
-          project: store.requireProject()
-        };
+          project,
+          validation
+        }, { project, validation });
       } finally {
         store.close();
       }
