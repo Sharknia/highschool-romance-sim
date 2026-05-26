@@ -203,6 +203,7 @@ const projectPageTypesSource = readText("apps/web/src/client/pages/projects/proj
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
 const useCasesSource = readText("packages/use-cases/src/index.ts");
+const serverHandlersSource = readText("apps/web/src/server/handlers.ts");
 const clientStylesSource = readText("apps/web/src/client/styles.css");
 const detailTabsBlock = projectPageTypesSource.match(/export const detailTabs = \[[\s\S]*?\] as const;/)?.[0] || "";
 const visibleShellStart = projectDetailViewSource.indexOf("<TabList");
@@ -565,6 +566,7 @@ assert.doesNotMatch(projectDetailViewSource, /currentProject\?\.id\s*\|\|\s*proj
 assert.match(projectDetailViewSource, /assetJobs\.length > 0 \? assetJobs : currentProject\?\.generationJobs/, "배경 화면 생성 탭은 project generationJobs fallback으로 승인 직후 CG 작업을 보여야 합니다.");
 assert.match(projectDetailViewSource, /runImageJobs\(plannedImageJobIds\)/, "배경 화면 생성 탭은 승인된 이벤트 CG planned 작업을 실행하는 버튼을 노출해야 합니다.");
 assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)/, "배경 화면 생성 탭은 실패한 이벤트 CG 작업 재시도 버튼을 노출해야 합니다.");
+assert.match(serverHandlersSource, /\/api\/project\/validate"[\s\S]{0,180}validateProject"\)/, "validate API route failure도 validateProject action 계약을 유지해야 합니다.");
 [
   "/api/project/preview",
   "/api/project/validate",
@@ -614,6 +616,10 @@ assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)
 assert.match(projectDetailViewSource, /severity === "error"/, "프리뷰 검증은 warning이 아니라 error severity만 차단해야 합니다.");
 assert.match(projectDetailViewSource, /result\.code === "PREVIEW_BLOCKED"/, "프리뷰 차단 응답은 failed가 아니라 blocked 상태로 표시해야 합니다.");
 assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 previewReadiness.canRun=true가 아닐 때 비활성화해야 합니다.");
+assert.match(projectDetailViewSource, /lastResetProjectIdRef/, "ProjectDetailView는 프로젝트 id 변경 여부를 추적해 preview/export local state reset을 제한해야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /\}, \[currentProject\?\.id,\s*projectExportPlan,\s*projectPreviewReadiness\]\)/, "ProjectDetailView는 readiness/export DTO prop 갱신만으로 preview runtime과 export 결과를 reset하면 안 됩니다.");
+assert.match(projectDetailViewSource, /result\.ok === false\s*\?\s*\{[\s\S]{0,700}emptyPreviewReadiness[\s\S]{0,700}state:\s*"failed"/, "프리뷰 검증 API 실패 응답에 previewReadiness DTO가 없어도 stale readiness 대신 명시적인 failed fallback을 표시해야 합니다.");
+assert.match(projectDetailViewSource, /setExportPlan\(result\.exportPlan \|\| null\)/, "프리뷰 검증 응답에 exportPlan이 없으면 이전 exportPlan을 stale하게 유지하지 않아야 합니다.");
 assert.match(projectDetailViewSource, /const blocked = result\.code === "PREVIEW_BLOCKED"[\s\S]{0,900}setPreviewRuntime\(null\)/, "프리뷰 차단/실패 응답은 이전 runtime 플레이 화면을 비워야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /프리뷰 탭입니다\. 플레이 검증을 연결합니다\./, "프리뷰 탭은 placeholder가 아니라 실제 runtime 확인 흐름이어야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /내보내기 탭입니다\. export와 실행 확인 결과를 연결합니다\./, "내보내기 탭은 placeholder가 아니라 실제 export/smoke 흐름이어야 합니다.");

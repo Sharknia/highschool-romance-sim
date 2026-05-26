@@ -520,6 +520,12 @@ assert.equal(previewAfterBackground.previewReadiness.canRun, true);
 assert.deepEqual(previewAfterBackground.previewReadiness.missingItems, []);
 assert.equal(previewAfterBackground.previewReadiness.requiredData.scenes, "ready");
 assert.equal(previewAfterBackground.previewReadiness.requiredData.background, "ready");
+const validatedAfterBackground = await useCases.validateProject({ projectDirectory });
+assert.equal(validatedAfterBackground.action, "validateProject");
+assert.equal(validatedAfterBackground.previewReadiness.state, "prepared");
+assert.equal(validatedAfterBackground.previewReadiness.canRun, true);
+assert.equal(validatedAfterBackground.exportPlan.state, "ready");
+assert.equal(validatedAfterBackground.exportPlan.canExport, true);
 
 const secondBackground = await useCases.createGenerationJob({
   projectDirectory,
@@ -899,6 +905,15 @@ const openedBranch = await useCases.saveScene({
 });
 assert.equal(openedBranch.validation.ok, false);
 assert.equal(openedBranch.validation.issues.some((issue) => issue.message.includes("엔딩 없이 끝납니다")), true);
+const validatedOpenedBranch = await useCases.validateProject({ projectDirectory: manualProjectDirectory });
+assert.equal(validatedOpenedBranch.action, "validateProject");
+assert.equal(validatedOpenedBranch.ok, false);
+assert.equal(validatedOpenedBranch.previewReadiness.state, "blocked");
+assert.equal(validatedOpenedBranch.previewReadiness.canRun, false);
+assert.equal(validatedOpenedBranch.previewReadiness.requiredData.validation, "invalid");
+assert.equal(validatedOpenedBranch.exportPlan.state, "blocked");
+assert.equal(validatedOpenedBranch.exportPlan.canExport, false);
+assert.equal(validatedOpenedBranch.exportPlan.blockers.some((blocker) => blocker.kind === "validation"), true);
 
 const invalidPreview = await useCases.previewProject({
   projectDirectory: manualProjectDirectory,

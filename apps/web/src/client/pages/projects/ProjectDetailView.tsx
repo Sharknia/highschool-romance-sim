@@ -1,5 +1,5 @@
 import { ArrowRight, CheckCircle2, Heart, Image as ImageIcon, Play, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { AssetStatePanel, Button, DiagnosticDrawer, EmptyState, ReadinessPanel, StatusChip, TabList, TabStatusList } from "../../components/ui";
@@ -341,6 +341,7 @@ export function ProjectDetailView({
   const [exportPlan, setExportPlan] = useState<ProjectExportPlan | null>(null);
   const [smokeResult, setSmokeResult] = useState<ProjectSmokeResult | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const lastResetProjectIdRef = useRef<string | null>(null);
   const routeProjectLoaded = !projectId || loadedProject?.id === projectId;
   const currentProject = routeProjectLoaded ? loadedProject : null;
   const currentWorkflowSummary = routeProjectLoaded ? workflowSummary : null;
@@ -524,6 +525,11 @@ export function ProjectDetailView({
   }
 
   useEffect(() => {
+    const nextProjectId = currentProject?.id || null;
+    if (lastResetProjectIdRef.current === nextProjectId) {
+      return;
+    }
+    lastResetProjectIdRef.current = nextProjectId;
     setAssetJobs([]);
     setAssetErrors([]);
     setAssetStatus("배경 화면 작업과 이벤트 CG 작업을 확인합니다.");
@@ -531,7 +537,7 @@ export function ProjectDetailView({
       exportPlan: projectExportPlan,
       previewReadiness: projectPreviewReadiness
     });
-  }, [currentProject?.id, projectExportPlan, projectPreviewReadiness]);
+  }, [currentProject?.id]);
 
   useEffect(() => {
     if (activeTab !== "background" || !currentProject) {
@@ -886,10 +892,15 @@ export function ProjectDetailView({
     const result = await postAuthedJson<ProjectApiResult>("/api/project/validate", { projectDirectory });
     const issues = validationIssues(result);
     const messages = issues.map(issueText);
-    const nextReadiness = result.previewReadiness || currentPreviewReadiness;
-    if (result.exportPlan) {
-      setExportPlan(result.exportPlan);
-    }
+    const nextReadiness = result.previewReadiness || (result.ok === false ? {
+      ...emptyPreviewReadiness,
+      state: "failed",
+      availableState: "failed",
+      failureCause: result.error || messages[0] || "검증 실행 중 오류가 발생했습니다.",
+      retryable: result.retryable ?? false,
+      nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
+    } : currentPreviewReadiness);
+    setExportPlan(result.exportPlan || null);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       setPreviewState("failed");
       setPreviewRuntime(null);

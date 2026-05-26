@@ -71,7 +71,7 @@ This audit compares the current implementation against the Notion VN Maker plann
 
 ## Verification
 
-Completed before writing this report:
+Completed for PR #95:
 
 - `npm run build:maker`
 - `node tests/vn-maker-use-cases.test.mjs`
@@ -80,12 +80,9 @@ Completed before writing this report:
 - `node tests/vn-maker-alpha-ui-state.test.mjs`
 - `npm run typecheck`
 - `npm run test:maker`
+- `git diff --check`
+- `git status --short --branch`
 - Browser smoke with `VN_MAKER_ALPHA_SANDBOX=1 VITE_PORT=6273 API_PORT=6274 npm run dev -w @vn-maker/web`
   - Desktop `1440x900`: `/projects` opened, a project was created through the UI, `/projects/:projectId/preview` rendered readiness/export DTO state, screenshot saved to `/tmp/vn-maker-planning-audit-detail-desktop.png`.
   - Mobile `390x844`: `/projects/:projectId/export` rendered the export plan panel without visible overlap, screenshot saved to `/tmp/vn-maker-planning-audit-export-mobile.png`.
   - The browser smoke used the alpha sandbox session for local auth. No image generation was executed in this audit.
-
-Remaining before PR:
-
-- `git diff --check`
-- `git status --short --branch`
