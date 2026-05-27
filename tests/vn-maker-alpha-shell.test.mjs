@@ -199,16 +199,19 @@ assert.match(heroineDeleteDialogSource, /requiresConfirmation:\s*false/, "히로
 assert.doesNotMatch(projectStartSource, /ProjectDeleteDialog/, "ProjectStartPage는 별도 ProjectDeleteDialog를 만들면 안 됩니다.");
 const recentProjectListPath = "apps/web/src/client/pages/projects/RecentProjectList.tsx";
 const projectDetailViewPath = "apps/web/src/client/pages/projects/ProjectDetailView.tsx";
+const studioWorkspacePath = "apps/web/src/client/pages/projects/StudioWorkspace.tsx";
 const projectDetailStateSource = readText("apps/web/src/client/pages/projects/projectDetailState.ts");
 const projectNewPagePath = "apps/web/src/client/pages/projects/ProjectNewPage.tsx";
 const projectApiPath = "apps/web/src/client/pages/projects/projectApi.ts";
 assert.ok(existsSync(join(root, projectDetailViewPath)), "프로젝트 상세 탭은 별도 ProjectDetailView 컴포넌트로 분리해야 합니다.");
+assert.ok(existsSync(join(root, studioWorkspacePath)), "제작 탭은 별도 StudioWorkspace 컴포넌트로 분리해야 합니다.");
 assert.ok(existsSync(join(root, projectNewPagePath)), "새 프로젝트 생성 화면은 별도 ProjectNewPage 컴포넌트로 분리해야 합니다.");
 assert.ok(existsSync(join(root, projectApiPath)), "프로젝트 목록 API wrapper는 projectApi.ts로 분리해야 합니다.");
 const recentProjectListSource = existsSync(join(root, recentProjectListPath))
   ? readText(recentProjectListPath)
   : projectStartSource;
 const projectDetailViewSource = readText(projectDetailViewPath);
+const studioWorkspaceSource = readText(studioWorkspacePath);
 const projectPageTypesSource = readText("apps/web/src/client/pages/projects/projectPageTypes.ts");
 const projectDisplayTextSource = readText("apps/web/src/client/pages/projects/projectDisplayText.ts");
 const projectNewPageSource = readText(projectNewPagePath);
@@ -232,8 +235,8 @@ const overviewEnd = overviewStart >= 0 ? projectDetailViewSource.indexOf('active
 const overviewBranch = overviewStart >= 0 && overviewEnd > overviewStart
   ? projectDetailViewSource.slice(overviewStart, overviewEnd)
   : "";
-const studioStart = projectDetailViewSource.indexOf('data-testid="studio-under-construction"');
-const studioEndCandidate = studioStart >= 0 ? projectDetailViewSource.indexOf('activeTab === "background"', studioStart) : -1;
+const studioStart = projectDetailViewSource.indexOf('activeTab === "studio"');
+const studioEndCandidate = studioStart >= 0 ? projectDetailViewSource.indexOf('activeTab === "preview"', studioStart) : -1;
 const studioBranch = studioStart >= 0 && studioEndCandidate > studioStart
   ? projectDetailViewSource.slice(studioStart, studioEndCandidate)
   : "";
@@ -417,17 +420,47 @@ assert.doesNotMatch(overviewBranch, /projectDirectory \|\| "저장 위치 미연
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `배경 화면 생성 탭에 '${requiredText}' 처리가 있어야 합니다.`);
 });
+assert.match(projectDetailViewSource, /StudioWorkspace/, "ProjectDetailView는 제작 탭을 StudioWorkspace로 위임해야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /studio-under-construction|제작 탭은 준비 중입니다|실제 동작하지 않는 제작 버튼은 제공하지 않습니다/, "제작 탭은 placeholder가 아니라 실제 StudioWorkspace여야 합니다.");
 [
-  'data-testid="studio-under-construction"',
-  'activeTab === "studio"',
-  "제작 탭은 준비 중입니다.",
-  "시나리오 작성",
-  "분기 편집",
-  "장면 구성",
-  "실제 동작하지 않는 제작 버튼은 제공하지 않습니다."
+  'data-testid="studio-workspace"',
+  'data-testid="studio-unsupported"',
+  "STUDIO_MIN_WIDTH",
+  "STUDIO_MIN_HEIGHT",
+  "1280",
+  "720",
+  "localStorage",
+  "studioLayoutStorageKey",
+  "clampStudioLayout",
+  "routeWidth",
+  "inspectorWidth",
+  "problemsHeight",
+  "?scene=",
+  "?panel=",
+  "/api/project/scenes",
+  "/api/project/scenes/insert",
+  "/api/project/scenes/link",
+  "/api/project/scenes/ending",
+  "Top command bar",
+  "Route flow map",
+  "Stage preview",
+  "Script editor",
+  "Inspector",
+  "Problems",
+  "시작 씬 만들기",
+  "현재 씬 뒤 새 씬",
+  "선택지 target 생성",
+  "조건/효과 후보 검토",
+  "condition runtime support가 #105에서 확정되기 전까지 편집할 수 없습니다.",
+  "Diagnostics",
+  "저장 실패",
+  "검증 stale",
+  "API failure",
+  "창을 넓혀 데스크톱 환경에서 열어주세요.",
+  "1280x720"
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  assert.match(projectDetailViewSource, pattern, `제작 탭에 '${requiredText}' 표시가 있어야 합니다.`);
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace에 '${requiredText}' 흐름이 있어야 합니다.`);
 });
 [
   "이벤트 제안 받기",
@@ -437,8 +470,10 @@ assert.doesNotMatch(overviewBranch, /projectDirectory \|\| "저장 위치 미연
   "제작 시작"
 ].forEach((blockedText) => {
   const pattern = new RegExp(blockedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  assert.doesNotMatch(studioBranch, pattern, `studio 탭은 '${blockedText}'를 노출하면 안 됩니다.`);
+  assert.doesNotMatch(`${studioBranch}\n${studioWorkspaceSource}`, pattern, `studio 탭은 '${blockedText}'를 노출하면 안 됩니다.`);
 });
+assert.doesNotMatch(studioWorkspaceSource, /conditionDraft|effectsDraft|setCondition|setEffects/, "조건/효과는 #105 전까지 프론트 임시 canonical 편집 모델을 만들면 안 됩니다.");
+assert.doesNotMatch(studioWorkspaceSource, /analyzeRouteGraph|routeGraphIssueToValidationIssue/, "StudioWorkspace는 route graph/domain 판단을 재구현하지 말고 API DTO를 표시해야 합니다.");
 [
   "detail-tab-grid",
   "detail-card",

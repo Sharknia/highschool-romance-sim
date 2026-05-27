@@ -12,6 +12,8 @@ const useCasesModule = await import("../packages/use-cases/dist/index.js");
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-use-cases-"));
 const projectDirectory = join(tempRoot, "UseCase.vnmaker");
 const manualProjectDirectory = join(tempRoot, "ManualScenes.vnmaker");
+const blankStartSceneProjectDirectory = join(tempRoot, "BlankStartScene.vnmaker");
+const noRouteStartSceneProjectDirectory = join(tempRoot, "NoRouteStartScene.vnmaker");
 const preserveNextProjectDirectory = join(tempRoot, "PreserveNext.vnmaker");
 const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
 const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
@@ -932,6 +934,86 @@ const manualCreated = await useCases.createProjectFromHeroine({
   premise: "수동 장면 제작 use-case 프로젝트"
 });
 assert.equal(manualCreated.ok, true);
+
+const blankStartCreated = await useCases.createProject({
+  projectDirectory: blankStartSceneProjectDirectory,
+  project: {
+    version: "vn-maker/v1",
+    id: "blank-start-scene",
+    title: "Blank Start Scene",
+    premise: "Studio 첫 씬 생성을 검증한다.",
+    characters: [{
+      id: "haru",
+      displayName: "하루",
+      role: "메인 히로인",
+      profile: "첫 씬 생성 테스트용 히로인",
+      emotionTags: ["normal"],
+      portraitAssetIds: []
+    }],
+    routes: [{
+      id: "haru-route",
+      title: "하루 루트",
+      heroineId: "haru",
+      summary: "",
+      entrySceneId: "scene-placeholder-start",
+      endings: []
+    }],
+    scenes: [],
+    assets: [],
+    generationJobs: [],
+    settings: {
+      defaultRouteId: "haru-route",
+      outputFileName: "index.html",
+      language: "ko"
+    }
+  }
+});
+assert.equal(blankStartCreated.ok, true);
+assert.equal(blankStartCreated.project.scenes.length, 0);
+const blankStartInserted = await useCases.insertManualScene({
+  projectDirectory: blankStartSceneProjectDirectory,
+  expectedProjectRevision: blankStartCreated.projectRevision,
+  link: { type: "none" },
+  scene: {
+    id: "scene-first-manual",
+    label: "첫 수동 장면",
+    speaker: "나",
+    text: "처음 만든 씬이 route 시작점이 된다.",
+    characters: [],
+    choices: []
+  }
+});
+assert.equal(blankStartInserted.ok, true);
+assert.equal(blankStartInserted.selectedSceneId, "scene-first-manual");
+assert.equal(blankStartInserted.project.routes[0].entrySceneId, "scene-first-manual");
+
+const noRouteStartCreated = await useCases.createProject({
+  projectDirectory: noRouteStartSceneProjectDirectory,
+  project: core.createBlankProject({
+    id: "no-route-start-scene",
+    title: "No Route Start Scene",
+    premise: "Studio 빈 프로젝트 첫 씬 생성을 검증한다."
+  })
+});
+assert.equal(noRouteStartCreated.ok, true);
+assert.equal(noRouteStartCreated.project.routes.length, 0);
+const noRouteStartInserted = await useCases.insertManualScene({
+  projectDirectory: noRouteStartSceneProjectDirectory,
+  expectedProjectRevision: noRouteStartCreated.projectRevision,
+  link: { type: "none" },
+  scene: {
+    id: "scene-first-no-route",
+    label: "첫 수동 장면",
+    speaker: "나",
+    text: "route 없는 프로젝트도 Studio에서 첫 씬을 만들 수 있다.",
+    characters: [],
+    choices: []
+  }
+});
+assert.equal(noRouteStartInserted.ok, true);
+assert.equal(noRouteStartInserted.project.routes.length, 1);
+assert.equal(noRouteStartInserted.project.routes[0].entrySceneId, "scene-first-no-route");
+assert.equal(noRouteStartInserted.project.settings.defaultRouteId, noRouteStartInserted.project.routes[0].id);
 
 const preserveCreated = await useCases.createProjectFromHeroine({
   projectDirectory: preserveNextProjectDirectory,

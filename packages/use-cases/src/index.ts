@@ -3276,11 +3276,6 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         return manualTransactionalMutationResult(store, input, (project) => {
-          const route = project.routes[0];
-          if (!route) {
-            throw manualInputError("프로젝트에 route가 없습니다.", "routes");
-          }
-
           const link = asRecord(record.link);
           const linkType = typeof link.type === "string" ? link.type : "none";
           if (!["none", "next", "choice"].includes(linkType)) {
@@ -3301,6 +3296,27 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           }
 
           const scene = sceneFromInput(project, record.scene);
+          let route = project.routes[0];
+          if (!route && linkType === "none") {
+            route = {
+              id: "route-main",
+              title: "기본 루트",
+              heroineId: project.characters[0]?.id || "manual-heroine",
+              summary: "",
+              entrySceneId: scene.id,
+              endings: []
+            };
+            project.routes.push(route);
+          }
+          if (linkType === "none" && project.scenes.length === 0) {
+            if (!route) {
+              throw manualInputError("프로젝트에 route가 없습니다.", "routes");
+            }
+            route.entrySceneId = scene.id;
+            if (!project.settings.defaultRouteId) {
+              project.settings.defaultRouteId = route.id;
+            }
+          }
           if (linkType === "next" && sourceScene) {
             if (sourceScene.choices.length > 0) {
               throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);

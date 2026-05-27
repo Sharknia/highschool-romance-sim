@@ -65,7 +65,18 @@ export interface ProjectData {
     sourceSnapshotCreatedAt?: string;
   }>;
   routes?: Array<{ id?: string; title?: string; entrySceneId?: string; heroineId?: string }>;
-  scenes?: Array<{ id?: string; label?: string; speaker?: string; text?: string; backgroundAssetId?: string; ending?: { title?: string; kind?: string } }>;
+  scenes?: Array<{
+    id?: string;
+    label?: string;
+    speaker?: string;
+    text?: string;
+    backgroundAssetId?: string;
+    cgAssetId?: string;
+    characters?: Array<{ characterId?: string; expression?: string; assetId?: string; position?: "left" | "center" | "right" | string }>;
+    choices?: Array<{ id?: string; text?: string; next?: string; condition?: Record<string, unknown>; effects?: Record<string, unknown> }>;
+    next?: string;
+    ending?: { id?: string; title?: string; kind?: string };
+  }>;
   assets?: ProjectAsset[];
   generationJobs?: ProjectGenerationJob[];
 }

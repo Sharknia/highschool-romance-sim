@@ -51,6 +51,7 @@ import {
   repairDiffOperationLabel,
   repairDiffValueText
 } from "./projectDisplayText";
+import { StudioWorkspace } from "./StudioWorkspace";
 
 interface ProjectDetailViewProps {
   activeTab: ProjectTabId;
@@ -83,6 +84,7 @@ interface DummyFallbackTarget {
 }
 
 const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
+const studioNavigationLabel = "제작으로 이동";
 
 const emptyWorkflowSummary: ProjectWorkflowSummary = {
   primaryAction: "goToHeroine",
@@ -1645,20 +1647,17 @@ export function ProjectDetailView({
           </div>
         ) : null}
         {activeTab === "studio" ? (
-          <div className="detail-tab-grid" data-testid="studio-under-construction">
-            <section className="detail-card detail-card-wide">
-              <EmptyState
-                title="제작 탭은 준비 중입니다."
-                description="Alpha에서는 시나리오 작성, 분기 편집, 장면 구성 흐름이 이 영역에 들어올 예정입니다."
-              />
-              <ul className="compact-list">
-                <li>시나리오 작성: 프로젝트 스냅샷과 배경 에셋을 바탕으로 장면 초안을 다룹니다.</li>
-                <li>분기 편집: 선택지와 엔딩 도달 상태를 시각적으로 조정합니다.</li>
-                <li>장면 구성: 대사, 배경, 캐릭터 표시를 한 장면 단위로 편집합니다.</li>
-              </ul>
-              <div className="inline-status">제작으로 이동 상태: 준비 중. 실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
-            </section>
-          </div>
+          <StudioWorkspace
+            navigationLabel={studioNavigationLabel}
+            onNavigate={navigate}
+            onProjectResult={onProjectResult}
+            postJson={(path, body) => postAuthedJson<ProjectApiResult>(path, body)}
+            previewPreflight={currentPreviewPreflight}
+            project={currentProject}
+            projectDirectory={projectDirectory}
+            projectRevision={currentPreviewPreflight?.projectRevision || null}
+            repairActions={currentRepairActions}
+          />
         ) : null}
         {activeTab === "background" ? (
           <div className="detail-tab-grid">
