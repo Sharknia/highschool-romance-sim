@@ -55,6 +55,9 @@ export interface CodexLoginStart {
   authUrl?: string;
   loginId?: string;
   type?: string;
+  userCode?: string;
+  verificationUri?: string;
+  verificationUrl?: string;
 }
 
 export interface CodexLoginResponse extends ApiResult {

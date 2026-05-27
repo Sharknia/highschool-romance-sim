@@ -60,9 +60,13 @@ assert.doesNotMatch(toolkitDocsSource, /웹앱에서 프로젝트 파일 선택\
 assert.match(
   appSource,
   /<Route path="\/" element={<RootRedirect \/?>} \/>/,
-  "`/`는 전용 RootRedirect로 인증 상태에 따라 분기해야 합니다."
+  "`/`는 전용 RootRedirect로 기본 제작 화면에 진입해야 합니다."
 );
-assert.match(appSource, /<Navigate to="\/heroines" replace \/>/, "`/` 인증 후 기본 화면은 히로인 관리여야 합니다.");
+assert.match(appSource, /<Navigate to="\/heroines" replace \/>/, "`/` 기본 화면은 히로인 관리여야 합니다.");
+assert.doesNotMatch(appSource, /AuthGate/, "App 라우팅은 Codex 연결 상태로 제작 화면 접근을 막는 AuthGate를 사용하면 안 됩니다.");
+assert.doesNotMatch(appSource, /\/login\?next/, "라우팅은 deep link를 /login?next로 강제 이동하면 안 됩니다.");
+assert.doesNotMatch(appSource, /status === "authenticated"|인증 상태 확인 중/, "앱 진입은 Codex 인증 완료 여부에 의존하면 안 됩니다.");
+assert.match(appSource, /path="\/login"/, "legacy /login deep link는 안전하게 처리해야 합니다.");
 ["/projects", "/heroines", "/settings"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 인증 앱 라우트가 있어야 합니다.`);
 });
@@ -120,7 +124,13 @@ assert.match(notFoundSource, /to="\/heroines"/, "인증 후 Not Found 복귀 링
 });
 const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
 assert.match(settingsStartSource, /page-status/, "SettingsStartPage는 page-local 상태 문장을 가져야 합니다.");
-assert.doesNotMatch(settingsStartSource, /상태 갱신|로그아웃|refreshSession/, "SettingsStartPage는 수동 상태 갱신/로그아웃 버튼을 노출하면 안 됩니다.");
+assert.match(settingsStartSource, /상태 갱신|로그아웃|refreshSession/, "SettingsStartPage는 Codex 연결 상태 갱신과 로그아웃을 설정 화면에서 소유해야 합니다.");
+const authGateSource = readText("apps/web/src/client/auth/AuthGate.tsx");
+assert.doesNotMatch(authGateSource, /Navigate|useLocation|\/login\?next|encodeNextPath/, "AuthGate는 더 이상 /login?next 리다이렉트 책임을 가지면 안 됩니다.");
+assert.match(authGateSource, /<Outlet \/>/, "AuthGate legacy wrapper는 제작 라우팅을 그대로 통과시켜야 합니다.");
+const loginPageSource = readText("apps/web/src/client/pages/LoginPage.tsx");
+assert.doesNotMatch(loginPageSource, /startBrowserLogin|브라우저로 로그인|ChatGPT 인증을 완료|로그인이 필요/, "LoginPage는 독립 로그인 화면 역할을 유지하면 안 됩니다.");
+assert.match(loginPageSource, /\/settings/, "legacy /login은 Codex 연결 관리가 설정 화면 책임임을 반영해야 합니다.");
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");
@@ -189,6 +199,7 @@ assert.match(heroineDeleteDialogSource, /requiresConfirmation:\s*false/, "히로
 assert.doesNotMatch(projectStartSource, /ProjectDeleteDialog/, "ProjectStartPage는 별도 ProjectDeleteDialog를 만들면 안 됩니다.");
 const recentProjectListPath = "apps/web/src/client/pages/projects/RecentProjectList.tsx";
 const projectDetailViewPath = "apps/web/src/client/pages/projects/ProjectDetailView.tsx";
+const projectDetailStateSource = readText("apps/web/src/client/pages/projects/projectDetailState.ts");
 const projectNewPagePath = "apps/web/src/client/pages/projects/ProjectNewPage.tsx";
 const projectApiPath = "apps/web/src/client/pages/projects/projectApi.ts";
 assert.ok(existsSync(join(root, projectDetailViewPath)), "프로젝트 상세 탭은 별도 ProjectDetailView 컴포넌트로 분리해야 합니다.");
@@ -203,6 +214,7 @@ const projectDisplayTextSource = readText("apps/web/src/client/pages/projects/pr
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
 const useCasesSource = readText("packages/use-cases/src/index.ts");
+const serverHandlersSource = readText("apps/web/src/server/handlers.ts");
 const clientStylesSource = readText("apps/web/src/client/styles.css");
 const detailTabsBlock = projectPageTypesSource.match(/export const detailTabs = \[[\s\S]*?\] as const;/)?.[0] || "";
 const visibleShellStart = projectDetailViewSource.indexOf("<TabList");
@@ -322,6 +334,8 @@ const legacyProjectTabClassPattern = new RegExp(`${["project", "tab"].join("-")}
 assert.doesNotMatch(projectDetailViewSource, legacyProjectTabClassPattern, "ProjectDetailView는 로컬 프로젝트 탭 class를 렌더링하면 안 됩니다.");
 assert.match(projectDetailViewSource, /<TabList/, "ProjectDetailView는 중앙 TabList를 사용해야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /function fallbackWorkflowSummary|function fallbackPreviewReadiness|function fallbackExportPlan/, "ProjectDetailView는 workflow/readiness/export 도메인 상태를 fallback으로 재계산하면 안 됩니다.");
+assert.doesNotMatch(projectDetailViewSource, /createPreviewReadinessFallback|createExportPlanFallback/, "ProjectDetailView는 preview/export readiness를 프론트 fallback으로 계산하지 말고 use case/API DTO만 표시해야 합니다.");
+assert.doesNotMatch(projectDetailStateSource, /createPreviewReadinessFallback|createExportPlanFallback/, "projectDetailState는 preview/export 도메인 readiness fallback 계산을 소유하면 안 됩니다.");
 assert.match(projectDetailViewSource, /emptyWorkflowSummary/, "ProjectDetailView는 DTO가 없을 때 표시 전용 workflow placeholder만 사용해야 합니다.");
 assert.match(projectDetailViewSource, /emptyPreviewReadiness/, "ProjectDetailView는 DTO가 없을 때 표시 전용 preview readiness placeholder만 사용해야 합니다.");
 assert.match(projectDetailViewSource, /emptyExportPlan/, "ProjectDetailView는 DTO가 없을 때 표시 전용 export plan placeholder만 사용해야 합니다.");
@@ -563,6 +577,7 @@ assert.doesNotMatch(projectDetailViewSource, /currentProject\?\.id\s*\|\|\s*proj
 assert.match(projectDetailViewSource, /assetJobs\.length > 0 \? assetJobs : currentProject\?\.generationJobs/, "배경 화면 생성 탭은 project generationJobs fallback으로 승인 직후 CG 작업을 보여야 합니다.");
 assert.match(projectDetailViewSource, /runImageJobs\(plannedImageJobIds\)/, "배경 화면 생성 탭은 승인된 이벤트 CG planned 작업을 실행하는 버튼을 노출해야 합니다.");
 assert.match(projectDetailViewSource, /runImageJobs\(failedImageJobIds,\s*true\)/, "배경 화면 생성 탭은 실패한 이벤트 CG 작업 재시도 버튼을 노출해야 합니다.");
+assert.match(serverHandlersSource, /\/api\/project\/validate"[\s\S]{0,180}validateProject"\)/, "validate API route failure도 validateProject action 계약을 유지해야 합니다.");
 [
   "ProjectAssetProvenance",
   "provenance?: ProjectAssetProvenance",
@@ -679,7 +694,11 @@ assert.match(
 });
 assert.match(projectDetailViewSource, /severity === "error"/, "프리뷰 검증은 warning이 아니라 error severity만 차단해야 합니다.");
 assert.match(projectDetailViewSource, /result\.code === "PREVIEW_BLOCKED"/, "프리뷰 차단 응답은 failed가 아니라 blocked 상태로 표시해야 합니다.");
-assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun === false/, "프리뷰 실행 버튼은 previewReadiness.canRun=false일 때 비활성화해야 합니다.");
+assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 previewReadiness.canRun=true가 아닐 때 비활성화해야 합니다.");
+assert.match(projectDetailViewSource, /lastResetProjectIdRef/, "ProjectDetailView는 프로젝트 id 변경 여부를 추적해 preview/export local state reset을 제한해야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /\}, \[currentProject\?\.id,\s*projectExportPlan,\s*projectPreviewReadiness\]\)/, "ProjectDetailView는 readiness/export DTO prop 갱신만으로 preview runtime과 export 결과를 reset하면 안 됩니다.");
+assert.match(projectDetailViewSource, /result\.ok === false\s*\?\s*\{[\s\S]{0,700}emptyPreviewReadiness[\s\S]{0,700}state:\s*"failed"/, "프리뷰 검증 API 실패 응답에 previewReadiness DTO가 없어도 stale readiness 대신 명시적인 failed fallback을 표시해야 합니다.");
+assert.match(projectDetailViewSource, /setExportPlan\(result\.exportPlan \|\| null\)/, "프리뷰 검증 응답에 exportPlan이 없으면 이전 exportPlan을 stale하게 유지하지 않아야 합니다.");
 assert.match(projectDetailViewSource, /const blocked = result\.code === "PREVIEW_BLOCKED"[\s\S]{0,900}setPreviewRuntime\(null\)/, "프리뷰 차단/실패 응답은 이전 runtime 플레이 화면을 비워야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /프리뷰 탭입니다\. 플레이 검증을 연결합니다\./, "프리뷰 탭은 placeholder가 아니라 실제 runtime 확인 흐름이어야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /내보내기 탭입니다\. export와 실행 확인 결과를 연결합니다\./, "내보내기 탭은 placeholder가 아니라 실제 export/smoke 흐름이어야 합니다.");
@@ -830,8 +849,9 @@ assert.doesNotMatch(
   "WorkspacePage는 히로인 기반 프로젝트 생성 실행 책임을 소유하면 안 됩니다."
 );
 assert.doesNotMatch(settingsStartSource, /setShellState/, "SettingsStartPage는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
-assert.doesNotMatch(settingsStartSource, /describeSession|session\?|logout\(/, "SettingsStartPage는 SA-108의 Codex 상세/로그아웃 범위를 선점하면 안 됩니다.");
-assert.doesNotMatch(settingsStartSource, /생성 기본값|soft visual novel|Codex imageGeneration/, "SettingsStartPage는 SA-108의 생성 기본값 범위를 선점하면 안 됩니다.");
+assert.match(settingsStartSource, /session|logout\(/, "SettingsStartPage는 #83 범위의 Codex session 상세와 로그아웃을 소유해야 합니다.");
+assert.match(settingsStartSource, /생성 기본값|이미지 생성|패키징 목 이미지/, "SettingsStartPage는 #83 범위의 생성 기본값과 fallback 정책을 표시해야 합니다.");
+assert.doesNotMatch(settingsStartSource, /describeSession/, "SettingsStartPage는 shell용 describeSession 문자열을 재사용하지 않고 설정 표시 상태를 분리해야 합니다.");
 
 const styleSource = readText("apps/web/src/client/styles.css");
 [".workspace-layout", ".workspace-nav", ".page-hero", ".page-primary-action"].forEach((selector) => {

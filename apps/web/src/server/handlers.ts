@@ -445,7 +445,7 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/scenes/insert", (context) => jsonBodyRoute(context, (body) => services.insertManualScene(body)));
   app.post("/api/project/scenes/link", (context) => jsonBodyRoute(context, (body) => services.linkManualScene(body)));
   app.post("/api/project/scenes/ending", (context) => jsonBodyRoute(context, (body) => services.setSceneEnding(body)));
-  app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body)));
+  app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body), "validateProject"));
   app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
   app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));
   app.post("/api/project/preview", (context) => jsonBodyRoute(context, (body) => services.previewProject(body), "previewProject"));
