@@ -1,0 +1,72 @@
+{
+  "id": "codex-prebuilt-mock-image-pack",
+  "version": "2026.05.26",
+  "adapter": "mock-image-pack-adapter",
+  "sourceGeneratedBy": "codex-imageGeneration-prebuilt-pack",
+  "assets": [
+    {
+      "id": "asset-mock-pack-background-classroom",
+      "kind": "background",
+      "target": "project.defaultBackground",
+      "filePath": "backgrounds/classroom.png",
+      "label": "Mock classroom background",
+      "license": "internal VN Maker mock pack",
+      "provenance": {
+        "adapter": "mock-image-pack-adapter",
+        "fallbackReason": "codex-imageGeneration-unavailable",
+        "packId": "codex-prebuilt-mock-image-pack",
+        "packVersion": "2026.05.26",
+        "sourceGeneratedBy": "codex-imageGeneration-prebuilt-pack",
+        "license": "internal VN Maker mock pack"
+      }
+    },
+    {
+      "id": "asset-mock-pack-portrait-heroine-neutral",
+      "kind": "portrait",
+      "target": "heroine.defaultPortrait",
+      "filePath": "portraits/heroine-neutral.png",
+      "label": "Mock heroine neutral portrait",
+      "license": "internal VN Maker mock pack",
+      "provenance": {
+        "adapter": "mock-image-pack-adapter",
+        "fallbackReason": "codex-imageGeneration-unavailable",
+        "packId": "codex-prebuilt-mock-image-pack",
+        "packVersion": "2026.05.26",
+        "sourceGeneratedBy": "codex-imageGeneration-prebuilt-pack",
+        "license": "internal VN Maker mock pack"
+      }
+    },
+    {
+      "id": "asset-mock-pack-expression-heroine-happy",
+      "kind": "expression",
+      "target": "heroine.expression.happy",
+      "filePath": "expressions/heroine-happy.png",
+      "label": "Mock heroine happy expression",
+      "license": "internal VN Maker mock pack",
+      "provenance": {
+        "adapter": "mock-image-pack-adapter",
+        "fallbackReason": "codex-imageGeneration-unavailable",
+        "packId": "codex-prebuilt-mock-image-pack",
+        "packVersion": "2026.05.26",
+        "sourceGeneratedBy": "codex-imageGeneration-prebuilt-pack",
+        "license": "internal VN Maker mock pack"
+      }
+    },
+    {
+      "id": "asset-mock-pack-cg-library-confession",
+      "kind": "cg",
+      "target": "scene.cg",
+      "filePath": "cgs/library-confession.png",
+      "label": "Mock library confession CG",
+      "license": "internal VN Maker mock pack",
+      "provenance": {
+        "adapter": "mock-image-pack-adapter",
+        "fallbackReason": "codex-imageGeneration-unavailable",
+        "packId": "codex-prebuilt-mock-image-pack",
+        "packVersion": "2026.05.26",
+        "sourceGeneratedBy": "codex-imageGeneration-prebuilt-pack",
+        "license": "internal VN Maker mock pack"
+      }
+    }
+  ]
+}

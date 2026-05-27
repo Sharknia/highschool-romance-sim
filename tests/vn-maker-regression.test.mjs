@@ -82,6 +82,30 @@ assert.deepEqual(validation.filter((issue) => issue.severity === "error"), []);
 const manifest = core.createAssetManifest(project);
 assert.equal(Array.isArray(manifest.requiredAssets), true);
 
+const packagedMockManifest = await codexGeneration.readPackagedMockImagePackManifest();
+assert.equal(packagedMockManifest.id, codexGeneration.PACKAGED_MOCK_IMAGE_PACK_ID);
+assert.equal(packagedMockManifest.version, codexGeneration.PACKAGED_MOCK_IMAGE_PACK_VERSION);
+assert.equal(packagedMockManifest.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
+assert.deepEqual(
+  new Set(packagedMockManifest.assets.map((asset) => asset.kind)),
+  new Set(["background", "portrait", "expression", "cg"])
+);
+for (const asset of packagedMockManifest.assets) {
+  assert.equal(asset.provenance.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(asset.provenance.packVersion, codexGeneration.PACKAGED_MOCK_IMAGE_PACK_VERSION);
+  const assetPath = codexGeneration.resolvePackagedMockImagePackAssetPath(asset.filePath);
+  assert.equal(existsSync(assetPath), true);
+  assert.equal(readFileSync(assetPath).subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+}
+assert.throws(
+  () => codexGeneration.resolvePackagedMockImagePackAssetPath("../outside.png"),
+  /pack filePath/
+);
+assert.throws(
+  () => codexGeneration.resolvePackagedMockImagePackAssetPath("C:/outside.png"),
+  /pack filePath/
+);
+
 const imageJob = core.createImageGenerationJob({
   id: "job-portrait-haru",
   kind: "portrait",
@@ -832,7 +856,10 @@ try {
   });
   assert.equal(sandboxImage.status, 200);
   assert.equal(sandboxImage.body.job.status, "completed");
-  assert.equal(sandboxImage.body.job.provider, "mock-adapter");
+  assert.equal(sandboxImage.body.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(sandboxImage.body.job.dummy, true);
+  assert.equal(sandboxImage.body.asset.source, "mock");
+  assert.equal(sandboxImage.body.asset.provenance.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
   assert.equal(sandboxImage.body.raw.provenance, "alpha-sandbox-pack@0.1.0");
   assert.match(sandboxImage.body.image.uri, /^\/generated-assets\//);
 } finally {

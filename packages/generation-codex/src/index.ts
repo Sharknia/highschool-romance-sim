@@ -1,9 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   describeEventExpansionPolicy,
   createImageGenerationJob,
+  parseMockImagePackManifest,
+  type MockImagePackManifest,
   type AssetKind,
   type EventExpansionPlan,
   type EventExpansionRequest,
@@ -21,6 +24,11 @@ type LoginFlow = "browser" | "device";
 type CodexAuthMode = "chatgpt" | "chatgptAuthTokens" | "apikey" | null;
 type CodexImageKind = Extract<AssetKind, "portrait" | "expression" | "cg" | "background">;
 type EventTextGenerationInput = Parameters<EventTextGenerationAdapter["generateEventExpansionPlan"]>[0];
+
+export const PACKAGED_MOCK_IMAGE_PACK_ID = "codex-prebuilt-mock-image-pack";
+export const PACKAGED_MOCK_IMAGE_PACK_VERSION = "2026.05.26";
+export const PACKAGED_MOCK_IMAGE_PACK_DIRECTORY = fileURLToPath(new URL("../mock-image-pack/", import.meta.url));
+export const PACKAGED_MOCK_IMAGE_PACK_MANIFEST_PATH = join(PACKAGED_MOCK_IMAGE_PACK_DIRECTORY, "manifest.json");
 
 interface JsonRpcResponse<T = unknown> {
   id: number;
@@ -138,6 +146,24 @@ export interface GeneratedCodexImageAssetResult {
   raw: {
     item: CodexImageGenerationItem;
   };
+}
+
+export async function readPackagedMockImagePackManifest(): Promise<MockImagePackManifest> {
+  const manifestJson = await readFile(PACKAGED_MOCK_IMAGE_PACK_MANIFEST_PATH, "utf8");
+  const parsed = parseMockImagePackManifest(JSON.parse(manifestJson));
+  if (!parsed.ok) {
+    const details = parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join(", ");
+    throw new Error(`패키징 목 이미지 pack manifest가 유효하지 않습니다: ${details}`);
+  }
+  return parsed.value;
+}
+
+export function resolvePackagedMockImagePackAssetPath(filePath: string): string {
+  const normalized = filePath.replaceAll("\\", "/");
+  if (normalized.startsWith("/") || isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").includes("..")) {
+    throw new Error("pack filePath는 mock image pack 내부 상대 경로여야 합니다.");
+  }
+  return join(PACKAGED_MOCK_IMAGE_PACK_DIRECTORY, normalized);
 }
 
 export interface CodexAppServerClientOptions {

@@ -157,6 +157,94 @@ assert.equal(withGenerationResult.generationJobs.some((job) => job.id === "job-d
 assert.equal(withGenerationResult.assets.some((asset) => asset.id === "asset-domain-cg" && asset.source === "generated"), true);
 assert.equal(starter.generationJobs.some((job) => job.id === "job-domain-cg"), false);
 
+assert.equal(core.MOCK_IMAGE_PACK_ADAPTER, "mock-image-pack-adapter");
+const mockPackManifest = core.parseMockImagePackManifest({
+  id: "alpha-mock-pack",
+  version: "2026.05.26",
+  adapter: core.MOCK_IMAGE_PACK_ADAPTER,
+  sourceGeneratedBy: "codex-imageGeneration",
+  assets: [{
+    id: "asset-mock-bg",
+    kind: "background",
+    target: "project-background",
+    filePath: "mock-pack/backgrounds/classroom.webp",
+    label: "목 이미지 교실 배경",
+    license: "internal mock asset",
+    provenance: {
+      adapter: core.MOCK_IMAGE_PACK_ADAPTER,
+      fallbackReason: "OAUTH_REQUIRED",
+      packId: "alpha-mock-pack",
+      packVersion: "2026.05.26",
+      sourceGeneratedBy: "codex-imageGeneration",
+      license: "internal mock asset"
+    }
+  }]
+});
+assert.equal(mockPackManifest.ok, true);
+assert.equal(mockPackManifest.value.assets[0].provenance.packVersion, "2026.05.26");
+const invalidMockPackManifest = core.parseMockImagePackManifest({
+  id: "broken-pack",
+  version: "2026.05.26",
+  adapter: core.MOCK_IMAGE_PACK_ADAPTER,
+  sourceGeneratedBy: "codex-imageGeneration",
+  assets: [{ id: "asset-broken", kind: "background", target: "project-background", label: "broken" }]
+});
+assert.equal(invalidMockPackManifest.ok, false);
+assert.equal(invalidMockPackManifest.issues.some((issue) => issue.path === "assets.0.filePath"), true);
+
+const mockPackJob = {
+  id: "job-mock-bg",
+  kind: "background",
+  targetId: "domain-project",
+  prompt: "fallback classroom background",
+  provider: core.MOCK_IMAGE_PACK_ADAPTER,
+  status: "completed",
+  outputAssetId: "asset-mock-bg",
+  dummy: true,
+  fallbackReason: "OAUTH_REQUIRED",
+  packVersion: "2026.05.26",
+  sourceGeneratedBy: "codex-imageGeneration"
+};
+const mockPackAsset = {
+  id: "asset-mock-bg",
+  kind: "background",
+  label: "목 이미지 교실 배경",
+  uri: "/generated-assets/asset-mock-bg.webp",
+  source: "mock",
+  generationJobId: "job-mock-bg",
+  provenance: {
+    adapter: core.MOCK_IMAGE_PACK_ADAPTER,
+    fallbackReason: "OAUTH_REQUIRED",
+    packId: "alpha-mock-pack",
+    packVersion: "2026.05.26",
+    sourceGeneratedBy: "codex-imageGeneration",
+    license: "internal mock asset"
+  }
+};
+const mockPackProject = {
+  ...starter,
+  assets: [mockPackAsset, ...starter.assets.filter((asset) => asset.kind !== "background")],
+  generationJobs: [mockPackJob, ...starter.generationJobs],
+  scenes: starter.scenes.map((scene) => ({ ...scene, backgroundAssetId: "asset-mock-bg" }))
+};
+assert.equal(core.parseVnMakerProject(mockPackProject).ok, true);
+assert.equal(core.validateProject(mockPackProject).filter((issue) => issue.severity === "error").length, 0);
+const mockPackAssetManifest = core.createAssetManifest(mockPackProject);
+assert.equal(mockPackAssetManifest.requiredAssets.some((asset) => asset.id === "asset-mock-bg" && asset.source === "mock"), true);
+assert.equal(mockPackAssetManifest.requiredAssets.find((asset) => asset.id === "asset-mock-bg")?.provenance.packVersion, "2026.05.26");
+const mockRuntime = core.createPlayerRuntimeData(mockPackProject);
+assert.equal(mockRuntime.scenes.every((scene) => scene.backgroundAsset?.source === "mock"), true);
+assert.equal(mockRuntime.scenes.every((scene) => scene.backgroundAsset?.provenance?.adapter === core.MOCK_IMAGE_PACK_ADAPTER), true);
+const missingMockProvenanceProject = {
+  ...mockPackProject,
+  assets: [{ ...mockPackAsset, provenance: undefined }]
+};
+assert.equal(
+  core.validateProject(missingMockProvenanceProject).some((issue) => issue.path === "assets.0.provenance" && issue.severity === "error"),
+  true,
+  "mock/dummy asset은 provenance 없이 통과하면 안 됩니다."
+);
+
 const parsedBackgroundInput = core.parseCreateImageGenerationJobInput({
   id: "job-domain-background",
   kind: "background",

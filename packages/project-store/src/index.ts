@@ -298,6 +298,7 @@ interface AssetRow {
   uri: string | null;
   source: VnMakerAsset["source"] | null;
   generation_job_id: string | null;
+  provenance_json: string | null;
   relative_path: string | null;
   hash: string | null;
   mime_type: string | null;
@@ -317,6 +318,10 @@ interface GenerationJobRow {
   status: VnMakerGenerationJob["status"];
   output_asset_id: string | null;
   failure_message: string | null;
+  dummy: number | null;
+  fallback_reason: string | null;
+  pack_version: string | null;
+  source_generated_by: string | null;
   prompt_hash: string | null;
   adapter: string | null;
   position: number;
@@ -534,6 +539,18 @@ CREATE TABLE IF NOT EXISTS staged_portraits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_staged_portraits_project_asset ON staged_portraits(project_id, asset_id);
+`
+  },
+  {
+    id: 6,
+    name: "mock_image_pack_provenance",
+    sql: `
+ALTER TABLE assets ADD COLUMN provenance_json TEXT;
+
+ALTER TABLE generation_jobs ADD COLUMN dummy INTEGER;
+ALTER TABLE generation_jobs ADD COLUMN fallback_reason TEXT;
+ALTER TABLE generation_jobs ADD COLUMN pack_version TEXT;
+ALTER TABLE generation_jobs ADD COLUMN source_generated_by TEXT;
 `
   }
 ] as const;
@@ -1046,14 +1063,14 @@ ORDER BY position ASC, id ASC
 `).all(project.id) as SceneRow[];
 
     const assets = this.db.prepare(`
-SELECT id, kind, label, uri, source, generation_job_id, relative_path, hash, mime_type, byte_size, prompt_hash, adapter, position
+SELECT id, kind, label, uri, source, generation_job_id, provenance_json, relative_path, hash, mime_type, byte_size, prompt_hash, adapter, position
 FROM assets
 WHERE project_id = ?
 ORDER BY position ASC, id ASC
 `).all(project.id) as AssetRow[];
 
     const generationJobs = this.db.prepare(`
-SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, failure_message, prompt_hash, adapter, position
+SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, failure_message, dummy, fallback_reason, pack_version, source_generated_by, prompt_hash, adapter, position
 FROM generation_jobs
 WHERE project_id = ?
 ORDER BY position ASC, id ASC
@@ -1109,7 +1126,8 @@ ORDER BY position ASC, id ASC
         label: row.label,
         uri: row.uri || undefined,
         source: row.source || undefined,
-        generationJobId: row.generation_job_id || undefined
+        generationJobId: row.generation_job_id || undefined,
+        provenance: parseJson<VnMakerAsset["provenance"] | undefined>(row.provenance_json, undefined)
       })),
       generationJobs: generationJobs.map((row): VnMakerGenerationJob => ({
         id: row.id,
@@ -1120,7 +1138,11 @@ ORDER BY position ASC, id ASC
         provider: row.provider,
         status: row.status,
         outputAssetId: row.output_asset_id || undefined,
-        failureMessage: row.failure_message || undefined
+        failureMessage: row.failure_message || undefined,
+        dummy: row.dummy === null ? undefined : Boolean(row.dummy),
+        fallbackReason: row.fallback_reason || undefined,
+        packVersion: row.pack_version || undefined,
+        sourceGeneratedBy: row.source_generated_by || undefined
       })),
       settings: {
         defaultRouteId: settings?.default_route_id || "",
@@ -1415,11 +1437,11 @@ VALUES (
 
       const insertAsset = this.db.prepare(`
 INSERT INTO assets (
-  project_id, id, kind, label, uri, source, generation_job_id, relative_path,
+  project_id, id, kind, label, uri, source, generation_job_id, provenance_json, relative_path,
   hash, mime_type, byte_size, prompt_hash, adapter, position, created_at, updated_at
 )
 VALUES (
-  @projectId, @id, @kind, @label, @uri, @source, @generationJobId, @relativePath,
+  @projectId, @id, @kind, @label, @uri, @source, @generationJobId, @provenanceJson, @relativePath,
   @hash, @mimeType, @byteSize, @promptHash, @adapter, @position, @now, @now
 )
 `);
@@ -1433,6 +1455,7 @@ VALUES (
           uri: normalizeNullable(asset.uri),
           source: normalizeNullable(asset.source),
           generationJobId: normalizeNullable(asset.generationJobId),
+          provenanceJson: asset.provenance ? json(asset.provenance) : null,
           relativePath: preserved?.relative_path || null,
           hash: preserved?.hash || null,
           mimeType: preserved?.mime_type || null,
@@ -1447,11 +1470,11 @@ VALUES (
       const insertJob = this.db.prepare(`
 INSERT INTO generation_jobs (
   project_id, id, kind, target_id, prompt, style, provider, status,
-  output_asset_id, failure_message, prompt_hash, adapter, position, created_at, updated_at
+  output_asset_id, failure_message, dummy, fallback_reason, pack_version, source_generated_by, prompt_hash, adapter, position, created_at, updated_at
 )
 VALUES (
   @projectId, @id, @kind, @targetId, @prompt, @style, @provider, @status,
-  @outputAssetId, @failureMessage, @promptHash, @adapter, @position, @now, @now
+  @outputAssetId, @failureMessage, @dummy, @fallbackReason, @packVersion, @sourceGeneratedBy, @promptHash, @adapter, @position, @now, @now
 )
 `);
       project.generationJobs.forEach((job, position) => {
@@ -1467,6 +1490,10 @@ VALUES (
           status: job.status,
           outputAssetId: normalizeNullable(job.outputAssetId),
           failureMessage: normalizeNullable(job.failureMessage),
+          dummy: job.dummy === undefined ? null : job.dummy ? 1 : 0,
+          fallbackReason: normalizeNullable(job.fallbackReason),
+          packVersion: normalizeNullable(job.packVersion),
+          sourceGeneratedBy: normalizeNullable(job.sourceGeneratedBy),
           promptHash: preserved?.prompt_hash || hashText(job.prompt),
           adapter: preserved?.adapter || job.provider,
           position,
@@ -1762,7 +1789,7 @@ VALUES (@projectId, @severity, @path, @message, @createdAt)
 
   private readAssetMetadata(projectId: string): Map<string, AssetRow> {
     const rows = this.db.prepare(`
-SELECT id, kind, label, uri, source, generation_job_id, relative_path, hash, mime_type, byte_size, prompt_hash, adapter, position
+SELECT id, kind, label, uri, source, generation_job_id, provenance_json, relative_path, hash, mime_type, byte_size, prompt_hash, adapter, position
 FROM assets
 WHERE project_id = ?
 `).all(projectId) as AssetRow[];
@@ -1771,7 +1798,7 @@ WHERE project_id = ?
 
   private readGenerationJobMetadata(projectId: string): Map<string, GenerationJobRow> {
     const rows = this.db.prepare(`
-SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, failure_message, prompt_hash, adapter, position
+SELECT id, kind, target_id, prompt, style, provider, status, output_asset_id, failure_message, dummy, fallback_reason, pack_version, source_generated_by, prompt_hash, adapter, position
 FROM generation_jobs
 WHERE project_id = ?
 `).all(projectId) as GenerationJobRow[];

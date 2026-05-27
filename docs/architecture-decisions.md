@@ -35,7 +35,9 @@ MyGame.vnmaker/
   cache/
 ```
 
-`project.sqlite`는 시나리오, 캐릭터, 씬, 분기, 검증 결과, 생성 작업, 에셋 manifest를 소유한다. 이미지, 오디오, 대형 생성 결과물은 DB에 BLOB로 저장하지 않고 파일로 저장한다. DB에는 상대 경로, 해시, mime, 크기, 생성 작업 id, adapter, prompt hash 같은 메타데이터만 저장한다.
+`project.sqlite`는 시나리오, 캐릭터, 씬, 분기, 검증 결과, 생성 작업, 에셋 manifest를 소유한다. 이미지, 오디오, 대형 생성 결과물은 DB에 BLOB로 저장하지 않고 파일로 저장한다. DB에는 상대 경로, 해시, mime, 크기, 생성 작업 id, adapter, prompt hash, mock/dummy provenance 같은 메타데이터만 저장한다.
+
+패키징된 목 이미지 fallback은 `packages/generation-codex/mock-image-pack` 아래의 manifest와 PNG/WebP 파일로 둔다. core는 pack schema와 provenance 검증만 소유하고, generation adapter는 해당 pack 파일 경로를 해석해 프로젝트 `assets/generated` 또는 project-store 관리 경로로 복사/링크하는 책임을 가진다. alpha sandbox fixture, 패키징 목 이미지 fallback, 실제 Codex `imageGeneration` 성공은 generation job provider와 provenance로 구분한다.
 
 **이유:** SQLite는 로컬 단일 사용자 제작툴, CLI 자동화, 작업 큐, 검색, 검증 결과 저장에 충분한 트랜잭션과 쿼리 능력을 제공한다. JSON 파일은 export/import와 AI 리뷰용 스냅샷으로 유지하되 canonical storage로 쓰지 않는다.
 

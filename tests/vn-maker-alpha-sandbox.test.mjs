@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const alphaSandbox = await import("../packages/alpha-sandbox/dist/index.js");
+const core = await import("../packages/engine-core/dist/index.js");
 const webHandlers = await import("../apps/web/dist/server/handlers.js");
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-alpha-sandbox-"));
 const previousSandboxEnv = process.env.VN_MAKER_ALPHA_SANDBOX;
@@ -424,9 +425,18 @@ try {
     }
   });
   assert.equal(apiGeneratedImage.status, 200);
-  assert.equal(apiGeneratedImage.body.job.provider, "mock-adapter");
+  assert.equal(apiGeneratedImage.body.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(apiGeneratedImage.body.job.dummy, true);
+  assert.equal(apiGeneratedImage.body.job.fallbackReason, "alpha-sandbox");
+  assert.equal(apiGeneratedImage.body.job.packVersion, alphaSandbox.ALPHA_SANDBOX_PACK_VERSION);
+  assert.equal(apiGeneratedImage.body.dummy, true);
+  assert.equal(apiGeneratedImage.body.fallbackReason, "alpha-sandbox");
+  assert.equal(apiGeneratedImage.body.packVersion, alphaSandbox.ALPHA_SANDBOX_PACK_VERSION);
   assert.equal(apiGeneratedImage.body.raw.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
-  assert.equal(apiGeneratedImage.body.asset.source, "generated");
+  assert.equal(apiGeneratedImage.body.raw.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(apiGeneratedImage.body.asset.source, "mock");
+  assert.equal(apiGeneratedImage.body.asset.provenance.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(apiGeneratedImage.body.asset.provenance.packVersion, alphaSandbox.ALPHA_SANDBOX_PACK_VERSION);
   assert.equal(existsSync(join(apiProjectDirectory, "assets", "generated", `${apiPlannedCgJob.outputAssetId}.png`)), true);
 
   const apiBackgroundImage = await sandboxApi({
@@ -488,6 +498,8 @@ try {
   });
   assert.equal(apiPreview.status, 200);
   assert.equal(apiPreview.body.runtime.scenes.some((scene) => scene.cgAsset?.id === apiPlannedCgJob.outputAssetId), true);
+  assert.equal(apiPreview.body.runtime.scenes.some((scene) => scene.cgAsset?.source === "mock"), true);
+  assert.equal(apiPreview.body.runtime.scenes.some((scene) => scene.cgAsset?.provenance?.packVersion === alphaSandbox.ALPHA_SANDBOX_PACK_VERSION), true);
   assert.equal(apiPreview.body.previewReadiness.state, "prepared");
   assert.equal(apiPreview.body.previewReadiness.canRun, true);
   assert.equal(apiPreview.body.previewReadiness.requiredData.background, "ready");
@@ -504,9 +516,11 @@ try {
   assert.equal(apiExport.body.exportPlan.githubPagesTarget, false);
   assert.equal(apiExport.body.exportPlan.includedData.includes("assetManifest"), true);
   assert.equal(apiExport.body.exportPlan.includedAssets.some((asset) => asset.kind === "background"), true);
+  assert.equal(apiExport.body.exportPlan.includedAssets.some((asset) => asset.source === "mock" && asset.provenance?.adapter === core.MOCK_IMAGE_PACK_ADAPTER), true);
   assert.equal(existsSync(join(apiExport.body.export.outputDirectory, "index.html")), true);
   const apiProjectData = JSON.parse(readFileSync(join(apiExport.body.export.outputDirectory, "project-data.json"), "utf8"));
   assert.equal(apiProjectData.assets.some((asset) => String(asset.label).includes(alphaSandbox.ALPHA_SANDBOX_PROVENANCE)), true);
+  assert.equal(apiProjectData.assets.some((asset) => asset.source === "mock" && asset.provenance?.packVersion === alphaSandbox.ALPHA_SANDBOX_PACK_VERSION), true);
 
   const apiHistory = await sandboxApi({
     method: "POST",
@@ -575,7 +589,11 @@ try {
     jobId: cliPlannedCgJob.id
   }, cliEnv);
   assert.equal(cliGeneratedImage.ok, true);
-  assert.equal(cliGeneratedImage.job.provider, "mock-adapter");
+  assert.equal(cliGeneratedImage.job.provider, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(cliGeneratedImage.job.dummy, true);
+  assert.equal(cliGeneratedImage.asset.source, "mock");
+  assert.equal(cliGeneratedImage.asset.provenance.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(cliGeneratedImage.dummy, true);
   assert.equal(cliGeneratedImage.raw.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
 
   const cliGenerateBackground = runCli("generate-image", {
@@ -624,6 +642,7 @@ try {
   }, cliEnv);
   assert.equal(cliPreview.ok, true);
   assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.id === cliPlannedCgJob.outputAssetId), true);
+  assert.equal(cliPreview.runtime.scenes.some((scene) => scene.cgAsset?.source === "mock"), true);
   assert.equal(cliPreview.previewReadiness.state, "prepared");
   assert.equal(cliPreview.previewReadiness.canRun, true);
   assert.equal(cliPreview.previewReadiness.requiredData.background, "ready");
@@ -637,6 +656,7 @@ try {
   assert.equal(cliExport.exportPlan.target, "localDesktopWebApp");
   assert.equal(cliExport.exportPlan.githubPagesTarget, false);
   assert.equal(cliExport.exportPlan.includedData.includes("runtime"), true);
+  assert.equal(cliExport.exportPlan.includedAssets.some((asset) => asset.source === "mock" && asset.provenance?.packVersion === alphaSandbox.ALPHA_SANDBOX_PACK_VERSION), true);
 
   const cliSmoke = runCli("smoke-export", {
     outputPath: cliExport.export.outputDirectory
