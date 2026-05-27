@@ -383,6 +383,11 @@ export function StudioWorkspace({
   const dirty = contentDirty || routingDirty;
   const preflightIssues = useMemo(() => preflightToIssues(previewPreflight), [previewPreflight]);
   const visibleIssues = useMemo(() => mergedStudioIssues(localIssues, preflightIssues), [localIssues, preflightIssues]);
+  const conditionRuntimeSupport = previewPreflight?.conditionRuntimeSupport || previewPreflight?.runtimeCapabilities?.conditionRuntimeSupport || null;
+  const conditionSupportMode = conditionRuntimeSupport?.editorMode || "candidate_review_only";
+  const conditionStrictPreviewText = conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated"
+    ? "condition preview not evaluated"
+    : "조건 판정 상태 확인 전";
   const problemCount = visibleIssues.length;
   const errorCount = visibleIssues.filter((issue) => issue.severity === "error").length;
   const previewDisabledReason = errorCount > 0
@@ -1079,9 +1084,11 @@ export function StudioWorkspace({
                   ) : null}
 
                   {selectedPanel === "stats" ? (
-                    <section>
+                    <section data-condition-runtime-support={conditionSupportMode}>
                       <h3>조건/효과 후보 검토</h3>
-                      <p className="studio-disabled-note">condition runtime support가 #105에서 확정되기 전까지 편집할 수 없습니다.</p>
+                      <p className="studio-disabled-note">
+                        condition runtime support가 #105에서 확정되기 전까지 편집할 수 없습니다. 현재 support false입니다. {conditionStrictPreviewText}
+                      </p>
                       <ul className="studio-readonly-list">
                         {(draftScene.choices || []).map((choice, index) => {
                           const hasCondition = Boolean(choice.condition && Object.keys(choice.condition).length);

@@ -332,6 +332,12 @@ function previewPreflightCapabilityText(preflight: ProjectPreviewPreflight | nul
   if (!preflight) {
     return "확인 전";
   }
+  const conditionRuntimeSupport = preflight.conditionRuntimeSupport || preflight.runtimeCapabilities?.conditionRuntimeSupport;
+  if (conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated") {
+    const strictPreviewSuccess = conditionRuntimeSupport.strictPreviewSuccess === true;
+    const status = strictPreviewSuccess ? "strict success 포함" : "strict success 제외";
+    return `condition preview not evaluated · ${status}`;
+  }
   const capabilities = preflight.runtimeCapabilities;
   if (capabilities?.choiceConditionFiltering && capabilities?.choiceEffects) {
     return "조건과 효과 반영";

@@ -306,6 +306,10 @@ assert.match(projectPageTypesSource, /export interface ProjectRepairHistoryEntry
 assert.match(projectPageTypesSource, /repairActions\?:\s*ProjectRepairAction\[\]/, "ProjectApiResult는 API/CLI 공통 repairActions DTO를 포함해야 합니다.");
 assert.match(projectPageTypesSource, /repairPreview\?:\s*ProjectRepairPreview/, "ProjectApiResult는 repairPreview DTO를 포함해야 합니다.");
 assert.match(projectPageTypesSource, /repairHistoryEntry\?:\s*ProjectRepairHistoryEntry/, "ProjectApiResult는 repairHistoryEntry DTO를 포함해야 합니다.");
+assert.match(projectPageTypesSource, /export interface ConditionRuntimeSupport/, "Project page 타입은 #105 condition runtime support DTO를 표현해야 합니다.");
+assert.match(projectPageTypesSource, /export interface ConditionEvaluationTrace/, "Project page 타입은 #105 condition evaluation trace DTO를 표현해야 합니다.");
+assert.match(projectPageTypesSource, /conditionRuntimeSupport\?:\s*ConditionRuntimeSupport/, "ProjectApiResult 계열 DTO는 condition runtime support false gate를 전달해야 합니다.");
+assert.match(projectPageTypesSource, /conditionEvaluationTrace\?:\s*ConditionEvaluationTrace/, "ProjectApiResult 계열 DTO는 condition preview not evaluated trace를 전달해야 합니다.");
 assert.match(projectStartSource, /void loadProjects\(\)/, "프로젝트 삭제 성공 후 목록 재조회 실패는 삭제 실패와 분리해야 합니다.");
 assert.doesNotMatch(projectStartSource, /confirmationTitle:\s*confirmationTitle\.trim\(\)/, "프로젝트 삭제 호출은 #20 계약에 없는 confirmationTitle 필드를 보내면 안 됩니다.");
 assert.doesNotMatch(projectStartSource, /aria-label="보조 프로젝트 작업"/, "/projects 루트는 저장 위치/현재 상태 보조 패널을 기본 렌더링하면 안 됩니다.");
@@ -492,6 +496,23 @@ assert.doesNotMatch(studioWorkspaceSource, /selectScene\(sceneId\);[\s\S]{0,120}
 assert.match(projectDetailViewSource, /if \(activeTab === "studio"\)[\s\S]{0,220}return studioWorkspace/, "Studio 탭은 미지원 viewport에서 상세 shell chrome을 노출하지 않도록 workspace를 상위에서 바로 반환해야 합니다.");
 assert.doesNotMatch(studioWorkspaceSource, /conditionDraft|effectsDraft|setCondition|setEffects/, "조건/효과는 #105 전까지 프론트 임시 canonical 편집 모델을 만들면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /analyzeRouteGraph|routeGraphIssueToValidationIssue/, "StudioWorkspace는 route graph/domain 판단을 재구현하지 말고 API DTO를 표시해야 합니다.");
+[
+  "conditionRuntimeSupport",
+  "strictPreviewStatus",
+  "strictPreviewSuccess",
+  "condition preview not evaluated"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView는 #105 strict preview와 preflight 성공 지표를 분리 표시해야 합니다: ${requiredText}`);
+});
+[
+  "conditionRuntimeSupport",
+  "candidate_review_only",
+  "condition preview not evaluated"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace는 #105 support false 상태를 candidate review 전용으로 표시해야 합니다: ${requiredText}`);
+});
 [
   "detail-tab-grid",
   "detail-card",

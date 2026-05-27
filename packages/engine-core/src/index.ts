@@ -39,10 +39,45 @@ export interface ProjectRevisionDto {
   createdAt: string;
 }
 
+export type ConditionRuntimeSupportFlag = "support_false";
+export type ConditionRuntimePreviewStatus = "not_evaluated";
+export type ConditionRuntimeEditorMode = "candidate_review_only";
+
+export interface ConditionRuntimeSupportDto {
+  supportFlag: ConditionRuntimeSupportFlag;
+  supported: boolean;
+  choiceConditionFiltering: boolean;
+  choiceEffects: boolean;
+  conditionSemanticsVersion: string;
+  strictPreviewStatus: ConditionRuntimePreviewStatus;
+  strictPreviewSuccess: boolean;
+  previewPreflightSuccess: boolean;
+  editorMode: ConditionRuntimeEditorMode;
+  reasonCode: "conditional-choice-runtime-unsupported";
+  message: string;
+}
+
+export interface ConditionEvaluationTraceDto {
+  status: ConditionRuntimePreviewStatus;
+  reasonCode: "conditional-choice-runtime-unsupported";
+  message: string;
+  sceneIds: string[];
+  choiceIds: string[];
+  visibleChoiceIds: string[];
+  hiddenChoiceIds: string[];
+  appliedEffects: Array<{
+    choiceId: string;
+    flags: string[];
+    affinity: Record<string, number>;
+    memoryTags: Record<string, string[]>;
+  }>;
+}
+
 export interface RuntimeCapabilitiesDto {
   choiceConditionFiltering: boolean;
   choiceEffects: boolean;
   conditionSemanticsVersion: string;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
 }
 
 export interface PreflightBlockerDto {
@@ -63,6 +98,8 @@ export interface PreviewPreflightDto {
   nextAction: string;
   projectRevision: ProjectRevisionDto;
   runtimeCapabilities: RuntimeCapabilitiesDto;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
 }
 
 export interface VnMakerProjectSettings {
@@ -446,6 +483,14 @@ export interface PlayerRuntimeData {
     ok: boolean;
     issues: ValidationIssue[];
   };
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
+}
+
+export interface PlayerRuntimeChoice {
+  id: string;
+  text: string;
+  next: string;
 }
 
 export interface PlayerRuntimeScene {
@@ -454,7 +499,7 @@ export interface PlayerRuntimeScene {
   speaker: string;
   text: string;
   characters: Array<VnMakerSceneCharacter & { asset?: VnMakerAsset }>;
-  choices: VnMakerChoice[];
+  choices: PlayerRuntimeChoice[];
   next?: string;
   ending?: VnMakerSceneEnding;
   backgroundAsset?: VnMakerAsset;
@@ -464,6 +509,7 @@ export interface PlayerRuntimeScene {
 export interface PlayerRuntimeOptions {
   startSceneId?: string;
   assetPathRewrites?: Record<string, string>;
+  conditionPreviewPreflightSuccess?: boolean;
 }
 
 export interface BuildProjectHtmlOptions extends PlayerRuntimeOptions {
@@ -1174,7 +1220,14 @@ function previewRequiredDataBlockers(project: VnMakerProject): PreflightBlockerD
   return blockers;
 }
 
-function conditionalChoiceRuntimeWarning(project: VnMakerProject): PreflightBlockerDto | null {
+const CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE = "conditional-choice-runtime-unsupported" as const;
+const CONDITION_RUNTIME_UNSUPPORTED_MESSAGE = "condition preview not evaluated: 조건/효과 runtime semantics는 아직 strict preview 성공으로 계산하지 않습니다.";
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function conditionalChoiceRuntimeRefs(project: VnMakerProject): { sceneIds: string[]; choiceIds: string[] } {
   const sceneIds: string[] = [];
   const choiceIds: string[] = [];
   project.scenes.forEach((scene) => {
@@ -1185,24 +1238,72 @@ function conditionalChoiceRuntimeWarning(project: VnMakerProject): PreflightBloc
       }
     });
   });
-  if (choiceIds.length === 0) {
+  return {
+    sceneIds: uniqueValues(sceneIds),
+    choiceIds: uniqueValues(choiceIds)
+  };
+}
+
+function conditionalChoiceRuntimeWarning(project: VnMakerProject): PreflightBlockerDto | null {
+  const refs = conditionalChoiceRuntimeRefs(project);
+  if (refs.choiceIds.length === 0) {
     return null;
   }
   return {
-    issueCode: "conditional-choice-runtime-unsupported",
+    issueCode: CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE,
     path: "runtimeCapabilities",
-    message: "condition preview not evaluated: 조건/효과 runtime semantics는 아직 strict preview 성공으로 계산하지 않습니다.",
-    sceneIds,
-    choiceIds,
+    message: CONDITION_RUNTIME_UNSUPPORTED_MESSAGE,
+    sceneIds: refs.sceneIds,
+    choiceIds: refs.choiceIds,
     repairActionIds: []
   };
 }
 
-export function runtimeCapabilitiesForProject(): RuntimeCapabilitiesDto {
+export function conditionRuntimeSupportForProject(
+  project: VnMakerProject,
+  options: { previewPreflightSuccess?: boolean } = {}
+): ConditionRuntimeSupportDto {
   return {
+    supportFlag: "support_false",
+    supported: false,
     choiceConditionFiltering: false,
     choiceEffects: false,
-    conditionSemanticsVersion: "unsupported"
+    conditionSemanticsVersion: "unsupported",
+    strictPreviewStatus: "not_evaluated",
+    strictPreviewSuccess: false,
+    previewPreflightSuccess: options.previewPreflightSuccess ?? false,
+    editorMode: "candidate_review_only",
+    reasonCode: CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE,
+    message: conditionalChoiceRuntimeRefs(project).choiceIds.length > 0
+      ? CONDITION_RUNTIME_UNSUPPORTED_MESSAGE
+      : "condition preview not evaluated: Phase 0 condition runtime support is disabled, so strict preview success excludes condition evaluation."
+  };
+}
+
+export function conditionEvaluationTraceForProject(project: VnMakerProject): ConditionEvaluationTraceDto {
+  const refs = conditionalChoiceRuntimeRefs(project);
+  return {
+    status: "not_evaluated",
+    reasonCode: CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE,
+    message: conditionRuntimeSupportForProject(project).message,
+    sceneIds: refs.sceneIds,
+    choiceIds: refs.choiceIds,
+    visibleChoiceIds: [],
+    hiddenChoiceIds: [],
+    appliedEffects: []
+  };
+}
+
+export function runtimeCapabilitiesForProject(
+  project: VnMakerProject,
+  options: { previewPreflightSuccess?: boolean } = {}
+): RuntimeCapabilitiesDto {
+  const conditionRuntimeSupport = conditionRuntimeSupportForProject(project, options);
+  return {
+    choiceConditionFiltering: conditionRuntimeSupport.choiceConditionFiltering,
+    choiceEffects: conditionRuntimeSupport.choiceEffects,
+    conditionSemanticsVersion: conditionRuntimeSupport.conditionSemanticsVersion,
+    conditionRuntimeSupport
   };
 }
 
@@ -1257,14 +1358,18 @@ export function createPreviewPreflight(
     .map(preflightIssueFromValidationIssue);
   const conditionWarning = conditionalChoiceRuntimeWarning(project);
   const warnings = conditionWarning ? [...validationWarnings, conditionWarning] : validationWarnings;
+  const canRun = blockers.length === 0;
+  const conditionRuntimeSupport = conditionRuntimeSupportForProject(project, { previewPreflightSuccess: canRun });
   return {
-    canRun: blockers.length === 0,
+    canRun,
     blockers,
     warnings,
     disabledReason: previewDisabledReason(blockers[0]),
     nextAction: previewNextAction(blockers[0]),
     projectRevision,
-    runtimeCapabilities: runtimeCapabilitiesForProject()
+    runtimeCapabilities: runtimeCapabilitiesForProject(project, { previewPreflightSuccess: canRun }),
+    conditionRuntimeSupport,
+    conditionEvaluationTrace: conditionEvaluationTraceForProject(project)
   };
 }
 
@@ -2425,6 +2530,14 @@ function rewriteAsset(asset: VnMakerAsset | undefined, rewrites: Record<string, 
   };
 }
 
+function playerRuntimeChoice(choice: VnMakerChoice): PlayerRuntimeChoice {
+  return {
+    id: choice.id,
+    text: choice.text,
+    next: choice.next
+  };
+}
+
 export function createPlayerRuntimeData(project: VnMakerProject, options: PlayerRuntimeOptions = {}): PlayerRuntimeData {
   const route = project.routes.find((item) => item.id === project.settings.defaultRouteId) || project.routes[0];
   const assets = project.assets
@@ -2457,7 +2570,7 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
           asset: assetId ? assetMap.get(assetId) : undefined
         };
       }),
-      choices: scene.choices,
+      choices: scene.choices.map(playerRuntimeChoice),
       next: scene.next,
       ending: scene.ending,
       backgroundAsset: scene.backgroundAssetId ? assetMap.get(scene.backgroundAssetId) : undefined,
@@ -2467,7 +2580,11 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
     validation: {
       ok: issues.every((issue) => issue.severity !== "error"),
       issues
-    }
+    },
+    conditionRuntimeSupport: conditionRuntimeSupportForProject(project, {
+      previewPreflightSuccess: options.conditionPreviewPreflightSuccess ?? false
+    }),
+    conditionEvaluationTrace: conditionEvaluationTraceForProject(project)
   };
 }
 

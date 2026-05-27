@@ -135,6 +135,36 @@ export interface ProjectPatchHistoryEntry {
   summary?: string;
 }
 
+export interface ConditionRuntimeSupport {
+  supportFlag?: "support_false" | string;
+  supported?: boolean;
+  choiceConditionFiltering?: boolean;
+  choiceEffects?: boolean;
+  conditionSemanticsVersion?: string;
+  strictPreviewStatus?: "not_evaluated" | string;
+  strictPreviewSuccess?: boolean;
+  previewPreflightSuccess?: boolean;
+  editorMode?: "candidate_review_only" | string;
+  reasonCode?: "conditional-choice-runtime-unsupported" | string;
+  message?: string;
+}
+
+export interface ConditionEvaluationTrace {
+  status?: "not_evaluated" | string;
+  reasonCode?: "conditional-choice-runtime-unsupported" | string;
+  message?: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  visibleChoiceIds?: string[];
+  hiddenChoiceIds?: string[];
+  appliedEffects?: Array<{
+    choiceId?: string;
+    flags?: string[];
+    affinity?: Record<string, number>;
+    memoryTags?: Record<string, string[]>;
+  }>;
+}
+
 export interface ProjectRuntimeScene {
   id?: string;
   label?: string;
@@ -159,6 +189,8 @@ export interface ProjectRuntime {
     ok?: boolean;
     issues?: ProjectIssue[];
   };
+  conditionRuntimeSupport?: ConditionRuntimeSupport;
+  conditionEvaluationTrace?: ConditionEvaluationTrace;
 }
 
 export interface ProjectExportResult {
@@ -209,7 +241,10 @@ export interface ProjectPreviewPreflight {
     choiceConditionFiltering?: boolean;
     choiceEffects?: boolean;
     conditionSemanticsVersion?: string;
+    conditionRuntimeSupport?: ConditionRuntimeSupport;
   };
+  conditionRuntimeSupport?: ConditionRuntimeSupport;
+  conditionEvaluationTrace?: ConditionEvaluationTrace;
 }
 
 export interface ProjectRepairActionRequiredInput {
@@ -276,6 +311,8 @@ export interface ProjectExportPlan {
   canExport?: boolean;
   target?: "localDesktopWebApp" | string;
   githubPagesTarget?: boolean;
+  conditionRuntimeSupport?: ConditionRuntimeSupport;
+  conditionEvaluationTrace?: ConditionEvaluationTrace;
   validationSummary?: {
     ok?: boolean;
     issueCount?: number;

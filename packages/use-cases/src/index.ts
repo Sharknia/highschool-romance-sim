@@ -5,6 +5,8 @@ import {
   DEFAULT_HEROINE_PORTRAIT_STYLE,
   analyzeRouteGraph,
   buildProjectHtml,
+  conditionEvaluationTraceForProject,
+  conditionRuntimeSupportForProject,
   createAssetManifest,
   createBlankProject,
   createDeterministicEventExpansionPlan,
@@ -30,6 +32,8 @@ import {
   validateProject as validateProjectSnapshot,
   type CreateImageGenerationJobInput,
   type CreateStarterProjectInput,
+  type ConditionEvaluationTraceDto,
+  type ConditionRuntimeSupportDto,
   type DtoParseResult,
   type EventExpansionPlan,
   type EventExpansionRequest,
@@ -249,6 +253,8 @@ export interface ProjectExportPlanDto {
   canExport: boolean;
   target: "localDesktopWebApp";
   githubPagesTarget: false;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
   validationSummary: {
     ok: boolean;
     issueCount: number;
@@ -936,6 +942,9 @@ function exportPlanFor(
   const defaultState = blockers.length > 0 ? "blocked" : "ready";
   const state = options.state || defaultState;
   const canExport = blockers.length === 0 && state !== "failed" && state !== "blocked";
+  const conditionRuntimeSupport = conditionRuntimeSupportForProject(project, {
+    previewPreflightSuccess: blockers.length === 0
+  });
   const failureCause = options.failureCause
     || blockers.map((blocker) => blocker.message).join(" ")
     || (state === "complete" ? "내보내기 실행 결과가 준비되었습니다." : "내보내기 전 검증을 통과했습니다.");
@@ -960,6 +969,8 @@ function exportPlanFor(
     canExport,
     target: "localDesktopWebApp",
     githubPagesTarget: false,
+    conditionRuntimeSupport,
+    conditionEvaluationTrace: conditionEvaluationTraceForProject(project),
     validationSummary,
     includedData: ["project", "runtime", "assetManifest"],
     includedAssets: project.assets.map((asset) => ({
@@ -3617,7 +3628,9 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         let runtime;
         let routeGraphAnalysis;
         try {
-          runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined);
+          runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined, {
+            conditionPreviewPreflightSuccess: initialPreflight.canRun
+          });
           routeGraphAnalysis = analyzeRouteGraph(project, typeof record.routeId === "string" ? record.routeId : undefined);
         } catch (error) {
           const validation = store.validateAndStore();

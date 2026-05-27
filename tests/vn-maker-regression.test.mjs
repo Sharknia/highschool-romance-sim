@@ -27,6 +27,8 @@ const previewPreflightBlockedDirectory = join(tempRoot, "PreviewPreflightBlocked
 const previewPreflightMissingBackgroundDirectory = join(tempRoot, "PreviewPreflightMissingBackground.vnmaker");
 const previewPreflightRouteGateDirectory = join(tempRoot, "PreviewPreflightRouteGate.vnmaker");
 const previewPreflightReadyDirectory = join(tempRoot, "PreviewPreflightReady.vnmaker");
+const previewPreflightReadyExportDirectory = join(tempRoot, "preview-preflight-ready-export");
+const previewPreflightReadyCliExportDirectory = join(tempRoot, "preview-preflight-ready-cli-export");
 const repairActionMissingTargetDirectory = join(tempRoot, "RepairActionMissingTarget.vnmaker");
 const repairActionUncoveredTerminalDirectory = join(tempRoot, "RepairActionUncoveredTerminal.vnmaker");
 const repairActionMixedOutgoingDirectory = join(tempRoot, "RepairActionMixedOutgoing.vnmaker");
@@ -551,7 +553,29 @@ assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.
 assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings.some((warning) => warning.issueCode === "conditional-choice-runtime-unsupported"), true);
 assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings.some((warning) => /condition preview not evaluated/.test(warning.message)), true);
 assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings[0].path, "runtimeCapabilities");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.supported, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.strictPreviewStatus, "not_evaluated");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.strictPreviewSuccess, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.editorMode, "candidate_review_only");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.reasonCode, "conditional-choice-runtime-unsupported");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.status, "not_evaluated");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.reasonCode, "conditional-choice-runtime-unsupported");
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.sceneIds, [previewPreflightReadyEntrySceneId]);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.choiceIds, ["choice-preflight-conditioned"]);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.visibleChoiceIds, []);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.hiddenChoiceIds, []);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.appliedEffects, []);
 assert.ok(previewPreflightReadyApi.body.runtime, "condition runtime unsupported must not block actual preview when validation blockers are absent");
+assert.equal(previewPreflightReadyApi.body.runtime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyApi.body.runtime.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyApi.body.runtime.conditionEvaluationTrace.status, "not_evaluated");
+const previewPreflightReadyRuntimeChoice = previewPreflightReadyApi.body.runtime.scenes
+  .find((scene) => scene.id === previewPreflightReadyEntrySceneId)
+  .choices.find((choice) => choice.id === "choice-preflight-conditioned");
+assert.equal("condition" in previewPreflightReadyRuntimeChoice, false);
+assert.equal("effects" in previewPreflightReadyRuntimeChoice, false);
 
 const previewPreflightReadyCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
   input: JSON.stringify({ projectDirectory: previewPreflightReadyDirectory }),
@@ -560,8 +584,54 @@ const previewPreflightReadyCli = JSON.parse(execFileSync(process.execPath, ["pac
 assert.equal(previewPreflightReadyCli.previewPreflight.canRun, true);
 assert.equal(previewPreflightReadyCli.previewPreflight.disabledReason, null);
 assert.equal(previewPreflightReadyCli.previewPreflight.runtimeCapabilities.choiceConditionFiltering, false);
+assert.equal(previewPreflightReadyCli.previewPreflight.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyCli.previewPreflight.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyCli.previewPreflight.conditionEvaluationTrace.status, "not_evaluated");
 assert.equal(previewPreflightReadyCli.previewPreflight.warnings[0].issueCode, previewPreflightReadyApi.body.previewPreflight.warnings[0].issueCode);
+assert.equal(previewPreflightReadyCli.runtime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyCli.runtime.conditionRuntimeSupport.previewPreflightSuccess, true);
 assert.ok(previewPreflightReadyCli.runtime);
+const previewPreflightReadyExportApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/export",
+  body: {
+    outputDirectory: previewPreflightReadyExportDirectory,
+    projectDirectory: previewPreflightReadyDirectory
+  }
+});
+assert.equal(previewPreflightReadyExportApi.status, 200);
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionRuntimeSupport.strictPreviewSuccess, false);
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionEvaluationTrace.status, "not_evaluated");
+const previewPreflightReadyExportRuntime = JSON.parse(readFileSync(join(previewPreflightReadyExportApi.body.export.outputDirectory, "project-data.json"), "utf8"));
+assert.equal(previewPreflightReadyExportRuntime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyExportRuntime.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.deepEqual(previewPreflightReadyExportRuntime.conditionEvaluationTrace.choiceIds, ["choice-preflight-conditioned"]);
+const previewPreflightReadyExportChoice = previewPreflightReadyExportRuntime.scenes
+  .find((scene) => scene.id === previewPreflightReadyEntrySceneId)
+  .choices.find((choice) => choice.id === "choice-preflight-conditioned");
+assert.equal("condition" in previewPreflightReadyExportChoice, false);
+assert.equal("effects" in previewPreflightReadyExportChoice, false);
+const previewPreflightReadyCliExport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "export-web"], {
+  input: JSON.stringify({
+    outputPath: previewPreflightReadyCliExportDirectory,
+    projectDirectory: previewPreflightReadyDirectory
+  }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionRuntimeSupport.strictPreviewSuccess, false);
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionEvaluationTrace.status, "not_evaluated");
+const previewPreflightReadyCliExportRuntime = JSON.parse(readFileSync(join(previewPreflightReadyCliExport.export.outputDirectory, "project-data.json"), "utf8"));
+assert.equal(previewPreflightReadyCliExportRuntime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.deepEqual(previewPreflightReadyCliExportRuntime.conditionEvaluationTrace.choiceIds, ["choice-preflight-conditioned"]);
+const previewPreflightReadyCliExportChoice = previewPreflightReadyCliExportRuntime.scenes
+  .find((scene) => scene.id === previewPreflightReadyEntrySceneId)
+  .choices.find((choice) => choice.id === "choice-preflight-conditioned");
+assert.equal("condition" in previewPreflightReadyCliExportChoice, false);
+assert.equal("effects" in previewPreflightReadyCliExportChoice, false);
 
 const repairCliInspect = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "inspect"], { encoding: "utf8" }));
 assert.equal(repairCliInspect.commands.includes("repair-preview"), true);

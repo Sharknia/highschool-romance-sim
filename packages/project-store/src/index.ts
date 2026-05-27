@@ -1758,8 +1758,11 @@ VALUES (
     return outcome;
   }
 
-  previewProject(startSceneId?: string): PlayerRuntimeData {
-    return createPlayerRuntimeData(this.requireProject(), { startSceneId });
+  previewProject(startSceneId?: string, options: { conditionPreviewPreflightSuccess?: boolean } = {}): PlayerRuntimeData {
+    return createPlayerRuntimeData(this.requireProject(), {
+      conditionPreviewPreflightSuccess: options.conditionPreviewPreflightSuccess,
+      startSceneId
+    });
   }
 
   async exportWebPlayer(outputDirectory?: string): Promise<{ export: WebExportResult; smoke: WebExportSmokeTestResult }> {
@@ -1773,7 +1776,10 @@ VALUES (
       ? resolve(outputDirectory)
       : join(this.paths.exportsDirectory, `${project.id}-web`);
     const assetPathRewrites = await this.copyExportAssets(exportDirectory);
-    const runtime = createPlayerRuntimeData(project, { assetPathRewrites });
+    const runtime = createPlayerRuntimeData(project, {
+      assetPathRewrites,
+      conditionPreviewPreflightSuccess: true
+    });
     const artifact = buildProjectHtml(project, {
       projectDataPath: "./project-data.json",
       runtimeScriptPath: "./runtime/player.js",
