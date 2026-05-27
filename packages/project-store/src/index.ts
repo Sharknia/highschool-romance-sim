@@ -175,6 +175,22 @@ export interface ApplyEventExpansionInput {
   sourcePatchHistoryId?: string;
 }
 
+export interface ApplyRepairMutationInput {
+  expectedProjectRevision: ProjectRevisionInput;
+  summary: string;
+  rawOutput?: (projectRevision: ProjectRevisionDto) => unknown;
+  diff?: ProjectPatchDescription;
+  mutate: (project: VnMakerProject) => VnMakerProject;
+}
+
+export interface ApplyRepairMutationResult {
+  project: VnMakerProject;
+  validation: ProjectValidationResult;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+  repairHistoryEntry: PatchHistoryEntry;
+}
+
 export type PatchHistoryStatus = "proposed" | "applied" | "failed";
 
 export interface PatchGenerationAttempt {
@@ -1623,6 +1639,33 @@ VALUES (
         validation,
         previousRevision,
         projectRevision: this.getProjectRevision()
+      };
+    });
+  }
+
+  applyRepairMutation(input: ApplyRepairMutationInput): ApplyRepairMutationResult {
+    return this.runInTransaction(() => {
+      const currentProject = this.requireProject();
+      const previousRevision = this.assertExpectedProjectRevision(input.expectedProjectRevision);
+      const nextProject = input.mutate(JSON.parse(JSON.stringify(currentProject)) as VnMakerProject);
+      const savedProject = this.writeProject(nextProject);
+      const validation = this.validateAndStoreCurrentProject();
+      const projectRevision = this.getProjectRevision();
+      const repairHistoryEntry = this.recordPatchHistory({
+        status: "applied",
+        summary: input.summary,
+        rawOutput: input.rawOutput ? input.rawOutput(projectRevision) : undefined,
+        validation,
+        diff: input.diff,
+        beforeProject: currentProject,
+        afterProject: savedProject
+      });
+      return {
+        project: savedProject,
+        validation,
+        previousRevision,
+        projectRevision,
+        repairHistoryEntry
       };
     });
   }

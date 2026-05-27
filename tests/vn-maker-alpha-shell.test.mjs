@@ -237,6 +237,16 @@ const studioEndCandidate = studioStart >= 0 ? projectDetailViewSource.indexOf('a
 const studioBranch = studioStart >= 0 && studioEndCandidate > studioStart
   ? projectDetailViewSource.slice(studioStart, studioEndCandidate)
   : "";
+const previewRepairActionStart = projectDetailViewSource.indexOf("async function previewRepairAction");
+const previewRepairActionEnd = previewRepairActionStart >= 0 ? projectDetailViewSource.indexOf("async function applyRepairPreview", previewRepairActionStart) : -1;
+const previewRepairActionBranch = previewRepairActionStart >= 0 && previewRepairActionEnd > previewRepairActionStart
+  ? projectDetailViewSource.slice(previewRepairActionStart, previewRepairActionEnd)
+  : "";
+const applyRepairResultStateStart = projectDetailViewSource.indexOf("function applyRepairResultState");
+const applyRepairResultStateEnd = applyRepairResultStateStart >= 0 ? projectDetailViewSource.indexOf("async function previewRepairAction", applyRepairResultStateStart) : -1;
+const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRepairResultStateEnd > applyRepairResultStateStart
+  ? projectDetailViewSource.slice(applyRepairResultStateStart, applyRepairResultStateEnd)
+  : "";
 assert.match(`${projectStartSource}\n${recentProjectListSource}`, /ContentList/, "프로젝트 목록 화면은 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(
   projectStartSource.includes('type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";'),
@@ -288,7 +298,11 @@ assert.match(projectStartSource, /프로젝트 목록 정리에 실패/, "프로
 assert.match(projectStartSource, /deleteErrorSource === "list"/, "프로젝트 목록 정리 실패는 파일 삭제 retry와 분리해야 합니다.");
 assert.match(projectPageTypesSource, /recentIndexRemoval\?:\s*\{[\s\S]*ok\?:\s*boolean/, "ProjectApiResult는 delete API의 최근 목록 정리 부분 실패를 타입으로 표현해야 합니다.");
 assert.match(projectPageTypesSource, /export interface ProjectRepairAction/, "ProjectApiResult는 수리 후보 DTO 타입을 표현해야 합니다.");
+assert.match(projectPageTypesSource, /export interface ProjectRepairPreview/, "ProjectApiResult는 수리 diff preview DTO 타입을 표현해야 합니다.");
+assert.match(projectPageTypesSource, /export interface ProjectRepairHistoryEntry/, "ProjectApiResult는 수리 undo 이력 DTO 타입을 표현해야 합니다.");
 assert.match(projectPageTypesSource, /repairActions\?:\s*ProjectRepairAction\[\]/, "ProjectApiResult는 API/CLI 공통 repairActions DTO를 포함해야 합니다.");
+assert.match(projectPageTypesSource, /repairPreview\?:\s*ProjectRepairPreview/, "ProjectApiResult는 repairPreview DTO를 포함해야 합니다.");
+assert.match(projectPageTypesSource, /repairHistoryEntry\?:\s*ProjectRepairHistoryEntry/, "ProjectApiResult는 repairHistoryEntry DTO를 포함해야 합니다.");
 assert.match(projectStartSource, /void loadProjects\(\)/, "프로젝트 삭제 성공 후 목록 재조회 실패는 삭제 실패와 분리해야 합니다.");
 assert.doesNotMatch(projectStartSource, /confirmationTitle:\s*confirmationTitle\.trim\(\)/, "프로젝트 삭제 호출은 #20 계약에 없는 confirmationTitle 필드를 보내면 안 됩니다.");
 assert.doesNotMatch(projectStartSource, /aria-label="보조 프로젝트 작업"/, "/projects 루트는 저장 위치/현재 상태 보조 패널을 기본 렌더링하면 안 됩니다.");
@@ -689,7 +703,14 @@ assert.match(
   "포함될 에셋",
   "차단 항목",
   "수리 후보",
-  "적용은 다음 단계에서 연결됩니다",
+  "수리 diff",
+  "diff 확인",
+  "변경 적용",
+  "마지막 수리 되돌리기",
+  "aria-live=\"polite\"",
+  "/api/project/repair/preview",
+  "/api/project/repair/apply",
+  "/api/project/repair/undo",
   "현재 실행 상태",
   "내보내기가 차단됩니다"
 ].forEach((requiredText) => {
@@ -699,6 +720,10 @@ assert.match(
 assert.match(projectDetailViewSource, /projectRepairActions/, "ProjectDetailView는 상위 API 응답의 repairActions를 prop으로 받아야 합니다.");
 assert.match(projectDetailViewSource, /currentRepairActions/, "ProjectDetailView는 로컬 검증 응답과 상위 DTO의 수리 후보를 같은 렌더링 경로로 표시해야 합니다.");
 assert.match(projectDetailViewSource, /setRepairActions\(result\.repairActions \|\| \[\]\)/, "프리뷰 검증/실행 응답은 repairActions를 화면 상태에 반영해야 합니다.");
+assert.doesNotMatch(previewRepairActionBranch, /onProjectResult\(result\)/, "수리 diff 미리보기는 프로젝트 mutation이 아니므로 상위 project result 갱신으로 diff 패널을 즉시 지우면 안 됩니다.");
+assert.match(applyRepairResultStateBranch, /setExportResult\(null\)/, "수리 적용/되돌리기 후 이전 export 산출물 표시를 비워야 합니다.");
+assert.match(applyRepairResultStateBranch, /setSmokeResult\(null\)/, "수리 적용/되돌리기 후 이전 smoke 결과 표시를 비워야 합니다.");
+assert.match(projectDetailViewSource, /window\.confirm\("마지막 수리를 되돌리고 검증을 다시 계산할까요\?"\)/, "마지막 수리 되돌리기는 프로젝트 변경 액션이므로 확인 후 실행해야 합니다.");
 assert.match(projectDetailViewSource, /severity === "error"/, "프리뷰 검증은 warning이 아니라 error severity만 차단해야 합니다.");
 assert.match(projectDetailViewSource, /result\.code === "PREVIEW_BLOCKED"/, "프리뷰 차단 응답은 failed가 아니라 blocked 상태로 표시해야 합니다.");
 assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 previewReadiness.canRun=true가 아닐 때 비활성화해야 합니다.");

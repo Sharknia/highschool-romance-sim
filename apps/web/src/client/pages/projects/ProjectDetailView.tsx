@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Copy, ExternalLink, Heart, Image as ImageIcon, Play, RefreshCw, Settings } from "lucide-react";
+import { ArrowRight, CheckCircle2, Copy, ExternalLink, GitCompareArrows, Heart, Image as ImageIcon, Play, RefreshCw, Settings, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -17,6 +17,9 @@ import {
   type ProjectPreviewPreflight,
   type ProjectPreviewReadiness,
   type ProjectRepairAction,
+  type ProjectRepairActionRequiredInput,
+  type ProjectRepairHistoryEntry,
+  type ProjectRepairPreview,
   type ProjectRuntime,
   type ProjectRuntimeScene,
   type ProjectSmokeResult,
@@ -44,7 +47,9 @@ import {
   imageJobKindLabel,
   isDummyAsset,
   isDummyGenerationJob,
-  jobStatusLabel
+  jobStatusLabel,
+  repairDiffOperationLabel,
+  repairDiffValueText
 } from "./projectDisplayText";
 
 interface ProjectDetailViewProps {
@@ -360,6 +365,32 @@ function repairActionMetaText(action: ProjectRepairAction): string {
   return metadata.join(" · ");
 }
 
+function repairActionKey(action: Pick<ProjectRepairAction, "actionId" | "issueCode" | "targetPath">): string {
+  return [action.issueCode || "issue", action.actionId || "action", action.targetPath || "target"].join("::");
+}
+
+function repairInputDefaultValue(input: ProjectRepairActionRequiredInput): string {
+  if (input.inputType === "select") {
+    return input.options?.[0]?.value || "";
+  }
+  return "";
+}
+
+function repairInputDisplayLabel(input: ProjectRepairActionRequiredInput): string {
+  return input.label || input.name || "입력";
+}
+
+function repairResultMessage(result: ProjectApiResult, fallback: string): string {
+  return result.message || result.error || result.issues?.[0]?.message || result.validation?.issues?.[0]?.message || fallback;
+}
+
+function activeRepairHistoryEntry(entry: ProjectRepairHistoryEntry | null): ProjectRepairHistoryEntry | null {
+  if (entry?.id && !entry.revertedAt) {
+    return entry;
+  }
+  return null;
+}
+
 function requiredDataNameLabel(name: string): string {
   if (name === "heroine") return "히로인";
   if (name === "background") return "배경";
@@ -488,6 +519,12 @@ export function ProjectDetailView({
   const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
   const [previewPreflight, setPreviewPreflight] = useState<ProjectPreviewPreflight | null>(null);
   const [repairActions, setRepairActions] = useState<ProjectRepairAction[] | null>(null);
+  const [repairPreview, setRepairPreview] = useState<ProjectRepairPreview | null>(null);
+  const [repairHistoryEntry, setRepairHistoryEntry] = useState<ProjectRepairHistoryEntry | null>(null);
+  const [repairHistory, setRepairHistory] = useState<ProjectRepairHistoryEntry[]>([]);
+  const [repairActionInputs, setRepairActionInputs] = useState<Record<string, Record<string, string>>>({});
+  const [repairStatus, setRepairStatus] = useState("수리 후보를 선택해 diff를 확인하세요.");
+  const [repairBusy, setRepairBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
@@ -547,6 +584,8 @@ export function ProjectDetailView({
   const currentPreviewReadiness = previewReadiness || projectPreviewReadiness || emptyPreviewReadiness;
   const currentPreviewPreflight = previewPreflight || projectPreviewPreflight || null;
   const currentRepairActions = repairActions ?? projectRepairActions;
+  const undoRepairEntry = activeRepairHistoryEntry(repairHistoryEntry);
+  const selectedRepairActionKey = repairPreview?.repairAction ? repairActionKey(repairPreview.repairAction) : "";
   const previewRunBlocked = currentPreviewReadiness.canRun !== true || currentPreviewPreflight?.canRun === false;
   const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
   const dummyImageAssets = collectDummyImageAssets(currentProject, currentExportPlan, previewRuntime);
@@ -682,6 +721,11 @@ export function ProjectDetailView({
     setPreviewReadiness(input.previewReadiness || null);
     setPreviewPreflight(input.previewPreflight || null);
     setRepairActions(input.repairActions ?? null);
+    setRepairPreview(null);
+    setRepairHistoryEntry(null);
+    setRepairHistory([]);
+    setRepairActionInputs({});
+    setRepairStatus("수리 후보를 선택해 diff를 확인하세요.");
     setPreviewState(nextState.previewState);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
@@ -1104,6 +1148,178 @@ export function ProjectDetailView({
     return validationIssues(result).map(issueText);
   }
 
+  function repairInputValue(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput): string {
+    const name = input.name || "";
+    if (!name) {
+      return "";
+    }
+    const value = repairActionInputs[repairActionKey(action)]?.[name];
+    return typeof value === "string" ? value : repairInputDefaultValue(input);
+  }
+
+  function repairInputsFor(action: ProjectRepairAction): Record<string, string> {
+    return (action.requiredInputs || []).reduce<Record<string, string>>((inputs, input) => {
+      if (input.name) {
+        inputs[input.name] = repairInputValue(action, input);
+      }
+      return inputs;
+    }, {});
+  }
+
+  function repairRequestBody(action: ProjectRepairAction): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      projectDirectory,
+      repairAction: {
+        actionId: action.actionId,
+        issueCode: action.issueCode,
+        targetPath: action.targetPath,
+        inputs: repairInputsFor(action)
+      }
+    };
+    if (currentPreviewPreflight?.projectRevision) {
+      body.expectedProjectRevision = currentPreviewPreflight.projectRevision;
+    }
+    return body;
+  }
+
+  function updateRepairInput(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput, value: string): void {
+    if (!input.name) {
+      return;
+    }
+    setRepairActionInputs((current) => ({
+      ...current,
+      [repairActionKey(action)]: {
+        ...(current[repairActionKey(action)] || {}),
+        [input.name as string]: value
+      }
+    }));
+    setRepairPreview(null);
+    setRepairStatus("입력이 변경되었습니다. 수리 diff를 다시 확인하세요.");
+  }
+
+  function applyRepairResultState(result: ProjectApiResult, status: string): void {
+    const nextResetState = createPreviewExportResetState({
+      project: result.project || currentProject,
+      workflowSummary: result.workflowSummary || workflowSummary,
+      previewStatus: result.previewPreflight?.disabledReason || "수리 결과가 반영되었습니다. 프리뷰를 다시 생성하세요."
+    });
+    onProjectResult(result);
+    setPreviewReadiness(result.previewReadiness || null);
+    setPreviewPreflight(result.previewPreflight || null);
+    setRepairActions(result.repairActions || []);
+    setRepairHistoryEntry(result.repairHistoryEntry || null);
+    setRepairHistory(result.repairHistory || []);
+    setExportPlan(result.exportPlan || null);
+    setPreviewRuntime(null);
+    setPreviewSceneId("");
+    setPreviewIssues(validationMessages(result));
+    setPreviewState(result.previewPreflight?.canRun === false ? "blocked" : nextResetState.previewState);
+    setPreviewStatus(nextResetState.previewStatus);
+    setExportResult(null);
+    setSmokeResult(null);
+    setExportState(nextResetState.exportState);
+    setExportStatus(nextResetState.exportStatus);
+    setRepairStatus(status);
+  }
+
+  async function previewRepairAction(action: ProjectRepairAction): Promise<void> {
+    if (!projectDirectory) {
+      setRepairStatus("프로젝트 저장 위치가 필요합니다.");
+      return;
+    }
+    setRepairBusy(true);
+    setRepairStatus("수리 diff를 계산하는 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/preview", repairRequestBody(action));
+      if (result.ok === false || !result.repairPreview) {
+        setRepairPreview(null);
+        if (result.previewReadiness) setPreviewReadiness(result.previewReadiness);
+        if (result.previewPreflight) setPreviewPreflight(result.previewPreflight);
+        if (result.repairActions) setRepairActions(result.repairActions);
+        if (result.exportPlan) setExportPlan(result.exportPlan);
+        setRepairStatus(repairResultMessage(result, "수리 diff를 계산하지 못했습니다."));
+        return;
+      }
+      setPreviewReadiness(result.previewReadiness || null);
+      setPreviewPreflight(result.previewPreflight || null);
+      setRepairActions(result.repairActions || []);
+      setExportPlan(result.exportPlan || null);
+      setRepairPreview(result.repairPreview);
+      setRepairStatus("수리 diff를 확인한 뒤 변경 적용을 누르세요.");
+    } catch (error) {
+      setRepairPreview(null);
+      setRepairStatus(`수리 diff 계산 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
+  async function applyRepairPreview(): Promise<void> {
+    if (!repairPreview?.repairAction || !repairPreview.beforeRevision || !repairPreview.confirmToken) {
+      setRepairStatus("먼저 수리 diff를 확인해야 합니다.");
+      return;
+    }
+    const destructive = (repairPreview.destructiveWarnings || []).length > 0 || repairPreview.repairAction.destructive;
+    if (destructive && !window.confirm("표시된 diff대로 수리 적용할까요?")) {
+      setRepairStatus("수리 적용을 취소했습니다.");
+      return;
+    }
+    setRepairBusy(true);
+    setRepairStatus("수리를 적용하고 검증을 다시 계산하는 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/apply", {
+        ...repairRequestBody(repairPreview.repairAction),
+        expectedProjectRevision: repairPreview.beforeRevision,
+        confirmToken: repairPreview.confirmToken
+      });
+      if (result.ok === false) {
+        setRepairPreview(null);
+        if (result.previewReadiness) setPreviewReadiness(result.previewReadiness);
+        if (result.previewPreflight) setPreviewPreflight(result.previewPreflight);
+        if (result.repairActions) setRepairActions(result.repairActions);
+        if (result.exportPlan) setExportPlan(result.exportPlan);
+        setRepairStatus(`${repairResultMessage(result, "수리를 적용하지 못했습니다.")} 수리 diff를 다시 확인하세요.`);
+        return;
+      }
+      setRepairPreview(null);
+      applyRepairResultState(result, "수리 적용 완료. 마지막 수리는 되돌릴 수 있습니다.");
+    } catch (error) {
+      setRepairPreview(null);
+      setRepairStatus(`수리 적용 실패: ${error instanceof Error ? error.message : String(error)} 수리 diff를 다시 확인하세요.`);
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
+  async function undoLastRepair(): Promise<void> {
+    if (!undoRepairEntry?.id) {
+      setRepairStatus("되돌릴 수리 이력이 없습니다.");
+      return;
+    }
+    if (!window.confirm("마지막 수리를 되돌리고 검증을 다시 계산할까요?")) {
+      setRepairStatus("수리 되돌리기를 취소했습니다.");
+      return;
+    }
+    setRepairBusy(true);
+    setRepairStatus("마지막 수리를 되돌리고 검증을 다시 계산하는 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/undo", {
+        projectDirectory,
+        repairHistoryId: undoRepairEntry.id
+      });
+      if (result.ok === false) {
+        setRepairStatus(repairResultMessage(result, "마지막 수리를 되돌리지 못했습니다."));
+        return;
+      }
+      setRepairPreview(null);
+      applyRepairResultState(result, "마지막 수리를 되돌렸습니다. 검증 결과와 사전 점검을 다시 확인하세요.");
+    } catch (error) {
+      setRepairStatus(`수리 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
   async function validateBeforePreview(): Promise<boolean> {
     const result = await postAuthedJson<ProjectApiResult>("/api/project/validate", { projectDirectory });
     const issues = validationIssues(result);
@@ -1118,6 +1334,7 @@ export function ProjectDetailView({
     } : currentPreviewReadiness);
     setPreviewPreflight(result.previewPreflight || null);
     setRepairActions(result.repairActions || []);
+    setRepairPreview(null);
     setExportPlan(result.exportPlan || null);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       const blocked = result.previewPreflight?.canRun === false || hasBlockingPreviewErrors(issues);
@@ -1682,22 +1899,83 @@ export function ProjectDetailView({
                   </ul>
                 </div>
               ) : null}
+              <p aria-live="polite" className="page-muted">{repairStatus}</p>
               {currentRepairActions.length ? (
                 <div>
                   <h4>수리 후보</h4>
-                  <p className="page-muted">적용은 다음 단계에서 연결됩니다.</p>
                   <ul className="repair-action-list">
-                    {currentRepairActions.map((action, index) => (
-                      <li key={`${action.issueCode || "issue"}-${action.actionId || index}-${action.targetPath || "target"}`}>
-                        <Button disabled={true} icon={<ArrowRight size={16} />} variant={action.destructive ? "danger" : "ghost"}>
-                          {action.label || action.actionId || "수리 후보"}
+	                    {currentRepairActions.map((action, index) => (
+	                      <li aria-current={repairActionKey(action) === selectedRepairActionKey ? "true" : undefined} className={repairActionKey(action) === selectedRepairActionKey ? "selected" : ""} key={`${action.issueCode || "issue"}-${action.actionId || index}-${action.targetPath || "target"}`}>
+                        <Button disabled={repairBusy || Boolean(action.disabledReason) || !projectDirectory} icon={<GitCompareArrows size={16} />} onClick={() => void previewRepairAction(action)} variant={action.destructive ? "danger" : "ghost"}>
+                          {action.label || action.actionId || "수리 후보"} diff 확인
                         </Button>
                         <span>{action.description || "문제 확인 결과에 맞는 수리 후보입니다."}</span>
                         <small>{repairActionMetaText(action)}</small>
                         {action.disabledReason ? <small>비활성 사유 {action.disabledReason}</small> : null}
+                        {action.requiredInputs?.length ? (
+                          <div className="repair-action-inputs">
+                            {action.requiredInputs.map((input) => (
+                              <label key={`${repairActionKey(action)}-${input.name || input.label}`} className="repair-action-input">
+                                <span>{repairInputDisplayLabel(input)}</span>
+                                {input.inputType === "select" ? (
+                                  <select disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} value={repairInputValue(action, input)}>
+                                    {(input.options || []).map((option) => (
+                                      <option key={option.value || option.label} value={option.value || ""}>{option.label || option.value || "선택"}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} placeholder={repairInputDisplayLabel(input)} value={repairInputValue(action, input)} />
+                                )}
+                              </label>
+                            ))}
+                          </div>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+              {repairPreview || undoRepairEntry ? (
+                <div className="repair-diff-panel">
+                  <h4>수리 diff</h4>
+                  {repairPreview ? (
+                    <>
+                      <p className="page-muted">{repairPreview.expectedAfterSummary || "표시된 변경 사항을 확인한 뒤 적용합니다."}</p>
+                      <dl className="summary-list">
+                        <div><dt>수리 액션</dt><dd>{repairPreview.repairAction?.label || repairPreview.actionId || "수리 후보"}</dd></div>
+                        <div><dt>대상</dt><dd>{repairPreview.targetPath || "대상 확인 필요"}</dd></div>
+                        <div><dt>기준 revision</dt><dd>{repairPreview.beforeRevision?.revision || "revision 확인 필요"}</dd></div>
+                        <div><dt>확인 방식</dt><dd>{repairPreview.repairAction?.requiresConfirmation || repairPreview.destructiveWarnings?.length ? "diff 확인 후 적용" : "즉시 적용 가능"}</dd></div>
+                      </dl>
+                      {repairPreview.destructiveWarnings?.length ? (
+                        <ul className="compact-list">
+                          {repairPreview.destructiveWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+                        </ul>
+                      ) : null}
+                      <ul className="repair-diff-list">
+                        {(repairPreview.diff || []).map((entry, index) => (
+                          <li key={`${entry.path || "diff"}-${entry.op || "op"}-${index}`}>
+                            <strong>{repairDiffOperationLabel(entry.op)} · {entry.path || "경로 확인 필요"}</strong>
+                            <span>{entry.humanLabel || "프로젝트 값을 변경합니다."}</span>
+                            <small>이전 {repairDiffValueText(entry.before)} → 이후 {repairDiffValueText(entry.after)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p className="page-muted">마지막 수리 적용 이력이 있습니다. 필요하면 되돌릴 수 있습니다.</p>
+                  )}
+                  <div className="button-row">
+                    {repairPreview ? (
+                      <Button disabled={repairBusy} icon={<CheckCircle2 size={16} />} onClick={() => void applyRepairPreview()} variant={repairPreview.destructiveWarnings?.length || repairPreview.repairAction?.destructive ? "danger" : "primary"}>
+                        변경 적용
+                      </Button>
+                    ) : null}
+                    <Button disabled={repairBusy || !undoRepairEntry?.id} icon={<Undo2 size={16} />} onClick={() => void undoLastRepair()} variant="ghost">
+                      마지막 수리 되돌리기
+                    </Button>
+                  </div>
+                  {repairHistoryEntry?.appliedAt ? <small>마지막 적용 시각 {repairHistoryEntry.appliedAt}</small> : null}
                 </div>
               ) : null}
               {currentPreviewReadiness.missingItems?.length ? (

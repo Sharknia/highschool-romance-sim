@@ -409,6 +409,18 @@ class ApiServices {
   undoPatch(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.undoPatch(body);
   }
+
+  previewRepair(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.previewRepair(body);
+  }
+
+  applyRepair(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.applyRepair(body);
+  }
+
+  undoRepair(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.undoRepair(body);
+  }
 }
 
 export function createApiApp(options: ApiHandlerOptions = {}): Hono {
@@ -459,6 +471,9 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body), "approveEvent"));
   app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));
   app.post("/api/events/undo", (context) => jsonBodyRoute(context, (body) => services.undoPatch(body)));
+  app.post("/api/project/repair/preview", (context) => jsonBodyRoute(context, (body) => services.previewRepair(body), "previewRepair"));
+  app.post("/api/project/repair/apply", (context) => jsonBodyRoute(context, (body) => services.applyRepair(body), "applyRepair"));
+  app.post("/api/project/repair/undo", (context) => jsonBodyRoute(context, (body) => services.undoRepair(body), "undoRepair"));
 
   app.post("/api/generation/jobs", (context) => jsonBodyRoute(context, (body) => services.createGenerationJob(body)));
   app.post("/api/generation/jobs/list", (context) => jsonBodyRoute(context, (body) => services.listGenerationJobs(body), "listGenerationJobs"));

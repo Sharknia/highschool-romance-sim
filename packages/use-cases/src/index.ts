@@ -36,6 +36,7 @@ import {
   type EventExpansionValidationResult,
   type HeroineProfile,
   type PreviewPreflightDto,
+  type ProjectPatchDescription,
   type ProjectRevisionDto,
   type ValidationIssue,
   type VnMakerAsset,
@@ -54,6 +55,8 @@ import {
   RecentProjectIndexStore,
   resolveProjectWorkspacePaths,
   smokeTestWebExport,
+  StaleProjectRevisionError,
+  type PatchHistoryEntry,
   type RecentProjectIndexEntry,
   type RecentProjectValidationState,
   type ProjectStore,
@@ -176,6 +179,9 @@ export type MakerActionId =
   | "runGenerationJobs"
   | "previewPreflightProject"
   | "previewProject"
+  | "previewRepair"
+  | "applyRepair"
+  | "undoRepair"
   | "exportProject";
 
 export type MakerValidationState = "unknown" | "valid" | "warning" | "error";
@@ -299,6 +305,41 @@ export interface RepairActionDto {
   disabledReason: string | null;
   expectedTarget: RepairActionExpectedTargetDto;
   preflightBlocker: RepairActionPreflightBlockerDto;
+}
+
+export interface RepairDiffEntryDto {
+  op: "add" | "remove" | "replace";
+  path: string;
+  before: unknown;
+  after: unknown;
+  humanLabel: string;
+}
+
+export interface RepairPreviewDto {
+  actionId: RepairActionDto["actionId"];
+  issueCode: string;
+  targetPath: string;
+  beforeRevision: ProjectRevisionDto;
+  expectedAfterSummary: string;
+  diff: RepairDiffEntryDto[];
+  destructiveWarnings: string[];
+  confirmToken: string;
+  repairAction: RepairActionDto;
+}
+
+export interface RepairHistoryEntryDto {
+  id: string;
+  actionId: string;
+  issueCode: string;
+  beforeRevision: ProjectRevisionDto;
+  afterRevision: ProjectRevisionDto;
+  appliedAt: string;
+  revertedAt?: string;
+}
+
+export interface UndoRepairInput {
+  repairHistoryId?: string;
+  undoToken?: string;
 }
 
 export type ProjectActionFailureCode =
@@ -1106,6 +1147,353 @@ function repairActionsForValidation(
   return actions;
 }
 
+interface RepairActionRequest {
+  actionId: RepairActionDto["actionId"];
+  issueCode: string;
+  targetPath: string;
+  inputs: JsonRecord;
+}
+
+interface RepairMutationPreview {
+  project: VnMakerProject;
+  diff: RepairDiffEntryDto[];
+  expectedAfterSummary: string;
+  destructiveWarnings: string[];
+}
+
+function cloneProject(project: VnMakerProject): VnMakerProject {
+  return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+}
+
+function validationSnapshotForProject(project: VnMakerProject): { ok: boolean; issues: ValidationIssue[] } {
+  const issues = validateProjectSnapshot(project);
+  return {
+    ok: issues.every((issue) => issue.severity !== "error"),
+    issues
+  };
+}
+
+function repairActionRequestFrom(input: unknown): RepairActionRequest {
+  const record = asRecord(input);
+  const actionRecord = asRecord(record.repairAction);
+  const actionId = String(actionRecord.actionId || record.actionId || "");
+  const issueCode = String(actionRecord.issueCode || record.issueCode || "");
+  const targetPath = String(actionRecord.targetPath || record.targetPath || "");
+  const inputs = asRecord(actionRecord.inputs || record.inputs);
+  if (!["create-target-scene", "connect-existing-scene", "set-scene-ending", "remove-next"].includes(actionId)) {
+    throw new InputValidationError("지원하지 않는 repair action입니다.", [{ severity: "error", path: "repairAction.actionId", message: "지원하지 않는 repair action입니다." }]);
+  }
+  if (!issueCode) {
+    throw new InputValidationError("repair action issueCode 입력이 필요합니다.", [{ severity: "error", path: "repairAction.issueCode", message: "비어 있을 수 없습니다." }]);
+  }
+  if (!targetPath) {
+    throw new InputValidationError("repair action targetPath 입력이 필요합니다.", [{ severity: "error", path: "repairAction.targetPath", message: "비어 있을 수 없습니다." }]);
+  }
+  return {
+    actionId: actionId as RepairActionDto["actionId"],
+    issueCode,
+    targetPath,
+    inputs
+  };
+}
+
+function repairIssueForRequest(validation: { issues?: ValidationIssue[] }, request: RepairActionRequest): ValidationIssue {
+  const issue = (validation.issues || []).find((candidate) =>
+    candidate.code === request.issueCode && candidate.path === request.targetPath && candidate.severity === "error"
+  );
+  if (!issue) {
+    throw new InputValidationError("repair action에 연결된 validation issue를 찾을 수 없습니다.", [{
+      severity: "error",
+      path: "repairAction",
+      message: "현재 검증 결과와 repair action이 일치하지 않습니다."
+    }]);
+  }
+  return issue;
+}
+
+function repairActionCandidateForRequest(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  preflight: PreviewPreflightDto,
+  request: RepairActionRequest
+): RepairActionDto {
+  const action = repairActionsForValidation(project, validation, preflight).find((candidate) =>
+    candidate.actionId === request.actionId && candidate.issueCode === request.issueCode && candidate.targetPath === request.targetPath
+  );
+  if (!action) {
+    throw new InputValidationError("현재 issue에는 적용 가능한 repair action 후보가 없습니다.", [{
+      severity: "error",
+      path: "repairAction",
+      message: "지원하지 않는 issue이거나 최신 검증 결과와 다릅니다."
+    }]);
+  }
+  if (action.disabledReason) {
+    throw new InputValidationError(action.disabledReason, [{
+      severity: "error",
+      path: "repairAction.disabledReason",
+      message: action.disabledReason
+    }]);
+  }
+  return action;
+}
+
+function sceneForRepairRequest(project: VnMakerProject, issue: ValidationIssue): VnMakerScene {
+  const scene = sceneForIssue(project, issue);
+  if (!scene) {
+    throw new InputValidationError("repair 대상 scene을 찾을 수 없습니다.", [{
+      severity: "error",
+      path: issue.path,
+      message: "repair 대상 scene을 찾을 수 없습니다.",
+      sceneIds: issue.sceneIds
+    }]);
+  }
+  return scene;
+}
+
+function repairInputString(inputs: JsonRecord, name: string): string {
+  const value = inputs[name];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function assertExpectedProjectRevision(store: ProjectStore, expectedProjectRevision: ProjectRevisionInput): ProjectRevisionDto {
+  const actualRevision = store.getProjectRevision();
+  const expectedRevision = typeof expectedProjectRevision === "string" ? expectedProjectRevision : expectedProjectRevision.revision;
+  if (expectedRevision !== actualRevision.revision) {
+    throw new StaleProjectRevisionError({ expectedRevision, actualRevision });
+  }
+  return actualRevision;
+}
+
+function routeEntryForMissingTarget(project: VnMakerProject, issue: ValidationIssue): { route: VnMakerProject["routes"][number]; routeIndex: number } | null {
+  const routeIndex = project.routes.findIndex((route) => route.entrySceneId === issue.targetSceneId);
+  if (routeIndex < 0) {
+    return null;
+  }
+  return { route: project.routes[routeIndex], routeIndex };
+}
+
+function applyRepairMutationToProject(project: VnMakerProject, request: RepairActionRequest, issue: ValidationIssue): RepairMutationPreview {
+  const nextProject = cloneProject(project);
+
+  if (request.actionId === "remove-next") {
+    const scene = sceneForRepairRequest(nextProject, issue);
+    const before = scene.next || null;
+    scene.next = undefined;
+    return {
+      project: nextProject,
+      diff: [{
+        op: "remove",
+        path: `${issue.path}.next`,
+        before,
+        after: null,
+        humanLabel: `${sceneLabelForRepair(project, scene.id)}의 next 연결 제거`
+      }],
+      expectedAfterSummary: "충돌을 만드는 next 연결을 제거하고 검증을 다시 계산합니다.",
+      destructiveWarnings: ["다음 장면 자동 연결이 제거됩니다."]
+    };
+  }
+
+  if (request.actionId === "set-scene-ending") {
+    const scene = sceneForRepairRequest(nextProject, issue);
+    const endingTitle = repairInputString(request.inputs, "endingTitle") || "새 엔딩";
+    const endingKind = repairInputString(request.inputs, "endingKind") || "normal";
+    const before = scene.ending || null;
+    const ending = endingFromInput(nextProject, scene.id, {
+      title: endingTitle,
+      kind: endingKind
+    });
+    scene.ending = ending;
+    return {
+      project: nextProject,
+      diff: [{
+        op: before ? "replace" : "add",
+        path: `${issue.path}.ending`,
+        before,
+        after: ending || null,
+        humanLabel: `${sceneLabelForRepair(project, scene.id)}에 엔딩 지정`
+      }],
+      expectedAfterSummary: "엔딩 없이 끝나는 씬에 엔딩 정보를 추가하고 검증을 다시 계산합니다.",
+      destructiveWarnings: []
+    };
+  }
+
+  if (request.actionId === "connect-existing-scene") {
+    const existingSceneId = repairInputString(request.inputs, "existingSceneId");
+    const targetScene = nextProject.scenes.find((candidate) => candidate.id === existingSceneId);
+    if (!targetScene) {
+      throw new InputValidationError("연결할 기존 씬을 찾을 수 없습니다.", [{
+        severity: "error",
+        path: "inputs.existingSceneId",
+        message: "연결할 기존 씬을 찾을 수 없습니다."
+      }]);
+    }
+    const scene = sceneForIssue(nextProject, issue);
+    if (!scene) {
+      const routeEntry = routeEntryForMissingTarget(nextProject, issue);
+      if (!routeEntry) {
+        throw new InputValidationError("repair 대상 route entry를 찾을 수 없습니다.", [{
+          severity: "error",
+          path: issue.path,
+          message: "repair 대상 route entry를 찾을 수 없습니다.",
+          targetSceneId: issue.targetSceneId
+        }]);
+      }
+      const before = routeEntry.route.entrySceneId || null;
+      routeEntry.route.entrySceneId = targetScene.id;
+      return {
+        project: nextProject,
+        diff: [{
+          op: "replace",
+          path: `routes.${routeEntry.routeIndex}.entrySceneId`,
+          before,
+          after: targetScene.id,
+          humanLabel: `${routeEntry.route.title || routeEntry.route.id} 시작 씬을 기존 씬에 연결`
+        }],
+        expectedAfterSummary: "없는 route entry target 대신 기존 씬을 연결하고 검증을 다시 계산합니다.",
+        destructiveWarnings: []
+      };
+    }
+    const choiceId = issue.choiceIds?.[0];
+    const choice = choiceId ? scene.choices.find((candidate) => candidate.id === choiceId) : undefined;
+    if (choice) {
+      const before = choice.next || null;
+      choice.next = targetScene.id;
+      return {
+        project: nextProject,
+        diff: [{
+          op: "replace",
+          path: `${issue.path}.next`,
+          before,
+          after: targetScene.id,
+          humanLabel: `${choice.text || choice.id} 선택지를 기존 씬에 연결`
+        }],
+        expectedAfterSummary: "없는 target 대신 기존 씬을 연결하고 검증을 다시 계산합니다.",
+        destructiveWarnings: []
+      };
+    }
+    const before = scene.next || null;
+    scene.next = targetScene.id;
+    return {
+      project: nextProject,
+      diff: [{
+        op: "replace",
+        path: `${issue.path}.next`,
+        before,
+        after: targetScene.id,
+        humanLabel: `${sceneLabelForRepair(project, scene.id)}의 next를 기존 씬에 연결`
+      }],
+      expectedAfterSummary: "없는 target 대신 기존 씬을 연결하고 검증을 다시 계산합니다.",
+      destructiveWarnings: []
+    };
+  }
+
+  const targetSceneId = issue.targetSceneId || repairInputString(request.inputs, "sceneId");
+  if (!targetSceneId) {
+    throw new InputValidationError("생성할 target scene id를 결정할 수 없습니다.", [{
+      severity: "error",
+      path: "repairAction.targetSceneId",
+      message: "생성할 target scene id를 결정할 수 없습니다."
+    }]);
+  }
+  const sceneLabel = repairInputString(request.inputs, "sceneLabel") || targetSceneId;
+  const newScene = requireParsed(parseVnMakerScene({
+    id: targetSceneId,
+    label: sceneLabel,
+    speaker: "",
+    text: "",
+    characters: [],
+    choices: []
+  }), "scene");
+  nextProject.scenes.push(newScene);
+  return {
+    project: nextProject,
+    diff: [{
+      op: "add",
+      path: `scenes.${nextProject.scenes.length - 1}`,
+      before: null,
+      after: newScene,
+      humanLabel: `${sceneLabel} 씬 생성`
+    }],
+    expectedAfterSummary: "누락된 target 씬을 생성하고 검증을 다시 계산합니다.",
+    destructiveWarnings: []
+  };
+}
+
+function repairConfirmToken(input: {
+  actionId: string;
+  issueCode: string;
+  targetPath: string;
+  beforeRevision: ProjectRevisionDto;
+  diff: RepairDiffEntryDto[];
+}): string {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex").slice(0, 32);
+}
+
+function repairPreviewFor(
+  project: VnMakerProject,
+  projectRevision: ProjectRevisionDto,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  request: RepairActionRequest
+): RepairPreviewDto {
+  const preflight = createPreviewPreflight(project, validation, projectRevision);
+  const issue = repairIssueForRequest(validation, request);
+  const repairAction = repairActionCandidateForRequest(project, validation, preflight, request);
+  const mutation = applyRepairMutationToProject(project, request, issue);
+  const previewBase = {
+    actionId: repairAction.actionId,
+    issueCode: repairAction.issueCode,
+    targetPath: repairAction.targetPath,
+    beforeRevision: projectRevision,
+    expectedAfterSummary: mutation.expectedAfterSummary,
+    diff: mutation.diff,
+    destructiveWarnings: mutation.destructiveWarnings,
+    repairAction
+  };
+  return {
+    ...previewBase,
+    confirmToken: repairConfirmToken(previewBase)
+  };
+}
+
+function patchHistoryRepairMetadata(entry: PatchHistoryEntry): { preview?: RepairPreviewDto; afterRevision?: ProjectRevisionDto } {
+  const repair = asRecord(asRecord(entry.rawOutput).repair);
+  return {
+    preview: repair.preview as RepairPreviewDto | undefined,
+    afterRevision: repair.afterRevision as ProjectRevisionDto | undefined
+  };
+}
+
+function repairHistoryEntryFromPatch(entry: PatchHistoryEntry): RepairHistoryEntryDto | null {
+  const metadata = patchHistoryRepairMetadata(entry);
+  if (!metadata.preview || !metadata.afterRevision) {
+    return null;
+  }
+  return {
+    id: entry.id,
+    actionId: metadata.preview.actionId,
+    issueCode: metadata.preview.issueCode,
+    beforeRevision: metadata.preview.beforeRevision,
+    afterRevision: metadata.afterRevision,
+    appliedAt: entry.createdAt,
+    ...(entry.revertedAt ? { revertedAt: entry.revertedAt } : {})
+  };
+}
+
+function latestUnrevertedRepairPatchEntry(store: ProjectStore): PatchHistoryEntry | null {
+  return store.listPatchHistory().find((entry) => Boolean(repairHistoryEntryFromPatch(entry)) && !entry.revertedAt) || null;
+}
+
+function patchDescriptionForRepair(preview: RepairPreviewDto): ProjectPatchDescription {
+  return {
+    text: preview.expectedAfterSummary,
+    sceneCount: preview.actionId === "create-target-scene" ? 1 : 0,
+    choiceCount: 0,
+    assetCount: 0,
+    generationJobCount: 0,
+    operations: preview.diff.map((entry) => `${entry.op} ${entry.path}: ${entry.humanLabel}`)
+  };
+}
+
 function attachProjectFailureContext(
   error: unknown,
   input: {
@@ -1191,7 +1579,7 @@ function withStoreActionState<T extends JsonRecord>(
   action: MakerActionId,
   store: ProjectStore,
   body: T,
-  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] } } = {}
+  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] }; projectRevision?: ProjectRevisionDto } = {}
 ) {
   const projectRevision = store.getProjectRevision();
   return withActionState(action, {
@@ -3626,6 +4014,115 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.undoPatchHistory(patchHistoryId);
         const validation = store.validateAndStore();
         return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation, entries: store.listPatchHistory() };
+      } finally {
+        store.close();
+      }
+    },
+
+    async previewRepair(input: unknown) {
+      const request = repairActionRequestFrom(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const validation = validationSnapshotForProject(project);
+        const repairPreview = repairPreviewFor(project, projectRevision, validation, request);
+        return withStoreActionState("previewRepair", store, {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          issues: validation.issues,
+          validation,
+          repairPreview
+        }, { project, validation, projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async applyRepair(input: unknown) {
+      const request = repairActionRequestFrom(input);
+      const expectedProjectRevision = expectedProjectRevisionFrom(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = assertExpectedProjectRevision(store, expectedProjectRevision);
+        const validation = validationSnapshotForProject(project);
+        const repairPreview = repairPreviewFor(project, projectRevision, validation, request);
+        const confirmToken = String(asRecord(input).confirmToken || "");
+        if (repairPreview.repairAction.destructive && confirmToken !== repairPreview.confirmToken) {
+          throw new InputValidationError("destructive repair에는 올바른 confirmToken이 필요합니다.", [{
+            severity: "error",
+            path: "confirmToken",
+            message: "수리 미리보기에서 받은 confirmToken과 일치해야 합니다."
+          }]);
+        }
+        const result = store.applyRepairMutation({
+          expectedProjectRevision,
+          summary: repairPreview.expectedAfterSummary,
+          diff: patchDescriptionForRepair(repairPreview),
+          rawOutput: (afterRevision) => ({
+            repair: {
+              preview: repairPreview,
+              afterRevision
+            }
+          }),
+          mutate: (currentProject) => {
+            const currentValidation = validationSnapshotForProject(currentProject);
+            const currentIssue = repairIssueForRequest(currentValidation, request);
+            return applyRepairMutationToProject(currentProject, request, currentIssue).project;
+          }
+        });
+        const repairHistoryEntry = repairHistoryEntryFromPatch(result.repairHistoryEntry);
+        return withStoreActionState("applyRepair", store, {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project: result.project,
+          previousRevision: result.previousRevision,
+          projectRevision: result.projectRevision,
+          issues: result.validation.issues,
+          validation: result.validation,
+          repairPreview,
+          repairHistoryEntry,
+          patchHistoryEntry: result.repairHistoryEntry
+        }, { project: result.project, validation: result.validation, projectRevision: result.projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async undoRepair(input: unknown) {
+      const record = asRecord(input);
+      const repairHistoryId = String(record.repairHistoryId || record.undoToken || "");
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const latestEntry = latestUnrevertedRepairPatchEntry(store);
+        if (!latestEntry) {
+          throw new InputValidationError("수리 이력을 찾을 수 없습니다.", [{ severity: "error", path: "repairHistoryId", message: "수리 이력을 찾을 수 없습니다." }]);
+        }
+        if (repairHistoryId && repairHistoryId !== latestEntry.id) {
+          throw new InputValidationError("마지막 수리만 되돌릴 수 있습니다.", [{
+            severity: "error",
+            path: "repairHistoryId",
+            message: "마지막 수리만 되돌릴 수 있습니다."
+          }]);
+        }
+        const previousRevision = store.getProjectRevision();
+        const project = store.undoPatchHistory(latestEntry.id);
+        const validation = store.validateAndStore();
+        const projectRevision = store.getProjectRevision();
+        const revertedEntry = store.getPatchHistoryEntry(latestEntry.id);
+        return withStoreActionState("undoRepair", store, {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          previousRevision,
+          projectRevision,
+          issues: validation.issues,
+          validation,
+          repairHistoryEntry: revertedEntry ? repairHistoryEntryFromPatch(revertedEntry) : null,
+          repairHistory: []
+        }, { project, validation, projectRevision });
       } finally {
         store.close();
       }

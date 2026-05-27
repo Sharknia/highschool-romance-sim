@@ -230,6 +230,36 @@ export interface ProjectRepairAction {
   preflightBlocker?: ProjectPreviewPreflightIssue;
 }
 
+export interface ProjectRepairDiffEntry {
+  op?: "add" | "remove" | "replace" | string;
+  path?: string;
+  before?: unknown;
+  after?: unknown;
+  humanLabel?: string;
+}
+
+export interface ProjectRepairPreview {
+  actionId?: string;
+  issueCode?: string;
+  targetPath?: string;
+  beforeRevision?: ProjectRevision;
+  confirmToken?: string;
+  expectedAfterSummary?: string;
+  diff?: ProjectRepairDiffEntry[];
+  destructiveWarnings?: string[];
+  repairAction?: ProjectRepairAction;
+}
+
+export interface ProjectRepairHistoryEntry {
+  id?: string;
+  actionId?: string;
+  issueCode?: string;
+  beforeRevision?: ProjectRevision;
+  afterRevision?: ProjectRevision;
+  appliedAt?: string;
+  revertedAt?: string;
+}
+
 export interface ProjectExportPlan {
   state?: "ready" | "blocked" | "running" | "complete" | "failed" | string;
   canExport?: boolean;
@@ -336,6 +366,9 @@ export interface ProjectApiResult extends ApiResult {
   export?: ProjectExportResult;
   previewReadiness?: ProjectPreviewReadiness;
   repairActions?: ProjectRepairAction[];
+  repairPreview?: ProjectRepairPreview;
+  repairHistoryEntry?: ProjectRepairHistoryEntry | null;
+  repairHistory?: ProjectRepairHistoryEntry[];
   exportPlan?: ProjectExportPlan;
   recentProject?: RecentProject;
   removedProject?: RecentProject;

@@ -1598,8 +1598,61 @@ a {
   background: #1b1916;
 }
 
+.repair-action-list li.selected {
+  border-color: #5eead4;
+  background: #15231f;
+}
+
 .repair-action-list .button {
   justify-self: start;
+}
+
+.repair-action-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.repair-action-input {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #d7cfc3;
+  font-size: 0.88rem;
+}
+
+.repair-diff-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #403b34;
+  border-radius: 7px;
+  background: #171613;
+}
+
+.repair-diff-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.repair-diff-list li {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid #332f29;
+  border-radius: 7px;
+  background: #11110f;
+}
+
+.repair-diff-list strong,
+.repair-diff-list span,
+.repair-diff-list small {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .asset-job-list {

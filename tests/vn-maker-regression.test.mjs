@@ -32,6 +32,10 @@ const repairActionUncoveredTerminalDirectory = join(tempRoot, "RepairActionUncov
 const repairActionMixedOutgoingDirectory = join(tempRoot, "RepairActionMixedOutgoing.vnmaker");
 const repairActionEndingOutgoingDirectory = join(tempRoot, "RepairActionEndingOutgoing.vnmaker");
 const repairActionUnknownIssueDirectory = join(tempRoot, "RepairActionUnknownIssue.vnmaker");
+const repairDiffApplyDirectory = join(tempRoot, "RepairDiffApply.vnmaker");
+const repairCliParityDirectory = join(tempRoot, "RepairCliParity.vnmaker");
+const repairRouteMissingTargetDirectory = join(tempRoot, "RepairRouteMissingTarget.vnmaker");
+const repairLastUndoDirectory = join(tempRoot, "RepairLastUndo.vnmaker");
 const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
@@ -559,6 +563,11 @@ assert.equal(previewPreflightReadyCli.previewPreflight.runtimeCapabilities.choic
 assert.equal(previewPreflightReadyCli.previewPreflight.warnings[0].issueCode, previewPreflightReadyApi.body.previewPreflight.warnings[0].issueCode);
 assert.ok(previewPreflightReadyCli.runtime);
 
+const repairCliInspect = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "inspect"], { encoding: "utf8" }));
+assert.equal(repairCliInspect.commands.includes("repair-preview"), true);
+assert.equal(repairCliInspect.commands.includes("repair-apply"), true);
+assert.equal(repairCliInspect.commands.includes("repair-undo"), true);
+
 function findRepairAction(result, issueCode, actionId) {
   return (result.repairActions || []).find((action) => action.issueCode === issueCode && action.actionId === actionId);
 }
@@ -746,6 +755,296 @@ assert.deepEqual(
   repairActionUnknownResult.cli.repairActions.map(repairActionTuple),
   repairActionUnknownResult.api.repairActions.map(repairActionTuple)
 );
+
+function mixedOutgoingRepairProject(id, title) {
+  const baseProject = core.createStarterProject({
+    id,
+    title,
+    premise: "mixed outgoing repair diff/apply/undo를 검증한다."
+  });
+  return {
+    ...baseProject,
+    scenes: baseProject.scenes.map((scene) => scene.id === baseProject.routes[0].entrySceneId
+      ? {
+          ...scene,
+          next: "scene-haru-smile"
+        }
+      : scene)
+  };
+}
+
+function repairRemoveNextRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "remove-next",
+      issueCode: "mixed-outgoing",
+      targetPath: "scenes.0"
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+function repairSetEndingRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "set-scene-ending",
+      issueCode: "uncovered-terminal",
+      targetPath: "scenes.1",
+      inputs: {
+        endingTitle: "수리된 엔딩",
+        endingKind: "normal"
+      }
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+function repairCreateTargetSceneRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "create-target-scene",
+      issueCode: "missing-target",
+      targetPath: "routes",
+      inputs: {
+        sceneLabel: "복구된 시작 씬"
+      }
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+function repairConnectExistingRouteRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "connect-existing-scene",
+      issueCode: "missing-target",
+      targetPath: "routes",
+      inputs: {
+        existingSceneId: "scene-opening"
+      }
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+async function repairApi(path, body) {
+  return webHandlers.handleApiRequest({
+    method: "POST",
+    path,
+    body
+  });
+}
+
+const repairDiffApplyStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairDiffApplyDirectory,
+  project: mixedOutgoingRepairProject("repair-diff-apply", "Repair Diff Apply")
+});
+repairDiffApplyStore.close();
+const repairDiffValidate = await repairApi("/api/project/validate", { projectDirectory: repairDiffApplyDirectory });
+assert.equal(repairDiffValidate.body.validation.ok, false);
+assert.equal(repairDiffValidate.body.issues.some((issue) => issue.code === "mixed-outgoing"), true);
+const repairDiffRevision = repairDiffValidate.body.projectRevision;
+const repairPreviewApi = await repairApi("/api/project/repair/preview", repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision));
+assert.equal(repairPreviewApi.status, 200);
+assert.equal(repairPreviewApi.body.ok, true);
+assert.equal(repairPreviewApi.body.repairPreview.actionId, "remove-next");
+assert.equal(repairPreviewApi.body.repairPreview.issueCode, "mixed-outgoing");
+assert.equal(repairPreviewApi.body.repairPreview.beforeRevision.revision, repairDiffRevision.revision);
+assert.equal(typeof repairPreviewApi.body.repairPreview.confirmToken, "string");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].op, "remove");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].path, "scenes.0.next");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].before, "scene-haru-smile");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].after, null);
+assert.match(repairPreviewApi.body.repairPreview.diff[0].humanLabel, /next 연결 제거/);
+assert.equal(repairPreviewApi.body.repairPreview.destructiveWarnings.length > 0, true);
+
+const repairPreviewCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-preview"], {
+  input: JSON.stringify(repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision)),
+  encoding: "utf8"
+}));
+assert.deepEqual(
+  repairPreviewCli.repairPreview.diff,
+  repairPreviewApi.body.repairPreview.diff,
+  "CLI repair-preview diff must match Web API repair-preview diff"
+);
+
+const repairApplyMismatch = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision, "wrong-token"));
+assert.equal(repairApplyMismatch.body.ok, false);
+assert.equal(repairApplyMismatch.body.issues.some((issue) => issue.path === "confirmToken"), true);
+
+const repairApplyApi = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(
+  repairDiffApplyDirectory,
+  repairDiffRevision,
+  repairPreviewApi.body.repairPreview.confirmToken
+));
+assert.equal(repairApplyApi.status, 200);
+assert.equal(repairApplyApi.body.ok, true);
+assert.equal(repairApplyApi.body.previousRevision.revision, repairDiffRevision.revision);
+assert.notEqual(repairApplyApi.body.projectRevision.revision, repairDiffRevision.revision);
+assert.equal(repairApplyApi.body.validation.ok, true);
+assert.equal(repairApplyApi.body.repairHistoryEntry.actionId, "remove-next");
+assert.equal(repairApplyApi.body.repairHistoryEntry.issueCode, "mixed-outgoing");
+assert.equal(repairApplyApi.body.project.scenes.find((scene) => scene.id === "scene-opening").next, undefined);
+assert.equal(repairApplyApi.body.issues.some((issue) => issue.code === "mixed-outgoing"), false);
+assert.equal((repairApplyApi.body.previewPreflight.blockers || []).some((blocker) => blocker.issueCode === "mixed-outgoing"), false);
+
+const repairApplyStaleBeforeConfirm = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision, "wrong-token"));
+assert.equal(repairApplyStaleBeforeConfirm.body.ok, false);
+assert.equal(repairApplyStaleBeforeConfirm.body.code, "STALE_PROJECT_REVISION");
+
+const repairUndoApi = await repairApi("/api/project/repair/undo", {
+  projectDirectory: repairDiffApplyDirectory,
+  repairHistoryId: repairApplyApi.body.repairHistoryEntry.id
+});
+assert.equal(repairUndoApi.status, 200);
+assert.equal(repairUndoApi.body.ok, true);
+assert.equal(repairUndoApi.body.project.scenes.find((scene) => scene.id === "scene-opening").next, "scene-haru-smile");
+assert.equal(repairUndoApi.body.validation.ok, false);
+assert.equal(repairUndoApi.body.issues.some((issue) => issue.code === "mixed-outgoing"), true);
+assert.equal((repairUndoApi.body.previewPreflight.blockers || []).some((blocker) => blocker.issueCode === "mixed-outgoing"), true);
+
+const repairCliStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairCliParityDirectory,
+  project: mixedOutgoingRepairProject("repair-cli-parity", "Repair CLI Parity")
+});
+repairCliStore.close();
+const repairCliValidate = await repairApi("/api/project/validate", { projectDirectory: repairCliParityDirectory });
+const repairCliRevision = repairCliValidate.body.projectRevision;
+const repairCliPreview = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-preview"], {
+  input: JSON.stringify(repairRemoveNextRequest(repairCliParityDirectory, repairCliRevision)),
+  encoding: "utf8"
+}));
+const repairCliApply = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-apply"], {
+  input: JSON.stringify(repairRemoveNextRequest(repairCliParityDirectory, repairCliRevision, repairCliPreview.repairPreview.confirmToken)),
+  encoding: "utf8"
+}));
+assert.equal(repairCliApply.ok, true);
+assert.equal(repairCliApply.validation.ok, true);
+assert.equal(repairCliApply.repairHistoryEntry.actionId, "remove-next");
+const repairCliUndo = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-undo"], {
+  input: JSON.stringify({
+    projectDirectory: repairCliParityDirectory,
+    repairHistoryId: repairCliApply.repairHistoryEntry.id
+  }),
+  encoding: "utf8"
+}));
+assert.equal(repairCliUndo.ok, true);
+assert.equal(repairCliUndo.validation.ok, false);
+assert.equal(repairCliUndo.issues.some((issue) => issue.code === "mixed-outgoing"), true);
+
+const repairFailureCli = spawnSync(process.execPath, ["packages/cli/dist/index.js", "repair-apply"], {
+  input: JSON.stringify({
+    projectDirectory: repairCliParityDirectory,
+    repairAction: {
+      actionId: "remove-next",
+      issueCode: "mixed-outgoing",
+      targetPath: "scenes.0"
+    },
+    confirmToken: "missing-revision"
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(repairFailureCli.status, 0);
+const repairFailureCliBody = JSON.parse(repairFailureCli.stdout);
+assert.equal(repairFailureCliBody.action, "applyRepair");
+
+const routeMissingTargetBaseProject = core.createStarterProject({
+  id: "repair-route-missing-target",
+  title: "Repair Route Missing Target",
+  premise: "route entrySceneId missing-target 수리를 검증한다."
+});
+const routeMissingTargetProject = {
+  ...routeMissingTargetBaseProject,
+  routes: routeMissingTargetBaseProject.routes.map((route) => ({
+    ...route,
+    entrySceneId: "scene-missing-entry"
+  }))
+};
+const routeMissingTargetStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairRouteMissingTargetDirectory,
+  project: routeMissingTargetProject
+});
+routeMissingTargetStore.close();
+const routeMissingValidate = await repairApi("/api/project/validate", { projectDirectory: repairRouteMissingTargetDirectory });
+assert.equal(routeMissingValidate.body.issues.some((issue) => issue.code === "missing-target" && issue.path === "routes"), true);
+const routeMissingRevision = routeMissingValidate.body.projectRevision;
+const routeCreatePreview = await repairApi("/api/project/repair/preview", repairCreateTargetSceneRequest(repairRouteMissingTargetDirectory, routeMissingRevision));
+assert.equal(routeCreatePreview.body.ok, true);
+assert.equal(routeCreatePreview.body.repairPreview.diff[0].path, "scenes.2");
+assert.equal(routeCreatePreview.body.repairPreview.diff[0].after.id, "scene-missing-entry");
+const routeConnectPreview = await repairApi("/api/project/repair/preview", repairConnectExistingRouteRequest(repairRouteMissingTargetDirectory, routeMissingRevision));
+assert.equal(routeConnectPreview.body.ok, true);
+assert.equal(routeConnectPreview.body.repairPreview.diff[0].path, "routes.0.entrySceneId");
+assert.equal(routeConnectPreview.body.repairPreview.diff[0].after, "scene-opening");
+const routeConnectApply = await repairApi("/api/project/repair/apply", repairConnectExistingRouteRequest(
+  repairRouteMissingTargetDirectory,
+  routeMissingRevision,
+  routeConnectPreview.body.repairPreview.confirmToken
+));
+assert.equal(routeConnectApply.body.ok, true);
+assert.equal(routeConnectApply.body.project.routes[0].entrySceneId, "scene-opening");
+assert.equal(routeConnectApply.body.issues.some((issue) => issue.code === "missing-target"), false);
+
+const repairLastUndoBaseProject = core.createStarterProject({
+  id: "repair-last-undo",
+  title: "Repair Last Undo",
+  premise: "last action undo만 허용한다."
+});
+const repairLastUndoProject = {
+  ...repairLastUndoBaseProject,
+  scenes: repairLastUndoBaseProject.scenes.map((scene) => {
+    if (scene.id === repairLastUndoBaseProject.routes[0].entrySceneId) {
+      return { ...scene, next: "scene-haru-smile" };
+    }
+    if (scene.id === "scene-haru-smile") {
+      return { ...scene, ending: undefined, choices: [], next: undefined };
+    }
+    return scene;
+  })
+};
+const repairLastUndoStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairLastUndoDirectory,
+  project: repairLastUndoProject
+});
+repairLastUndoStore.close();
+const repairLastInitial = await repairApi("/api/project/validate", { projectDirectory: repairLastUndoDirectory });
+const repairLastInitialRevision = repairLastInitial.body.projectRevision;
+const repairLastRemovePreview = await repairApi("/api/project/repair/preview", repairRemoveNextRequest(repairLastUndoDirectory, repairLastInitialRevision));
+const repairLastFirstApply = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(
+  repairLastUndoDirectory,
+  repairLastInitialRevision,
+  repairLastRemovePreview.body.repairPreview.confirmToken
+));
+assert.equal(repairLastFirstApply.body.ok, true);
+const repairLastEndingRevision = repairLastFirstApply.body.projectRevision;
+const repairLastEndingPreview = await repairApi("/api/project/repair/preview", repairSetEndingRequest(repairLastUndoDirectory, repairLastEndingRevision));
+const repairLastSecondApply = await repairApi("/api/project/repair/apply", repairSetEndingRequest(
+  repairLastUndoDirectory,
+  repairLastEndingRevision,
+  repairLastEndingPreview.body.repairPreview.confirmToken
+));
+assert.equal(repairLastSecondApply.body.ok, true);
+const repairUndoOld = await repairApi("/api/project/repair/undo", {
+  projectDirectory: repairLastUndoDirectory,
+  repairHistoryId: repairLastFirstApply.body.repairHistoryEntry.id
+});
+assert.equal(repairUndoOld.body.ok, false);
+assert.equal(repairUndoOld.body.issues.some((issue) => issue.path === "repairHistoryId" && /마지막/.test(issue.message)), true);
+const repairUndoLatest = await repairApi("/api/project/repair/undo", {
+  projectDirectory: repairLastUndoDirectory,
+  repairHistoryId: repairLastSecondApply.body.repairHistoryEntry.id
+});
+assert.equal(repairUndoLatest.body.ok, true);
+assert.equal(Boolean(repairUndoLatest.body.repairHistoryEntry.revertedAt), true);
+assert.deepEqual(repairUndoLatest.body.repairHistory || [], []);
 
 const revisionGuardProject = core.createStarterProject({
   id: "revision-guard",

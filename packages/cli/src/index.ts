@@ -166,6 +166,9 @@ function printCapabilities(): void {
       "run-generation-jobs",
       "list-patch-history",
       "undo-patch",
+      "repair-preview",
+      "repair-apply",
+      "repair-undo",
       "codex-auth-status",
       "codex-login",
       "codex-logout",
@@ -197,7 +200,10 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "preview": "previewProject",
     "export-web": "exportProject",
     "list-generation-jobs": "listGenerationJobs",
-    "run-generation-jobs": "runGenerationJobs"
+    "run-generation-jobs": "runGenerationJobs",
+    "repair-preview": "previewRepair",
+    "repair-apply": "applyRepair",
+    "repair-undo": "undoRepair"
   };
   return actions[command];
 }
@@ -448,6 +454,21 @@ async function run(): Promise<void> {
 
   if (command === "undo-patch") {
     writeJson(await useCases.undoPatch(input));
+    return;
+  }
+
+  if (command === "repair-preview") {
+    writeJson(await useCases.previewRepair(input));
+    return;
+  }
+
+  if (command === "repair-apply") {
+    writeJson(await useCases.applyRepair(input));
+    return;
+  }
+
+  if (command === "repair-undo") {
+    writeJson(await useCases.undoRepair(input));
     return;
   }
 
