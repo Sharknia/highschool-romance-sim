@@ -263,11 +263,14 @@ try {
       replaceCompleted: true
     }
   });
-  assert.equal(imageFailureRun.status, 401);
-  assert.equal(imageFailureRun.body.ok, false);
-  assert.equal(imageFailureRun.body.code, "OAUTH_REQUIRED");
-  assert.match(String(imageFailureRun.body.message), /OAuth 로그인이 필요/);
-  assert.equal(imageFailureRun.body.retryable, true);
+  assert.equal(imageFailureRun.status, 200);
+  assert.equal(imageFailureRun.body.ok, true);
+  assert.equal(imageFailureRun.body.jobs[0].provider, core.MOCK_IMAGE_PACK_ADAPTER);
+  assert.equal(imageFailureRun.body.jobs[0].dummy, true);
+  assert.equal(imageFailureRun.body.jobs[0].fallbackReason, "OAUTH_REQUIRED");
+  assert.equal(imageFailureRun.body.assets[0].source, "mock");
+  assert.equal(imageFailureRun.body.assets[0].provenance.fallbackReason, "OAUTH_REQUIRED");
+  assert.equal(existsSync(join(imageFailureProjectDirectory, "assets", "generated", "asset-image-failure-background.png")), true);
 
   process.env.VN_MAKER_ALPHA_SANDBOX = "1";
   const sandboxApi = webHandlers.createApiRequestHandler();
