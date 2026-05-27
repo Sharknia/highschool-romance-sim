@@ -42,6 +42,8 @@ type ProjectRoute = NonNullable<ProjectData["routes"]>[number];
 type SceneCharacter = NonNullable<ProjectScene["characters"]>[number];
 type SceneChoice = NonNullable<ProjectScene["choices"]>[number];
 
+const dirtyDraftDiscardMessage = "저장하지 않은 씬 변경 사항이 있습니다. 변경 사항을 버리고 이동할까요?";
+
 interface StudioLayout {
   routeWidth: number;
   inspectorWidth: number;
@@ -161,18 +163,30 @@ function cleanText(value?: string): string {
 
 function sceneTitle(scene?: ProjectScene | null): string {
   if (!scene) return "씬 없음";
-  return cleanText(scene.label) || cleanText(scene.id) || "씬";
+  return cleanText(scene.label) || "이름 없는 씬";
+}
+
+function sceneSummaryText(scene?: ProjectScene | null): string {
+  if (!scene) return "선택된 씬 없음";
+  const speaker = cleanText(scene.speaker);
+  const text = cleanText(scene.text).replace(/\s+/g, " ");
+  if (speaker && text) return `${speaker} · ${text.slice(0, 32)}${text.length > 32 ? "..." : ""}`;
+  if (speaker) return `${speaker} 대사`;
+  if (text) return text.slice(0, 36) + (text.length > 36 ? "..." : "");
+  if ((scene.choices || []).length > 0) return `선택지 ${(scene.choices || []).length}개`;
+  if (scene.ending) return `엔딩: ${scene.ending.title || "제목 없음"}`;
+  return "요약 없음";
 }
 
 function assetLabel(asset?: ProjectAsset | null): string {
   if (!asset) return "연결 없음";
-  return asset.label || asset.id || asset.uri || "에셋";
+  return asset.label || "이름 없는 에셋";
 }
 
 function characterLabel(project: ProjectData | null, characterId?: string): string {
   if (!characterId) return "캐릭터 없음";
   const character = (project?.characters || []).find((item) => item.id === characterId);
-  return character?.displayName || character?.sourceHeroineName || character?.id || characterId;
+  return character?.displayName || character?.sourceHeroineName || "이름 없는 캐릭터";
 }
 
 function panelFromValue(value?: string | null): StudioPanelId {
@@ -261,9 +275,21 @@ function generationClassificationTone(classification?: string): "success" | "war
 
 function generationSourceText(log: GenerationResultLog | null): string {
   if (!log) return "결과 없음";
-  if (log.sourceType === "actual") return `actual · ${log.adapter || "adapter unknown"}`;
-  if (log.sourceType === "mock") return `mock · ${log.adapter || "adapter unknown"}`;
-  return `unavailable · ${log.skippedReason || "reason missing"}`;
+  if (log.sourceType === "actual") return `실제 생성 · ${log.adapter || "어댑터 확인 필요"}`;
+  if (log.sourceType === "mock") return `목 생성 · ${log.adapter || "어댑터 확인 필요"}`;
+  return `사용 불가 · ${log.skippedReason || "사유 없음"}`;
+}
+
+function saveStateLabel(saveState: StudioSaveState, dirty: boolean): string {
+  if (saveState === "saving") return "저장 중";
+  if (saveState === "failed") return "저장 실패";
+  if (saveState === "apiFailure") return "API 실패";
+  if (dirty) return "변경됨";
+  return "저장됨";
+}
+
+function problemCountLabel(problemCount: number): string {
+  return problemCount === 0 ? "문제 0건" : `문제 ${problemCount}건`;
 }
 
 function preflightToIssues(preflight: ProjectPreviewPreflight | null): ProjectIssue[] {
@@ -393,11 +419,11 @@ function focusLater(ref: RefObject<HTMLElement | null>): void {
 }
 
 function revisionStatusText(revision: ProjectRevision | null): string {
-  return revision?.revision ? `revision ${revision.revision}` : "revision 확인 필요";
+  return revision?.revision ? `리비전 ${revision.revision}` : "리비전 확인 필요";
 }
 
 export function StudioWorkspace({
-  navigationLabel = "Studio workspace",
+  navigationLabel = "제작 워크스페이스",
   onNavigate,
   onProjectResult,
   postJson,
@@ -413,6 +439,7 @@ export function StudioWorkspace({
   const [layout, setLayout] = useState(() => studioDefaultLayoutForViewport());
   const [layoutStorageReadyKey, setLayoutStorageReadyKey] = useState("");
   const [draftScene, setDraftScene] = useState<ProjectScene | null>(null);
+  const [draftBaseScene, setDraftBaseScene] = useState<ProjectScene | null>(null);
   const [saveState, setSaveState] = useState<StudioSaveState>("idle");
   const [statusText, setStatusText] = useState("수동 제작 워크스페이스를 불러왔습니다.");
   const [fixedPrompts, setFixedPrompts] = useState<TestPromptFixture[]>([]);
@@ -428,6 +455,7 @@ export function StudioWorkspace({
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inspectorFirstFieldRef = useRef<HTMLElement | null>(null);
+  const confirmedSceneChangeRef = useRef<string | null>(null);
   const uxSessionIdRef = useRef(`studio-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
 
   const projectId = project?.id || routeProjectId || "";
@@ -440,10 +468,10 @@ export function StudioWorkspace({
     const routeEntry = scenes.find((scene) => scene.id === activeRoute?.entrySceneId) || null;
     return scenes.find((scene) => scene.id === selectedSceneQuery) || routeEntry || scenes[0] || null;
   }, [activeRoute?.entrySceneId, scenes, selectedSceneQuery]);
-  const originalSceneJson = useMemo(() => serializeScene(selectedScene), [selectedScene]);
   const draftSceneJson = useMemo(() => serializeScene(draftScene), [draftScene]);
-  const contentDirty = useMemo(() => JSON.stringify(sceneContentSnapshot(draftScene)) !== JSON.stringify(sceneContentSnapshot(selectedScene)), [draftSceneJson, originalSceneJson]);
-  const routingDirty = useMemo(() => JSON.stringify(sceneRoutingSnapshot(draftScene)) !== JSON.stringify(sceneRoutingSnapshot(selectedScene)), [draftSceneJson, originalSceneJson]);
+  const draftBaseSceneJson = useMemo(() => serializeScene(draftBaseScene), [draftBaseScene]);
+  const contentDirty = useMemo(() => JSON.stringify(sceneContentSnapshot(draftScene)) !== JSON.stringify(sceneContentSnapshot(draftBaseScene)), [draftSceneJson, draftBaseSceneJson]);
+  const routingDirty = useMemo(() => JSON.stringify(sceneRoutingSnapshot(draftScene)) !== JSON.stringify(sceneRoutingSnapshot(draftBaseScene)), [draftSceneJson, draftBaseSceneJson]);
   const dirty = contentDirty || routingDirty;
   const preflightIssues = useMemo(() => preflightToIssues(previewPreflight), [previewPreflight]);
   const visibleIssues = useMemo(() => mergedStudioIssues(localIssues, preflightIssues), [localIssues, preflightIssues]);
@@ -558,9 +586,26 @@ export function StudioWorkspace({
   }, [layout, layoutStorageReadyKey, projectId, viewport.height, viewport.width]);
 
   useEffect(() => {
+    const currentDraftSceneId = draftBaseScene?.id || null;
+    const nextSceneId = selectedScene?.id || null;
+    const confirmedSceneChange = confirmedSceneChangeRef.current === nextSceneId;
+    if (currentDraftSceneId === nextSceneId) {
+      return;
+    }
+    if (dirty && currentDraftSceneId && !confirmedSceneChange) {
+      const confirmed = window.confirm(dirtyDraftDiscardMessage);
+      if (!confirmed) {
+        setSaveState("dirty");
+        setStatusText("저장하지 않은 씬 변경 사항이 있어 이동을 취소했습니다.");
+        setSearchParams(canonicalStudioQuery(searchParams, { scene: currentDraftSceneId }), { replace: true });
+        return;
+      }
+    }
+    confirmedSceneChangeRef.current = null;
     setDraftScene(cloneScene(selectedScene));
+    setDraftBaseScene(cloneScene(selectedScene));
     setSaveState("idle");
-  }, [selectedScene?.id]);
+  }, [dirty, draftBaseScene?.id, searchParams, selectedScene, selectedScene?.id, setSearchParams]);
 
   useEffect(() => {
     if (saveState === "saving" || saveState === "failed" || saveState === "apiFailure") {
@@ -571,6 +616,18 @@ export function StudioWorkspace({
     } else if (saveState === "dirty") {
       setSaveState("idle");
     }
+  }, [dirty, saveState]);
+
+  useEffect(() => {
+    if (!dirty || saveState === "saving") {
+      return;
+    }
+    function handleBeforeUnload(event: BeforeUnloadEvent): void {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [dirty, saveState]);
 
   useEffect(() => {
@@ -588,8 +645,25 @@ export function StudioWorkspace({
     setSearchParams(next, { replace });
   }
 
-  function selectScene(sceneId?: string): void {
+  function confirmDiscardDirtyDraft(): boolean {
+    if (!dirty) {
+      return true;
+    }
+    const confirmed = window.confirm(dirtyDraftDiscardMessage);
+    if (!confirmed) {
+      setSaveState("dirty");
+      setStatusText("저장하지 않은 씬 변경 사항이 있어 이동을 취소했습니다.");
+      return false;
+    }
+    return true;
+  }
+
+  function selectScene(sceneId?: string, options: { force?: boolean } = {}): void {
     if (!sceneId) return;
+    if (selectedScene?.id !== sceneId) {
+      if (!options.force && !confirmDiscardDirtyDraft()) return;
+      confirmedSceneChangeRef.current = sceneId;
+    }
     updateQuery({ scene: sceneId });
   }
 
@@ -640,7 +714,7 @@ export function StudioWorkspace({
       return;
     }
     setGenerationBusy(true);
-    setGenerationStatus(adapterMode === "actual" ? "actual 생성 경로로 replay 중입니다." : "mock replay 중입니다.");
+    setGenerationStatus(adapterMode === "actual" ? "실제 생성 경로로 재생 중입니다." : "목 생성 경로로 재생 중입니다.");
     recordUXDecisionEvent({
       eventName: "recipe_used",
       inputMode: "fixed_prompt",
@@ -694,7 +768,7 @@ export function StudioWorkspace({
         return;
       }
       setPhase0EventLog(result.eventLog || null);
-      setPhase0Status(`eventLogId ${result.eventLogId || result.eventLog?.eventLogId || "기록 없음"} export 완료`);
+      setPhase0Status(`이벤트 로그 ID ${result.eventLogId || result.eventLog?.eventLogId || "기록 없음"} export 완료`);
     } catch (error) {
       setPhase0Status(`이벤트 로그 export 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -738,7 +812,7 @@ export function StudioWorkspace({
         return;
       }
       setPhase0Report(result.phase0DecisionReport || null);
-      setPhase0Status(`Phase 0 판정 ${result.phase0DecisionReport?.decision || "Iterate"} · eventLogId ${result.phase0DecisionReport?.sessions?.[0]?.eventLogId || "기록 없음"}`);
+      setPhase0Status(`Phase 0 판정 ${result.phase0DecisionReport?.decision || "Iterate"} · 이벤트 로그 ID ${result.phase0DecisionReport?.sessions?.[0]?.eventLogId || "기록 없음"}`);
     } catch (error) {
       setPhase0Status(`Phase 0 판정 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -750,7 +824,7 @@ export function StudioWorkspace({
     return (
       <section>
         <h3>Phase 0 판정</h3>
-        <p className="studio-disabled-note">Ready/Partial/Missing 작업 패키지, fixed/free 분리, eventLogId, preflightResult 기준으로 Go · Iterate · Stop/Rethink를 계산합니다.</p>
+        <p className="studio-disabled-note">Ready/Partial/Missing 작업 패키지, 고정/자유 입력 분리, 이벤트 로그 ID, 프리플라이트 결과 기준으로 Go · Iterate · Stop/Rethink를 계산합니다.</p>
         <div className="button-row">
           <Button disabled={phase0Busy} icon={<ListChecks size={16} />} onClick={() => void exportCurrentUXEventLog()}>
             이벤트 로그 export
@@ -761,10 +835,10 @@ export function StudioWorkspace({
         </div>
         <dl className="summary-list">
           <div><dt>상태</dt><dd>{phase0Status}</dd></div>
-          <div><dt>eventLogId</dt><dd>{phase0Report?.sessions?.[0]?.eventLogId || phase0EventLog?.eventLogId || "export 전"}</dd></div>
+          <div><dt>이벤트 로그 ID</dt><dd>{phase0Report?.sessions?.[0]?.eventLogId || phase0EventLog?.eventLogId || "export 전"}</dd></div>
           <div><dt>판정</dt><dd>{phase0Report?.decision || "계산 전"}</dd></div>
-          <div><dt>고정/자유 입력</dt><dd>fixed {phase0Report?.fixedInputMetrics?.sessionCount ?? 0} · free {phase0Report?.freeInputFindings?.sessionCount ?? 0}</dd></div>
-          <div><dt>preflightResult</dt><dd>{phase0Report?.conditionRuntime?.actualPreviewCanRun ? "actual preview evidence 있음" : "actual preview evidence 확인 전"}</dd></div>
+          <div><dt>고정/자유 입력</dt><dd>고정 {phase0Report?.fixedInputMetrics?.sessionCount ?? 0} · 자유 {phase0Report?.freeInputFindings?.sessionCount ?? 0}</dd></div>
+          <div data-contract-copy="preflightResult"><dt>프리플라이트 결과</dt><dd>{phase0Report?.conditionRuntime?.actualPreviewCanRun ? "실제 프리뷰 근거 있음" : "실제 프리뷰 근거 확인 전"}</dd></div>
         </dl>
         {phase0Report?.workPackages?.length ? (
           <ul className="studio-readonly-list">
@@ -776,8 +850,8 @@ export function StudioWorkspace({
             ))}
           </ul>
         ) : null}
-        <DiagnosticDrawer summary="Phase 0 decision report">
-          <pre>{phase0Report ? JSON.stringify({ phase0DecisionReport: phase0Report, eventLog: phase0EventLog }, null, 2) : "Phase 0 decision report 없음"}</pre>
+        <DiagnosticDrawer summary="Phase 0 판정 원문">
+          <pre data-contract-copy="Phase 0 decision report">{phase0Report ? JSON.stringify({ phase0DecisionReport: phase0Report, eventLog: phase0EventLog }, null, 2) : "Phase 0 판정 원문 없음"}</pre>
         </DiagnosticDrawer>
       </section>
     );
@@ -845,7 +919,12 @@ export function StudioWorkspace({
     onProjectResult(result);
     const nextSelectedSceneId = resultSelectedSceneId(result);
     if (nextSelectedSceneId) {
-      selectScene(nextSelectedSceneId);
+      selectScene(nextSelectedSceneId, { force: true });
+    } else if (draftScene) {
+      setDraftBaseScene(cloneScene(draftScene));
+    }
+    if (nextSelectedSceneId && nextSelectedSceneId === selectedScene?.id && draftScene) {
+      setDraftBaseScene(cloneScene(draftScene));
     }
     setSaveState("saved");
     setStatusText(result.message || fallbackStatus);
@@ -865,10 +944,15 @@ export function StudioWorkspace({
     }
     const apiFailure = isApiFailure(result);
     setSaveState(apiFailure ? "apiFailure" : "failed");
-    setStatusText(`${apiFailure ? "API failure" : "저장 실패"}: ${result.message || result.error || fallbackStatus}`);
+    setStatusText(`${apiFailure ? "API 실패" : "저장 실패"}: ${result.message || result.error || fallbackStatus}`);
   }
 
   async function validateStudio(): Promise<ProjectRevision | null> {
+    if (dirty) {
+      setSaveState("dirty");
+      setStatusText("저장하지 않은 씬 변경 사항이 있습니다. 저장 후 검증을 실행하세요.");
+      return null;
+    }
     setStatusText("검증을 실행하는 중입니다.");
     try {
       const result = await postJson("/api/project/validate", { projectDirectory });
@@ -882,10 +966,10 @@ export function StudioWorkspace({
       }
       if (isApiFailure(result)) {
         setSaveState("apiFailure");
-        setStatusText(`API failure: ${result.message || result.error || "검증을 실행하지 못했습니다."}`);
+        setStatusText(`API 실패: ${result.message || result.error || "검증을 실행하지 못했습니다."}`);
         return null;
       }
-      setStatusText(resultIssues(result).length > 0 ? "검증 stale: 문제 확인 결과가 갱신되었습니다." : "검증 완료. 문제 없음.");
+      setStatusText(resultIssues(result).length > 0 ? "검증 갱신 필요: 문제 확인 결과가 갱신되었습니다." : "검증 완료. 문제 없음.");
       if (resultIssues(result).some((issue) => issue.severity === "error")) {
         recordUXDecisionEvent({
           eventName: "validation_failed",
@@ -896,7 +980,7 @@ export function StudioWorkspace({
       return nextRevision;
     } catch (error) {
       setSaveState("apiFailure");
-      setStatusText(`API failure: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -934,7 +1018,7 @@ export function StudioWorkspace({
       applySuccessfulResult(result, "씬 저장 완료.");
     } catch (error) {
       setSaveState("apiFailure");
-      setStatusText(`API failure: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -960,11 +1044,14 @@ export function StudioWorkspace({
       applySuccessfulResult(result, fallbackStatus);
     } catch (error) {
       setSaveState("apiFailure");
-      setStatusText(`API failure: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   async function createStartScene(): Promise<void> {
+    if (!confirmDiscardDirtyDraft()) {
+      return;
+    }
     const route = activeRoute as ProjectRoute | null;
     const seedLabel = route?.title ? `${route.title} 시작` : "시작 씬";
     await insertScene(newScene(project, seedLabel), { link: { type: "none" } }, "시작 씬 만들기 완료.");
@@ -973,6 +1060,9 @@ export function StudioWorkspace({
   async function addSceneAfterCurrent(): Promise<void> {
     if (!selectedScene?.id) {
       setStatusText("기준 씬을 먼저 선택해야 합니다.");
+      return;
+    }
+    if (!confirmDiscardDirtyDraft()) {
       return;
     }
     await insertScene(
@@ -990,19 +1080,22 @@ export function StudioWorkspace({
       setStatusText("기준 씬을 먼저 선택해야 합니다.");
       return;
     }
+    if (!confirmDiscardDirtyDraft()) {
+      return;
+    }
     await insertScene(
-      newScene(project, "선택지 target 생성", draftScene?.speaker || ""),
+      newScene(project, "선택지 대상 생성", draftScene?.speaker || ""),
       {
         link: { choiceText: "새 선택지", type: "choice" },
         sourceSceneId: selectedScene.id
       },
-      "선택지 target 생성 완료."
+      "선택지 대상 생성 완료."
     );
   }
 
   async function linkExistingTarget(link: { choiceId?: string; choiceText?: string; targetSceneId: string; type: "choice" | "next" }): Promise<void> {
     if (!selectedScene?.id || !link.targetSceneId) {
-      setStatusText("source와 target 씬을 모두 선택해야 합니다.");
+      setStatusText("출발 씬과 대상 씬을 모두 선택해야 합니다.");
       return;
     }
     const expectedProjectRevision = await ensureRevision();
@@ -1029,7 +1122,7 @@ export function StudioWorkspace({
       applySuccessfulResult(result, "연결 저장 완료.");
     } catch (error) {
       setSaveState("apiFailure");
-      setStatusText(`API failure: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1060,20 +1153,24 @@ export function StudioWorkspace({
       applySuccessfulResult(result, ending ? "엔딩 저장 완료." : "엔딩 해제 완료.");
     } catch (error) {
       setSaveState("apiFailure");
-      setStatusText(`API failure: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   function handleProblemFocus(issue: ProjectIssue): void {
     const sceneId = findIssueSceneId(issue, project);
     const nextPanel = issuePanel(issue);
+    const nextSceneId = sceneId || selectedScene?.id || "";
+    if (nextSceneId && nextSceneId !== selectedScene?.id && !confirmDiscardDirtyDraft()) {
+      return;
+    }
     recordUXDecisionEvent({
       eventName: "help_opened",
       helpChannel: "static_tutorial",
       issueCode: issue.code,
       outcome: "opened"
     });
-    updateQuery({ panel: nextPanel, scene: sceneId || selectedScene?.id || "" });
+    updateQuery({ panel: nextPanel, scene: nextSceneId });
     if (nextPanel === "scene") {
       focusLater(scriptTextareaRef);
     } else {
@@ -1092,7 +1189,7 @@ export function StudioWorkspace({
     return (
       <section className="studio-unsupported" data-testid="studio-unsupported">
         <div>
-          <p className="eyebrow">Studio unsupported viewport</p>
+          <p className="eyebrow">제작 화면 미지원</p>
           <h3>창을 넓혀 데스크톱 환경에서 열어주세요.</h3>
           <p>제작 워크스페이스는 1280x720 이상에서 사용할 수 있습니다.</p>
           <p className="page-muted">현재 창: {viewport.width}x{viewport.height}</p>
@@ -1117,20 +1214,20 @@ export function StudioWorkspace({
 
   return (
     <section aria-label={navigationLabel} className="studio-workspace" data-testid="studio-workspace" style={rootStyle}>
-      <header aria-label="Top command bar" className="studio-command-bar">
+      <header aria-label="상단 명령 바" className="studio-command-bar">
         <div className="studio-command-main">
           <strong>{project?.title || "VN Maker Studio"}</strong>
           <StatusChip tone={saveState === "failed" || saveState === "apiFailure" ? "danger" : dirty ? "warning" : "success"}>
-            {saveState === "saving" ? "saving" : saveState === "failed" ? "저장 실패" : saveState === "apiFailure" ? "API failure" : dirty ? "dirty" : "saved"}
+            {saveStateLabel(saveState, dirty)}
           </StatusChip>
-          <StatusChip tone={problemCount > 0 ? (errorCount > 0 ? "danger" : "warning") : "success"}>Problems {problemCount}</StatusChip>
+          <StatusChip tone={problemCount > 0 ? (errorCount > 0 ? "danger" : "warning") : "success"}>{problemCountLabel(problemCount)}</StatusChip>
           <span className="studio-command-status">{statusText}</span>
         </div>
         <div className="studio-command-actions">
           <Button disabled={!draftScene || saveState === "saving" || !contentDirty} icon={<Save size={16} />} onClick={() => void saveDraftScene()} variant="primary">
             저장
           </Button>
-          <Button disabled={saveState === "saving"} icon={<RefreshCw size={16} />} onClick={() => void validateStudio()}>
+          <Button disabled={saveState === "saving" || dirty} icon={<RefreshCw size={16} />} onClick={() => void validateStudio()} title={dirty ? "저장 후 검증을 실행하세요." : "검증 실행"}>
             검증
           </Button>
           <Button disabled={Boolean(previewDisabledReason)} icon={<Play size={16} />} onClick={() => onNavigate(`/projects/${projectId}/preview`)} title={previewDisabledReason || "프리뷰로 이동"}>
@@ -1139,12 +1236,13 @@ export function StudioWorkspace({
           <Button icon={<Settings size={16} />} onClick={() => updateLayout(studioDefaultLayoutForViewport(viewport.width, viewport.height))} variant="ghost">
             레이아웃 리셋
           </Button>
-          <DiagnosticDrawer summary="Diagnostics">
-            <dl className="summary-list">
-              <div><dt>query</dt><dd>?scene={selectedScene?.id || "none"} · ?panel={selectedPanel}</dd></div>
-              <div><dt>revision</dt><dd>{revisionStatusText(localRevision)}</dd></div>
-              <div><dt>preview disabled reason</dt><dd>{previewDisabledReason || "없음"}</dd></div>
-              <div><dt>검증 stale</dt><dd>{dirty ? "저장되지 않은 변경으로 stale 가능" : "현재 draft 기준"}</dd></div>
+          <DiagnosticDrawer summary="진단">
+            <dl className="summary-list" data-contract-copy="진단 API 실패">
+              <div><dt>쿼리</dt><dd>?scene={selectedScene?.id || "none"} · ?panel={selectedPanel}</dd></div>
+              <div><dt>리비전</dt><dd>{revisionStatusText(localRevision)}</dd></div>
+              <div><dt>프리뷰 제한 사유</dt><dd>{previewDisabledReason || "없음"}</dd></div>
+              <div><dt>진단 범위</dt><dd>진단 패널</dd></div>
+              <div><dt>검증 최신성</dt><dd>{dirty ? "저장되지 않은 변경으로 갱신 필요" : "현재 초안 기준"}</dd></div>
             </dl>
             <div className="studio-layout-controls" aria-label="Studio layout settings">
               <label>
@@ -1165,7 +1263,7 @@ export function StudioWorkspace({
       </header>
 
       <div className="studio-body">
-        <aside aria-label="Route flow map" className={`studio-route-map ${layout.routeCollapsed ? "collapsed" : ""}`}>
+        <aside aria-label="루트 맵" className={`studio-route-map ${layout.routeCollapsed ? "collapsed" : ""}`}>
           <div className="studio-panel-toolbar">
             <strong>루트 맵</strong>
             <Button icon={layout.routeCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />} iconOnly onClick={() => updateLayout({ routeCollapsed: !layout.routeCollapsed })} title="루트 패널 접기" />
@@ -1187,12 +1285,12 @@ export function StudioWorkspace({
                           <span className="studio-node-index">{index + 1}</span>
                           <span>
                             <strong>{sceneTitle(scene)}</strong>
-                            <small>{scene.id}</small>
+                            <small>{sceneSummaryText(scene)}</small>
                           </span>
                           <span className="studio-node-badges">
-                            {activeRoute?.entrySceneId === scene.id ? <StatusChip tone="success">Start</StatusChip> : null}
-                            {scene.ending ? <StatusChip tone="warning">Ending</StatusChip> : null}
-                            {(scene.choices || []).length > 0 ? <StatusChip>Choices {(scene.choices || []).length}</StatusChip> : null}
+                            {activeRoute?.entrySceneId === scene.id ? <StatusChip tone="success">시작</StatusChip> : null}
+                            {scene.ending ? <StatusChip tone="warning">엔딩</StatusChip> : null}
+                            {(scene.choices || []).length > 0 ? <StatusChip>선택지 {(scene.choices || []).length}</StatusChip> : null}
                             {sceneProblemCount > 0 ? <StatusChip tone="danger">{sceneProblemCount}</StatusChip> : null}
                           </span>
                         </button>
@@ -1212,7 +1310,7 @@ export function StudioWorkspace({
         </aside>
 
         <main className="studio-center">
-          <section aria-label="Stage preview" className="studio-stage">
+          <section aria-label="스테이지 미리보기" className="studio-stage">
             <div className="studio-stage-header">
               <div>
                 <strong>스테이지 미리보기</strong>
@@ -1223,7 +1321,7 @@ export function StudioWorkspace({
                   현재 씬 뒤 새 씬
                 </Button>
                 <Button disabled={!selectedScene || Boolean(draftScene?.ending) || Boolean(draftScene?.next) || saveState === "saving"} icon={<GitBranch size={16} />} onClick={() => void createChoiceTargetScene()}>
-                  선택지 target 생성
+                  선택지 대상 생성
                 </Button>
               </div>
             </div>
@@ -1247,31 +1345,31 @@ export function StudioWorkspace({
                     {(draftScene?.choices || []).map((choice, index) => <span key={choice.id || index}>{choice.text || "선택지"}</span>)}
                   </div>
                 ) : null}
-                {draftScene?.ending ? <StatusChip tone="warning">Ending · {draftScene.ending.title || draftScene.ending.id}</StatusChip> : null}
+                {draftScene?.ending ? <StatusChip tone="warning">엔딩 · {draftScene.ending.title || "제목 없음"}</StatusChip> : null}
               </div>
             </div>
           </section>
 
-          <section aria-label="Script editor" className="studio-script-editor">
+          <section aria-label="스크립트 편집기" className="studio-script-editor">
             <header>
               <div>
                 <strong>스크립트 편집기</strong>
-                <span>{selectedScene?.id || "선택된 씬 없음"}</span>
+                <span>{sceneSummaryText(draftScene)}</span>
               </div>
-              <StatusChip tone={dirty ? "warning" : "success"}>{dirty ? "dirty" : "clean"}</StatusChip>
+              <StatusChip tone={dirty ? "warning" : "success"}>{dirty ? "변경됨" : "저장됨"}</StatusChip>
             </header>
             {draftScene ? (
               <div className="studio-editor-grid">
                 <label className="field-row">
-                  <span>label</span>
+                  <span>라벨</span>
                   <input onChange={(event) => patchDraftScene({ label: event.target.value })} value={draftScene.label || ""} />
                 </label>
                 <label className="field-row">
-                  <span>speaker</span>
+                  <span>화자</span>
                   <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} value={draftScene.speaker || ""} />
                 </label>
                 <label className="field-row studio-editor-text">
-                  <span>text</span>
+                  <span>본문</span>
                   <textarea ref={scriptTextareaRef} onChange={(event) => patchDraftScene({ text: event.target.value })} value={draftScene.text || ""} />
                 </label>
               </div>
@@ -1281,7 +1379,7 @@ export function StudioWorkspace({
           </section>
         </main>
 
-        <aside aria-label="Inspector" className={`studio-inspector ${layout.inspectorCollapsed ? "collapsed" : ""}`}>
+        <aside aria-label="인스펙터" className={`studio-inspector ${layout.inspectorCollapsed ? "collapsed" : ""}`}>
           <div className="studio-panel-toolbar">
             <strong>인스펙터</strong>
             <Button icon={layout.inspectorCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />} iconOnly onClick={() => updateLayout({ inspectorCollapsed: !layout.inspectorCollapsed })} title="인스펙터 접기" />
@@ -1301,27 +1399,23 @@ export function StudioWorkspace({
                     <section>
                       <h3>씬</h3>
                       <label className="field-row">
-                        <span>id</span>
-                        <input readOnly ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.id || ""} />
+                        <span>라벨</span>
+                        <input onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.label || ""} />
                       </label>
                       <label className="field-row">
-                        <span>label</span>
-                        <input onChange={(event) => patchDraftScene({ label: event.target.value })} value={draftScene.label || ""} />
-                      </label>
-                      <label className="field-row">
-                        <span>speaker</span>
+                        <span>화자</span>
                         <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} value={draftScene.speaker || ""} />
                       </label>
                       <label className="field-row">
-                        <span>ending title</span>
+                        <span>엔딩 제목</span>
                         <input onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal" }), title: event.target.value } })} value={draftScene.ending?.title || ""} />
                       </label>
                       <label className="field-row">
-                        <span>ending kind</span>
+                        <span>엔딩 종류</span>
                         <select onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, title: "새 엔딩" }), kind: event.target.value } })} value={draftScene.ending?.kind || "normal"}>
-                          <option value="normal">normal</option>
-                          <option value="good">good</option>
-                          <option value="bad">bad</option>
+                          <option value="normal">일반</option>
+                          <option value="good">좋음</option>
+                          <option value="bad">나쁨</option>
                         </select>
                       </label>
                       <div className="button-row">
@@ -1332,14 +1426,18 @@ export function StudioWorkspace({
                           엔딩 해제
                         </Button>
                       </div>
+                      <details className="studio-technical-details">
+                        <summary>기술 정보</summary>
+                        <label className="field-row"><span>씬 ID</span><input readOnly value={draftScene.id || ""} /></label>
+                      </details>
                     </section>
                   ) : null}
 
                   {selectedPanel === "choices" ? (
                     <section>
-                      <h3>Next 연결</h3>
+                      <h3>다음 연결</h3>
                       <label className="field-row">
-                        <span>next target</span>
+                        <span>다음 대상</span>
                         <select
                           disabled={(draftScene.choices || []).length > 0 || Boolean(draftScene.ending)}
                           onChange={(event) => patchDraftScene({ next: event.target.value || undefined })}
@@ -1351,7 +1449,7 @@ export function StudioWorkspace({
                         </select>
                       </label>
                       <Button disabled={!draftScene.next || saveState === "saving"} icon={<GitBranch size={16} />} onClick={() => void linkExistingTarget({ targetSceneId: draftScene.next || "", type: "next" })}>
-                        next 연결 저장
+                        다음 연결 저장
                       </Button>
                       <h3>선택지 연결</h3>
                       <div className="button-row">
@@ -1359,18 +1457,18 @@ export function StudioWorkspace({
                           선택지 추가
                         </Button>
                         <Button disabled={Boolean(draftScene.next) || Boolean(draftScene.ending) || saveState === "saving"} icon={<GitBranch size={16} />} onClick={() => void createChoiceTargetScene()}>
-                          선택지 target 생성
+                          선택지 대상 생성
                         </Button>
                       </div>
                       <ul className="studio-choice-list">
                         {(draftScene.choices || []).map((choice, index) => (
                           <li key={choice.id || index}>
                             <label className="field-row">
-                              <span>choice text</span>
+                              <span>선택지 문구</span>
                               <input onChange={(event) => updateChoice(index, { text: event.target.value })} value={choice.text || ""} />
                             </label>
                             <label className="field-row">
-                              <span>choice target</span>
+                              <span>선택지 대상</span>
                               <select onChange={(event) => updateChoice(index, { next: event.target.value })} value={choice.next || ""}>
                                 <option value="">없음</option>
                                 {scenes.filter((scene) => scene.id !== draftScene.id).map((scene) => <option key={scene.id} value={scene.id}>{sceneTitle(scene)}</option>)}
@@ -1391,7 +1489,7 @@ export function StudioWorkspace({
                     <section data-condition-runtime-support={conditionSupportMode}>
                       <h3>조건/효과 후보 검토</h3>
                       <p className="studio-disabled-note">
-                        condition runtime support가 #105에서 확정되기 전까지 편집할 수 없습니다. 현재 support false입니다. {conditionStrictPreviewText}
+                        조건 판정 런타임 지원이 #105에서 확정되기 전까지 편집할 수 없습니다. 현재 미지원 상태입니다. {conditionStrictPreviewText}
                       </p>
                       <ul className="studio-readonly-list">
                         {(draftScene.choices || []).map((choice, index) => {
@@ -1399,7 +1497,7 @@ export function StudioWorkspace({
                           const hasEffects = Boolean(choice.effects && Object.keys(choice.effects).length);
                           return (
                             <li key={choice.id || index}>
-                              <strong>{choice.text || choice.id || "선택지"}</strong>
+                              <strong>{choice.text || "선택지"}</strong>
                               <span>조건 후보 {hasCondition ? "있음" : "없음"} · 효과 후보 {hasEffects ? "있음" : "없음"}</span>
                             </li>
                           );
@@ -1418,7 +1516,7 @@ export function StudioWorkspace({
                     <section>
                       <h3>에셋</h3>
                       <label className="field-row">
-                        <span>background</span>
+                        <span>배경</span>
                         <select onChange={(event) => patchDraftScene({ backgroundAssetId: event.target.value || undefined })} ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.backgroundAssetId || ""}>
                           <option value="">연결 없음</option>
                           {backgroundAssets.map((asset) => <option key={asset.id || asset.uri} value={asset.id || ""}>{assetLabel(asset)}</option>)}
@@ -1441,18 +1539,18 @@ export function StudioWorkspace({
                         {(draftScene.characters || []).map((character, index) => (
                           <li key={`${character.characterId || "character"}-${index}`}>
                             <label className="field-row">
-                              <span>character</span>
+                              <span>캐릭터</span>
                               <select onChange={(event) => updateCharacter(index, { characterId: event.target.value })} value={character.characterId || ""}>
                                 <option value="">없음</option>
                                 {(project?.characters || []).map((item) => <option key={item.id} value={item.id}>{characterLabel(project, item.id)}</option>)}
                               </select>
                             </label>
                             <label className="field-row">
-                              <span>position</span>
+                              <span>위치</span>
                               <select onChange={(event) => updateCharacter(index, { position: event.target.value })} value={character.position || "center"}>
-                                <option value="left">left</option>
-                                <option value="center">center</option>
-                                <option value="right">right</option>
+                                <option value="left">왼쪽</option>
+                                <option value="center">중앙</option>
+                                <option value="right">오른쪽</option>
                               </select>
                             </label>
                             <Button onClick={() => removeCharacterDisplay(index)} variant="ghost">삭제</Button>
@@ -1465,7 +1563,7 @@ export function StudioWorkspace({
                   {selectedPanel === "validation" ? (
                     <section>
                       <h3>검증</h3>
-                      <p className="studio-disabled-note">저장 실패, 검증 stale, API failure 상태를 여기서 확인합니다.</p>
+                      <p className="studio-disabled-note">저장 실패, 검증 갱신 필요, API 실패 상태를 여기서 확인합니다.</p>
                       <ul className="studio-problem-list compact">
                         {visibleIssues.map((issue, index) => (
                           <li key={`${issue.path || issue.code || "issue"}-${index}`}>
@@ -1478,7 +1576,7 @@ export function StudioWorkspace({
                       </ul>
                       <h3>생성 결과 로그</h3>
                       <label className="field-row">
-                        <span>fixed prompt</span>
+                        <span>고정 프롬프트</span>
                         <select onChange={(event) => setSelectedFixedPromptId(event.target.value)} value={selectedFixedPrompt?.promptId || ""}>
                           {fixedPrompts.map((fixture) => (
                             <option key={fixture.promptId} value={fixture.promptId}>{fixture.promptId}</option>
@@ -1488,17 +1586,17 @@ export function StudioWorkspace({
                       <p className="studio-disabled-note">{selectedFixedPrompt?.promptText || generationStatus}</p>
                       <div className="button-row">
                         <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<Play size={16} />} onClick={() => void replayFixedPrompt("actual")} variant="primary">
-                          actual replay
+                          실제 재생
                         </Button>
                         <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<RefreshCw size={16} />} onClick={() => void replayFixedPrompt("mock")}>
-                          mock replay
+                          목 재생
                         </Button>
                       </div>
                       <dl className="summary-list">
                         <div><dt>상태</dt><dd>{generationStatus}</dd></div>
-                        <div><dt>classification</dt><dd><StatusChip tone={generationClassificationTone(generationLog?.classification)}>{generationLog?.classification || "not run"}</StatusChip></dd></div>
-                        <div><dt>source</dt><dd>{generationSourceText(generationLog)}</dd></div>
-                        <div><dt>resultId</dt><dd>{generationLog?.resultId || "기록 없음"}</dd></div>
+                        <div><dt>분류</dt><dd><StatusChip tone={generationClassificationTone(generationLog?.classification)}>{generationLog?.classification || "실행 전"}</StatusChip></dd></div>
+                        <div><dt>소스</dt><dd>{generationSourceText(generationLog)}</dd></div>
+                        <div><dt>결과 ID</dt><dd>{generationLog?.resultId || "기록 없음"}</dd></div>
                       </dl>
                       {renderPhase0ProtocolPanel()}
                     </section>
@@ -1516,11 +1614,11 @@ export function StudioWorkspace({
         </aside>
       </div>
 
-      <section aria-label="Problems" className={`studio-problems-panel ${layout.problemsCollapsed ? "collapsed" : ""}`}>
+      <section aria-label="문제 패널" className={`studio-problems-panel ${layout.problemsCollapsed ? "collapsed" : ""}`}>
         <div className="studio-panel-toolbar">
           <strong>문제 패널</strong>
           <div className="button-row">
-            <Button icon={<ListChecks size={16} />} onClick={() => void validateStudio()} variant="ghost">
+            <Button disabled={saveState === "saving" || dirty} icon={<ListChecks size={16} />} onClick={() => void validateStudio()} title={dirty ? "저장 후 검증을 실행하세요." : "다시 검증"} variant="ghost">
               다시 검증
             </Button>
             <Button icon={<AlertTriangle size={16} />} iconOnly onClick={() => updateLayout({ problemsCollapsed: !layout.problemsCollapsed })} title="문제 패널 접기" />

@@ -7,6 +7,18 @@
 - 기준 URL: `https://www.notion.so/36d45e8947528196a238c920455faa75`
 - 이번 최종 패스에서 Notion connector 재조회는 120초 timeout으로 실패했다. 요구사항은 같은 목표 수행 중 앞서 조회한 원문 기준으로 대조했다.
 
+## 비교 기준 요약
+
+| 기준 | 판정 기준 |
+| --- | --- |
+| 진입 route | `/projects/:projectId/studio`가 상세 shell chrome 없이 Studio workspace를 직접 렌더링한다. |
+| 최소 viewport | `1280x720` 이상은 제작 workspace, 그보다 좁은 화면은 workspace 없이 미지원 안내를 보여준다. |
+| desktop shell | 왼쪽 56px app rail 뒤에서 Studio가 `100vh`로 시작하고 기존 topbar/page padding을 노출하지 않는다. |
+| 주요 해상도 | `1280x720`, `1366x768`, `1440x900`, `1920x1080`에서 가로/세로 overflow 없이 작업 영역이 들어간다. |
+| 패널 기본값 | route/inspector/problems/command bar 크기가 해상도별 기획값과 일치한다. |
+| 주요 문구 | 루트 맵, 스테이지 미리보기, 스크립트 편집기, 인스펙터, 문제 패널이 한국어 heading으로 보인다. |
+| 제작자 기본 정보 | 기본 화면은 씬 ID 같은 기술 식별자보다 라벨, 화자, 장면 요약, 문제 상태를 우선 노출한다. |
+
 ## 검토 범위
 
 - `/projects/:projectId/studio` 제작 워크스페이스 스크린샷과 기획서의 주요 해상도 기준을 비교했다.

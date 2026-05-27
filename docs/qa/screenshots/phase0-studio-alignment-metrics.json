@@ -1,6 +1,6 @@
 {
-  "projectId": "alignment-final-mpo81vra",
-  "url": "http://127.0.0.1:5174/projects/alignment-final-mpo81vra/studio",
+  "projectId": "alignment-review-mpo9af18",
+  "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio",
   "results": [
     {
       "label": "1280x720",
@@ -8,7 +8,7 @@
         "width": 1280,
         "height": 720
       },
-      "url": "http://127.0.0.1:5174/projects/alignment-final-mpo81vra/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
       "rects": {
         "workspace": {
           "x": 56,
@@ -108,12 +108,12 @@
           "right": 925
         },
         "commandStatus": {
-          "x": 405,
+          "x": 371,
           "y": 17,
-          "width": 285,
+          "width": 392,
           "height": 21,
           "bottom": 38,
-          "right": 690
+          "right": 763
         }
       },
       "horizontalOverflow": false,
@@ -137,7 +137,7 @@
         "width": 1366,
         "height": 768
       },
-      "url": "http://127.0.0.1:5174/projects/alignment-final-mpo81vra/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
       "rects": {
         "workspace": {
           "x": 56,
@@ -237,12 +237,12 @@
           "right": 991
         },
         "commandStatus": {
-          "x": 409,
+          "x": 371,
           "y": 17,
-          "width": 367,
+          "width": 478,
           "height": 21,
           "bottom": 38,
-          "right": 776
+          "right": 849
         }
       },
       "horizontalOverflow": false,
@@ -266,7 +266,7 @@
         "width": 1440,
         "height": 900
       },
-      "url": "http://127.0.0.1:5174/projects/alignment-final-mpo81vra/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
       "rects": {
         "workspace": {
           "x": 56,
@@ -366,12 +366,12 @@
           "right": 1025
         },
         "commandStatus": {
-          "x": 409,
+          "x": 371,
           "y": 17,
-          "width": 441,
+          "width": 552,
           "height": 21,
           "bottom": 38,
-          "right": 850
+          "right": 923
         }
       },
       "horizontalOverflow": false,
@@ -395,7 +395,7 @@
         "width": 1920,
         "height": 1080
       },
-      "url": "http://127.0.0.1:5174/projects/alignment-final-mpo81vra/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
       "rects": {
         "workspace": {
           "x": 56,
@@ -495,12 +495,12 @@
           "right": 1448
         },
         "commandStatus": {
-          "x": 409,
+          "x": 371,
           "y": 17,
-          "width": 921,
+          "width": 1032,
           "height": 21,
           "bottom": 38,
-          "right": 1330
+          "right": 1403
         }
       },
       "horizontalOverflow": false,
@@ -524,7 +524,7 @@
         "width": 390,
         "height": 844
       },
-      "url": "http://127.0.0.1:5174/projects/alignment-final-mpo81vra/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
       "rects": {
         "workspace": null,
         "unsupported": {
