@@ -180,6 +180,140 @@ export interface UXDecisionEventLogExportDto {
   events: UXDecisionEventDto[];
 }
 
+export type Phase0WorkPackageStatus = "Ready" | "Partial" | "Missing";
+export type Phase0Decision = "Go" | "Iterate" | "Stop/Rethink";
+export type Phase0TaskInputMode = "fixed_prompt" | "free_input" | "manual" | "generated" | string;
+
+export interface Phase0WorkPackageStatusDto {
+  id: string;
+  label: string;
+  status: Phase0WorkPackageStatus;
+  evidence: string[];
+  missing: string[];
+}
+
+export interface Phase0ParticipantResultDto {
+  participantIdHash: string;
+  sessionId: string;
+  inputMode: Phase0TaskInputMode;
+  taskId?: string;
+  promptId?: string;
+  vnToolCompletedCount?: number;
+  professionalDeveloper?: boolean;
+  regularScriptingWork?: boolean;
+  storyCreatorLastYear?: boolean;
+  noviceNonDevStoryCreator?: boolean;
+  completed?: boolean;
+  reachedValidPreview?: boolean;
+  usedModeratorHint?: boolean;
+  usedStaticTutorial?: boolean;
+  abandoned?: boolean;
+  blockingErrorCount?: number;
+  completionMs?: number;
+  wrongMentalModel?: boolean;
+  dataLossAnxiety?: boolean;
+  criticalIncidentCause?: string;
+  actualPreview?: boolean;
+  mockPreview?: boolean;
+  notes?: string;
+}
+
+export interface Phase0GuidedRepairEvidenceDto {
+  ready: boolean;
+  issueCode?: string;
+  repairActionId?: string;
+  revisionBefore?: ProjectRevisionDto;
+  revisionAfter?: ProjectRevisionDto;
+  preflightResult?: UXDecisionPreflightResultDto;
+  eventLogId?: string;
+}
+
+export interface Phase0SessionEvidenceDto {
+  sessionId: string;
+  eventLogId?: string;
+  participantIdHash?: string;
+  noviceNonDevStoryCreator: boolean;
+  inputMode: Phase0TaskInputMode;
+  taskId?: string;
+  promptId?: string;
+  eventNames: UXDecisionEventName[];
+  completed: boolean;
+  reachedValidPreview: boolean;
+  usedModeratorHint: boolean;
+  usedStaticTutorial: boolean;
+  abandoned: boolean;
+  stall90s: boolean;
+  blockingErrorCount: number;
+  completionMs?: number;
+  wrongMentalModel: boolean;
+  dataLossAnxiety: boolean;
+  criticalIncidentCause?: string;
+  actualPreview: boolean;
+  mockPreview: boolean;
+  previewPreflightCanRun: boolean;
+  conditionPreviewStatus: ConditionRuntimePreviewStatus;
+  guidedRepairEvidence?: Phase0GuidedRepairEvidenceDto;
+}
+
+export interface Phase0MetricDto {
+  inputMode: Phase0TaskInputMode;
+  sessionCount: number;
+  completedCount: number;
+  completionRate: number;
+  guidedRepairCompletionRate: number;
+  noviceNonDevStoryCreatorCount: number;
+  majorityValidPreviewWithoutHint: boolean;
+  medianCompletionMinutes: number | null;
+  averageBlockingErrors: number;
+  helpRecoveryRate: number;
+  sameCauseCriticalIncidentCount: number;
+  fakeOrMockPreviewCount: number;
+}
+
+export interface Phase0DenominatorDto {
+  totalSessions: number;
+  failedSessions: number;
+  abandonedSessions: number;
+  stall90sSessions: number;
+  staticTutorialRecoverySessions: number;
+  moderatorHintSessions: number;
+  includedFailedAbandonedAndHelpRecovery: boolean;
+}
+
+export interface Phase0ConditionRuntimeDecisionDto {
+  supportFlag: ConditionRuntimeSupportFlag;
+  supported: boolean;
+  strictPreviewStatus: ConditionRuntimePreviewStatus;
+  conditionPreviewCountsAsStrictSuccess: boolean;
+  actualPreviewCanRun: boolean;
+  message: string;
+}
+
+export interface Phase0MockActualSeparationDto {
+  combinedTotalsUsed: false;
+  actualPreviewCount: number;
+  fakeOrMockPreviewCount: number;
+  mockGenerationResultCount: number;
+  unavailableGenerationResultCount: number;
+}
+
+export interface Phase0DecisionReportDto {
+  reportId: string;
+  projectId: string;
+  projectRevision: ProjectRevisionDto;
+  generatedAt: string;
+  decision: Phase0Decision;
+  maximumDecisionDueToMissing?: Phase0Decision;
+  decisionReasons: string[];
+  workPackages: Phase0WorkPackageStatusDto[];
+  sessions: Phase0SessionEvidenceDto[];
+  denominator: Phase0DenominatorDto;
+  fixedInputMetrics: Phase0MetricDto;
+  freeInputFindings: Phase0MetricDto;
+  conditionRuntime: Phase0ConditionRuntimeDecisionDto;
+  mockActualSeparation: Phase0MockActualSeparationDto;
+}
+
 export type ConditionRuntimeSupportFlag = "support_false";
 export type ConditionRuntimePreviewStatus = "not_evaluated";
 export type ConditionRuntimeEditorMode = "candidate_review_only";

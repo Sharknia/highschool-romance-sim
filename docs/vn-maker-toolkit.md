@@ -105,6 +105,7 @@ echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.j
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","eventName":"started","sessionId":"session-1","participantIdHash":"hash","taskId":"task-1"}' | node packages/cli/dist/index.js record-ux-event
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","sessionId":"session-1"}' | node packages/cli/dist/index.js list-ux-events
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","sessionId":"session-1"}' | node packages/cli/dist/index.js export-ux-event-log
+echo '{"projectDirectory":"/tmp/Haru.vnmaker","sessionIds":["session-1"],"participantResults":[...]}' | node packages/cli/dist/index.js phase0-decision-report
 echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js preview
 echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js export-web
 echo '{"job": {...}}' | node packages/cli/dist/index.js create-image-job
@@ -166,6 +167,7 @@ echo '{"image":{"kind":"cg","targetId":"scene-opening","prompt":"방과 후 교�
 - Codex 미연결 또는 imageGeneration 사용 불가 시 패키징 목 이미지 fallback 표시
 - 생성 결과 미리보기
 - 고정 프롬프트 replay 결과 로그와 test-session UX decision event JSON export
+- Phase 0 decision report: Ready/Partial/Missing 작업 패키지 표, Go/Iterate/Stop/Rethink 판정, fixed/free 입력 분리, eventLogId/preflightResult 증거, fake/mock preview 0 기준, condition preview not_evaluated와 actual preview evidence 분리
 
 API 라우트:
 
@@ -209,6 +211,7 @@ POST /api/events/generation-result-logs
 POST /api/events/ux/record
 POST /api/events/ux/list
 POST /api/events/ux/export
+POST /api/phase0/decision-report
 POST /api/events/expand
 POST /api/events/approve
 POST /api/events/history

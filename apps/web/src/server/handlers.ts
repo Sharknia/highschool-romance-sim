@@ -382,6 +382,10 @@ class ApiServices {
     return this.useCases.exportUXDecisionEventLog(body);
   }
 
+  createPhase0DecisionReport(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.createPhase0DecisionReport(body);
+  }
+
   expandEvent(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.expandEvent(body);
   }
@@ -497,6 +501,7 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/events/ux/record", (context) => jsonBodyRoute(context, (body) => services.recordUXDecisionEvent(body), "recordUXDecisionEvent"));
   app.post("/api/events/ux/list", (context) => jsonBodyRoute(context, (body) => services.listUXDecisionEvents(body), "listUXDecisionEvents"));
   app.post("/api/events/ux/export", (context) => jsonBodyRoute(context, (body) => services.exportUXDecisionEventLog(body), "exportUXDecisionEventLog"));
+  app.post("/api/phase0/decision-report", (context) => jsonBodyRoute(context, (body) => services.createPhase0DecisionReport(body), "createPhase0DecisionReport"));
   app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body), "expandEvent"));
   app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body), "approveEvent"));
   app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));

@@ -1381,6 +1381,209 @@ assert.equal(exportedHintEvent.helpChannel, "moderator_hint");
 assert.equal(exportedHintEvent.hintLevel, 1);
 assert.equal(exportedAbandonedEvent.outcome, "abandoned");
 
+const phase0ParticipantResults = [{
+  participantIdHash: "participant-hash-104",
+  sessionId: uxSessionId,
+  inputMode: "fixed_prompt",
+  taskId: "fixed-prompt-valid-preview",
+  promptId: fixedPromptSet.fixtures[0].promptId,
+  vnToolCompletedCount: 0,
+  professionalDeveloper: false,
+  regularScriptingWork: false,
+  storyCreatorLastYear: true,
+  completed: false,
+  reachedValidPreview: false,
+  usedModeratorHint: true,
+  usedStaticTutorial: true,
+  abandoned: true,
+  blockingErrorCount: 2,
+  completionMs: 96000,
+  actualPreview: true,
+  mockPreview: false,
+  criticalIncidentCause: "moderator-hint-completion"
+}];
+
+for (let index = 0; index < 6; index += 1) {
+  const sessionId = `phase0-fixed-success-${index}`;
+  const participantIdHash = `phase0-fixed-participant-${index}`;
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "started",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    outcome: "started",
+    elapsedMs: 0
+  });
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "recipe_used",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    outcome: "used",
+    elapsedMs: 1200
+  });
+  if (index === 0) {
+    await useCases.recordUXDecisionEvent({
+      projectDirectory: fixedPromptDirectory,
+      eventName: "help_opened",
+      sessionId,
+      participantIdHash,
+      taskId: "fixed-prompt-valid-preview",
+      helpChannel: "static_tutorial",
+      outcome: "opened",
+      elapsedMs: 2200
+    });
+  }
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "repair_action_used",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    issueCode: "missing-target",
+    issueCodesBefore: ["missing-target"],
+    repairActionId: "create-target-scene",
+    outcome: "used",
+    elapsedMs: 3000
+  });
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "repaired",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    issueCode: "missing-target",
+    issueCodesBefore: ["missing-target"],
+    issueCodesAfter: [],
+    repairActionId: "create-target-scene",
+    revisionBefore: fixedPromptReplay.projectRevision,
+    revisionAfter: fixedPromptReplay.projectRevision,
+    outcome: "success",
+    elapsedMs: 4200
+  });
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "previewed",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    preflightResult: { canRun: true },
+    outcome: "completed",
+    elapsedMs: 540000
+  });
+  phase0ParticipantResults.push({
+    participantIdHash,
+    sessionId,
+    inputMode: "fixed_prompt",
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    vnToolCompletedCount: index % 2,
+    professionalDeveloper: false,
+    regularScriptingWork: false,
+    storyCreatorLastYear: true,
+    completed: true,
+    reachedValidPreview: true,
+    usedModeratorHint: false,
+    usedStaticTutorial: index === 0,
+    abandoned: false,
+    blockingErrorCount: 1,
+    completionMs: 540000,
+    actualPreview: true,
+    mockPreview: index === 0
+  });
+}
+
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "started",
+  sessionId: "phase0-free-exploratory",
+  participantIdHash: "phase0-free-participant",
+  taskId: "free-input-exploratory",
+  inputMode: "free_input",
+  outcome: "started"
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "generated",
+  sessionId: "phase0-free-exploratory",
+  participantIdHash: "phase0-free-participant",
+  taskId: "free-input-exploratory",
+  inputMode: "free_input",
+  outcome: "success"
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "previewed",
+  sessionId: "phase0-free-exploratory",
+  participantIdHash: "phase0-free-participant",
+  taskId: "free-input-exploratory",
+  inputMode: "free_input",
+  preflightResult: { canRun: true },
+  outcome: "completed",
+  elapsedMs: 720000
+});
+phase0ParticipantResults.push({
+  participantIdHash: "phase0-free-participant",
+  sessionId: "phase0-free-exploratory",
+  inputMode: "free_input",
+  taskId: "free-input-exploratory",
+  vnToolCompletedCount: 1,
+  professionalDeveloper: false,
+  regularScriptingWork: false,
+  storyCreatorLastYear: true,
+  completed: true,
+  reachedValidPreview: true,
+  usedModeratorHint: false,
+  usedStaticTutorial: false,
+  abandoned: false,
+  blockingErrorCount: 0,
+  completionMs: 720000,
+  actualPreview: true,
+  mockPreview: false,
+  criticalIncidentCause: "term-confusion"
+});
+
+const phase0ReportResult = await useCases.createPhase0DecisionReport({
+  projectDirectory: fixedPromptDirectory,
+  participantResults: phase0ParticipantResults
+});
+assert.equal(phase0ReportResult.ok, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.decision, "Iterate");
+assert.equal(phase0ReportResult.phase0DecisionReport.maximumDecisionDueToMissing, "Iterate");
+assert.equal(phase0ReportResult.phase0DecisionReport.workPackages.length, 9);
+assert.equal(phase0ReportResult.phase0DecisionReport.workPackages.every((item) => ["Ready", "Partial", "Missing"].includes(item.status)), true);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.totalSessions, 8);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.abandonedSessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.stall90sSessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.staticTutorialRecoverySessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.moderatorHintSessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.fixedInputMetrics.sessionCount, 7);
+assert.equal(phase0ReportResult.phase0DecisionReport.freeInputFindings.sessionCount, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.fixedInputMetrics.noviceNonDevStoryCreatorCount >= 6, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.fixedInputMetrics.majorityValidPreviewWithoutHint, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.mockActualSeparation.fakeOrMockPreviewCount, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.mockActualSeparation.actualPreviewCount >= 6, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.conditionRuntime.strictPreviewStatus, "not_evaluated");
+assert.equal(phase0ReportResult.phase0DecisionReport.conditionRuntime.actualPreviewCanRun, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.conditionRuntime.conditionPreviewCountsAsStrictSuccess, false);
+const guidedRepairEvidence = phase0ReportResult.phase0DecisionReport.sessions.find((session) => session.guidedRepairEvidence?.ready);
+assert.equal(Boolean(guidedRepairEvidence), true);
+assert.equal(Boolean(guidedRepairEvidence.eventLogId), true);
+assert.equal(guidedRepairEvidence.guidedRepairEvidence.issueCode, "missing-target");
+assert.equal(guidedRepairEvidence.guidedRepairEvidence.repairActionId, "create-target-scene");
+assert.equal(Boolean(guidedRepairEvidence.guidedRepairEvidence.revisionBefore?.revision), true);
+assert.equal(Boolean(guidedRepairEvidence.guidedRepairEvidence.revisionAfter?.revision), true);
+assert.equal(guidedRepairEvidence.guidedRepairEvidence.preflightResult.canRun, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.mockActualSeparation.combinedTotalsUsed, false);
+
 const noEventTextUseCases = useCasesModule.createVnMakerUseCases({
   recentProjectIndexFile: join(tempRoot, "fixed-prompt-unavailable-recent.json")
 });

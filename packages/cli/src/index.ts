@@ -161,6 +161,7 @@ function printCapabilities(): void {
       "record-ux-event",
       "list-ux-events",
       "export-ux-event-log",
+      "phase0-decision-report",
       "expand-event",
       "approve-event",
       "preview-preflight",
@@ -208,6 +209,7 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "record-ux-event": "recordUXDecisionEvent",
     "list-ux-events": "listUXDecisionEvents",
     "export-ux-event-log": "exportUXDecisionEventLog",
+    "phase0-decision-report": "createPhase0DecisionReport",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
     "preview-preflight": "previewPreflightProject",
@@ -427,6 +429,11 @@ async function run(): Promise<void> {
 
   if (command === "export-ux-event-log") {
     writeJson(await useCases.exportUXDecisionEventLog(input));
+    return;
+  }
+
+  if (command === "phase0-decision-report") {
+    writeJson(await useCases.createPhase0DecisionReport(input));
     return;
   }
 

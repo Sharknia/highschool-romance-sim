@@ -1883,6 +1883,41 @@ assert.deepEqual(
 assert.equal(uxEventApiExport.body.eventLog.events.find((event) => event.eventName === "hint_given").helpChannel, "moderator_hint");
 assert.equal(uxEventApiExport.body.eventLog.events.find((event) => event.eventName === "abandoned").outcome, "abandoned");
 
+const phase0ApiReport = await mockApi({
+  method: "POST",
+  path: "/api/phase0/decision-report",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    sessionIds: ["api-session-104"],
+    participantResults: [{
+      participantIdHash: "api-participant-hash",
+      sessionId: "api-session-104",
+      inputMode: "fixed_prompt",
+      taskId: "api-task",
+      promptId: fixedPromptApiList.body.fixtures[0].promptId,
+      vnToolCompletedCount: 0,
+      professionalDeveloper: false,
+      regularScriptingWork: false,
+      storyCreatorLastYear: true,
+      completed: true,
+      reachedValidPreview: true,
+      usedModeratorHint: true,
+      abandoned: false,
+      blockingErrorCount: 2,
+      completionMs: 90000,
+      actualPreview: true,
+      mockPreview: true
+    }]
+  }
+});
+assert.equal(phase0ApiReport.status, 200);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.decision, "Iterate");
+assert.equal(phase0ApiReport.body.phase0DecisionReport.workPackages.length, 9);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.denominator.totalSessions, 1);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.sessions[0].eventLogId, uxEventApiStarted.body.eventLogId);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.mockActualSeparation.fakeOrMockPreviewCount, 1);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.conditionRuntime.strictPreviewStatus, "not_evaluated");
+
 const fixedPromptCliList = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "fixed-prompts"], {
   input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
   encoding: "utf8"
@@ -1935,6 +1970,19 @@ const uxEventCliRecord = JSON.parse(execFileSync(process.execPath, ["packages/cl
 assert.equal(uxEventCliRecord.ok, true);
 assert.equal(uxEventCliRecord.actionEvent.eventName, "started");
 assert.equal(uxEventCliRecord.actionEvent.correlationId, uxEventCliRecord.correlationId);
+execFileSync(process.execPath, ["packages/cli/dist/index.js", "record-ux-event"], {
+  input: JSON.stringify({
+    projectDirectory: uxEventCliDirectory,
+    eventName: "previewed",
+    sessionId: "cli-session-104",
+    participantIdHash: "cli-participant-hash",
+    taskId: "cli-task",
+    inputMode: "fixed_prompt",
+    preflightResult: { canRun: true },
+    outcome: "completed"
+  }),
+  encoding: "utf8"
+});
 const uxEventCliExport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "export-ux-event-log"], {
   input: JSON.stringify({ projectDirectory: uxEventCliDirectory, sessionId: "cli-session-104" }),
   encoding: "utf8"
@@ -1943,6 +1991,37 @@ assert.equal(uxEventCliExport.ok, true);
 assert.equal(uxEventCliExport.eventLog.eventLogId, uxEventCliRecord.eventLogId);
 assert.equal(uxEventCliExport.eventLog.events[0].eventName, "started");
 assert.equal(uxEventCliExport.eventLog.events[0].projectRevision.revision, uxEventCliExport.projectRevision.revision);
+const phase0CliReport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "phase0-decision-report"], {
+  input: JSON.stringify({
+    projectDirectory: uxEventCliDirectory,
+    sessionIds: ["cli-session-104"],
+    participantResults: [{
+      participantIdHash: "cli-participant-hash",
+      sessionId: "cli-session-104",
+      inputMode: "fixed_prompt",
+      taskId: "cli-task",
+      vnToolCompletedCount: 0,
+      professionalDeveloper: false,
+      regularScriptingWork: false,
+      storyCreatorLastYear: true,
+      completed: true,
+      reachedValidPreview: true,
+      usedModeratorHint: false,
+      abandoned: false,
+      blockingErrorCount: 0,
+      completionMs: 600000,
+      actualPreview: true,
+      mockPreview: true
+    }]
+  }),
+  encoding: "utf8"
+}));
+assert.equal(phase0CliReport.ok, true);
+assert.equal(phase0CliReport.phase0DecisionReport.decision, phase0ApiReport.body.phase0DecisionReport.decision);
+assert.equal(phase0CliReport.phase0DecisionReport.workPackages.length, phase0ApiReport.body.phase0DecisionReport.workPackages.length);
+assert.equal(phase0CliReport.phase0DecisionReport.denominator.totalSessions, 1);
+assert.equal(phase0CliReport.phase0DecisionReport.sessions[0].eventLogId, uxEventCliRecord.eventLogId);
+assert.equal(phase0CliReport.phase0DecisionReport.mockActualSeparation.fakeOrMockPreviewCount, 1);
 mockCodexTextCalls = 0;
 
 const apiServerFailure = await mockApi({

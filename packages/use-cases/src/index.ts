@@ -40,6 +40,15 @@ import {
   type EventExpansionPlan,
   type EventExpansionRequest,
   type EventExpansionValidationResult,
+  type Phase0Decision,
+  type Phase0DecisionReportDto,
+  type Phase0DenominatorDto,
+  type Phase0MetricDto,
+  type Phase0ParticipantResultDto,
+  type Phase0SessionEvidenceDto,
+  type Phase0TaskInputMode,
+  type Phase0WorkPackageStatus,
+  type Phase0WorkPackageStatusDto,
   type GenerationFailureClassification,
   type GenerationResultClassification,
   type GenerationResultLogDto,
@@ -210,6 +219,18 @@ const FIXED_PROMPT_FIXTURES: TestPromptFixtureDto[] = [
   }
 ];
 
+export const PHASE0_WORK_PACKAGES: Array<{ id: string; label: string }> = [
+  { id: "alpha-input", label: "Alpha input" },
+  { id: "generation-summary", label: "generation summary" },
+  { id: "studio-guided-recipe", label: "Studio guided recipe" },
+  { id: "problems-repair", label: "Problems repair" },
+  { id: "preview-preflight", label: "Preview preflight" },
+  { id: "event-log-export", label: "Event log export" },
+  { id: "participant-protocol", label: "participant screening protocol" },
+  { id: "fixed-free-separation", label: "fixed/free input separation" },
+  { id: "decision-thresholds", label: "Go/Iterate/Stop threshold report" }
+];
+
 export type MakerActionId =
   | "createProject"
   | "createProjectFromHeroine"
@@ -232,6 +253,7 @@ export type MakerActionId =
   | "recordUXDecisionEvent"
   | "listUXDecisionEvents"
   | "exportUXDecisionEventLog"
+  | "createPhase0DecisionReport"
   | "listGenerationJobs"
   | "runGenerationJobs"
   | "previewPreflightProject"
@@ -1816,6 +1838,397 @@ function createUXDecisionEvent(
     ...(stringField(record, "action") ? { action: stringField(record, "action") } : {}),
     ...(stringField(record, "resultId") ? { resultId: stringField(record, "resultId") } : {}),
     ...(asRecord(record.metadata) === record.metadata ? { metadata: record.metadata as Record<string, unknown> } : {})
+  };
+}
+
+function booleanField(record: JsonRecord, key: string): boolean | undefined {
+  return typeof record[key] === "boolean" ? record[key] as boolean : undefined;
+}
+
+function phase0StringList(input: unknown): string[] {
+  if (typeof input === "string" && input.trim()) {
+    return [input.trim()];
+  }
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
+}
+
+function phase0InputMode(value: unknown): Phase0TaskInputMode {
+  return typeof value === "string" && value.trim() ? value.trim() : "manual";
+}
+
+function phase0ParticipantResultFrom(value: unknown): Phase0ParticipantResultDto | null {
+  const record = asRecord(value);
+  const sessionId = stringField(record, "sessionId");
+  const participantIdHash = stringField(record, "participantIdHash");
+  if (!sessionId || !participantIdHash) {
+    return null;
+  }
+  return {
+    participantIdHash,
+    sessionId,
+    inputMode: phase0InputMode(record.inputMode),
+    ...(stringField(record, "taskId") ? { taskId: stringField(record, "taskId") } : {}),
+    ...(stringField(record, "promptId") ? { promptId: stringField(record, "promptId") } : {}),
+    ...(numberField(record, "vnToolCompletedCount") !== undefined ? { vnToolCompletedCount: numberField(record, "vnToolCompletedCount") } : {}),
+    ...(booleanField(record, "professionalDeveloper") !== undefined ? { professionalDeveloper: booleanField(record, "professionalDeveloper") } : {}),
+    ...(booleanField(record, "regularScriptingWork") !== undefined ? { regularScriptingWork: booleanField(record, "regularScriptingWork") } : {}),
+    ...(booleanField(record, "storyCreatorLastYear") !== undefined ? { storyCreatorLastYear: booleanField(record, "storyCreatorLastYear") } : {}),
+    ...(booleanField(record, "noviceNonDevStoryCreator") !== undefined ? { noviceNonDevStoryCreator: booleanField(record, "noviceNonDevStoryCreator") } : {}),
+    ...(booleanField(record, "completed") !== undefined ? { completed: booleanField(record, "completed") } : {}),
+    ...(booleanField(record, "reachedValidPreview") !== undefined ? { reachedValidPreview: booleanField(record, "reachedValidPreview") } : {}),
+    ...(booleanField(record, "usedModeratorHint") !== undefined ? { usedModeratorHint: booleanField(record, "usedModeratorHint") } : {}),
+    ...(booleanField(record, "usedStaticTutorial") !== undefined ? { usedStaticTutorial: booleanField(record, "usedStaticTutorial") } : {}),
+    ...(booleanField(record, "abandoned") !== undefined ? { abandoned: booleanField(record, "abandoned") } : {}),
+    ...(numberField(record, "blockingErrorCount") !== undefined ? { blockingErrorCount: numberField(record, "blockingErrorCount") } : {}),
+    ...(numberField(record, "completionMs") !== undefined ? { completionMs: numberField(record, "completionMs") } : {}),
+    ...(booleanField(record, "wrongMentalModel") !== undefined ? { wrongMentalModel: booleanField(record, "wrongMentalModel") } : {}),
+    ...(booleanField(record, "dataLossAnxiety") !== undefined ? { dataLossAnxiety: booleanField(record, "dataLossAnxiety") } : {}),
+    ...(stringField(record, "criticalIncidentCause") ? { criticalIncidentCause: stringField(record, "criticalIncidentCause") } : {}),
+    ...(booleanField(record, "actualPreview") !== undefined ? { actualPreview: booleanField(record, "actualPreview") } : {}),
+    ...(booleanField(record, "mockPreview") !== undefined ? { mockPreview: booleanField(record, "mockPreview") } : {}),
+    ...(stringField(record, "notes") ? { notes: stringField(record, "notes") } : {})
+  };
+}
+
+function phase0ParticipantResultsFrom(input: unknown): Phase0ParticipantResultDto[] {
+  const value = asRecord(input).participantResults;
+  return Array.isArray(value)
+    ? value.map(phase0ParticipantResultFrom).filter((item): item is Phase0ParticipantResultDto => Boolean(item))
+    : [];
+}
+
+function phase0ParticipantIsNoviceNonDevStoryCreator(participant?: Phase0ParticipantResultDto, events: UXDecisionEventDto[] = []): boolean {
+  if (participant?.noviceNonDevStoryCreator !== undefined) {
+    return participant.noviceNonDevStoryCreator;
+  }
+  if (participant) {
+    return (participant.vnToolCompletedCount ?? Number.POSITIVE_INFINITY) <= 1
+      && participant.professionalDeveloper !== true
+      && participant.regularScriptingWork !== true
+      && participant.storyCreatorLastYear === true;
+  }
+  return events.some((event) => event.participantType === "novice_non_dev_story_creator");
+}
+
+function latestPhase0Preflight(events: UXDecisionEventDto[]): UXDecisionEventDto["preflightResult"] | undefined {
+  return [...events].reverse().find((event) => event.preflightResult)?.preflightResult;
+}
+
+function phase0EventNames(events: UXDecisionEventDto[]): UXDecisionEventName[] {
+  return [...new Set(events.map((event) => event.eventName))];
+}
+
+function phase0MaxElapsedMs(events: UXDecisionEventDto[]): number | undefined {
+  const elapsedValues = events.map((event) => event.elapsedMs).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return elapsedValues.length ? Math.max(...elapsedValues) : undefined;
+}
+
+function phase0GuidedRepairEvidence(events: UXDecisionEventDto[]): Phase0SessionEvidenceDto["guidedRepairEvidence"] {
+  const repairUsed = events.find((event) => event.eventName === "repair_action_used");
+  const repaired = [...events].reverse().find((event) => event.eventName === "repaired");
+  const preflightResult = latestPhase0Preflight(events);
+  const issueCode = repaired?.issueCode || repairUsed?.issueCode;
+  const repairActionId = repaired?.repairActionId || repairUsed?.repairActionId;
+  const revisionBefore = repaired?.revisionBefore;
+  const revisionAfter = repaired?.revisionAfter;
+  const eventLogId = repaired?.eventLogId || repairUsed?.eventLogId || events[0]?.eventLogId;
+  const ready = Boolean(issueCode && repairActionId && revisionBefore && revisionAfter && preflightResult && eventLogId);
+  return {
+    ready,
+    ...(issueCode ? { issueCode } : {}),
+    ...(repairActionId ? { repairActionId } : {}),
+    ...(revisionBefore ? { revisionBefore } : {}),
+    ...(revisionAfter ? { revisionAfter } : {}),
+    ...(preflightResult ? { preflightResult } : {}),
+    ...(eventLogId ? { eventLogId } : {})
+  };
+}
+
+function phase0SessionEvidence(
+  sessionId: string,
+  events: UXDecisionEventDto[],
+  participant?: Phase0ParticipantResultDto
+): Phase0SessionEvidenceDto {
+  const orderedEvents = [...events].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  const eventNames = phase0EventNames(orderedEvents);
+  const latestPreflight = latestPhase0Preflight(orderedEvents);
+  const previewPreflightCanRun = latestPreflight?.canRun === true;
+  const abandoned = participant?.abandoned ?? eventNames.includes("abandoned");
+  const reachedValidPreview = participant?.reachedValidPreview ?? orderedEvents.some((event) =>
+    event.eventName === "previewed" && event.outcome === "completed" && event.preflightResult?.canRun === true
+  );
+  const completed = participant?.completed ?? (reachedValidPreview && !abandoned);
+  const usedModeratorHint = participant?.usedModeratorHint ?? orderedEvents.some((event) => event.eventName === "hint_given" || event.helpChannel === "moderator_hint");
+  const usedStaticTutorial = participant?.usedStaticTutorial ?? orderedEvents.some((event) => event.helpChannel === "static_tutorial");
+  const stall90s = orderedEvents.some((event) => typeof event.stallDurationMs === "number" && event.stallDurationMs >= 90000);
+  const blockingErrorCount = participant?.blockingErrorCount
+    ?? orderedEvents.filter((event) => event.eventName === "validation_failed" || event.outcome === "blocked").length;
+  const completionMs = participant?.completionMs ?? phase0MaxElapsedMs(orderedEvents);
+  const inputMode = phase0InputMode(participant?.inputMode || orderedEvents.find((event) => event.inputMode)?.inputMode);
+  const mockPreview = participant?.mockPreview === true
+    || orderedEvents.some((event) => ["mock", "fake"].includes(String(asRecord(event.metadata).previewKind || "")));
+  const actualPreview = participant?.actualPreview ?? (previewPreflightCanRun && !mockPreview);
+  const guidedRepairEvidence = phase0GuidedRepairEvidence(orderedEvents);
+  return {
+    sessionId,
+    ...(orderedEvents[0]?.eventLogId ? { eventLogId: orderedEvents[0].eventLogId } : {}),
+    ...(participant?.participantIdHash || orderedEvents[0]?.participantIdHash ? { participantIdHash: participant?.participantIdHash || orderedEvents[0]?.participantIdHash } : {}),
+    noviceNonDevStoryCreator: phase0ParticipantIsNoviceNonDevStoryCreator(participant, orderedEvents),
+    inputMode,
+    ...(participant?.taskId || orderedEvents.find((event) => event.taskId)?.taskId ? { taskId: participant?.taskId || orderedEvents.find((event) => event.taskId)?.taskId } : {}),
+    ...(participant?.promptId || orderedEvents.find((event) => event.promptId)?.promptId ? { promptId: participant?.promptId || orderedEvents.find((event) => event.promptId)?.promptId } : {}),
+    eventNames,
+    completed,
+    reachedValidPreview,
+    usedModeratorHint,
+    usedStaticTutorial,
+    abandoned,
+    stall90s,
+    blockingErrorCount,
+    ...(completionMs !== undefined ? { completionMs } : {}),
+    wrongMentalModel: participant?.wrongMentalModel === true,
+    dataLossAnxiety: participant?.dataLossAnxiety === true,
+    ...(participant?.criticalIncidentCause ? { criticalIncidentCause: participant.criticalIncidentCause } : {}),
+    actualPreview,
+    mockPreview,
+    previewPreflightCanRun,
+    conditionPreviewStatus: "not_evaluated",
+    guidedRepairEvidence
+  };
+}
+
+function phase0MedianMinutes(values: number[]): number | null {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const ms = sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+  return Math.round((ms / 60000) * 10) / 10;
+}
+
+function phase0Rate(numerator: number, denominator: number): number {
+  return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 1000 : 0;
+}
+
+function phase0SameCauseCriticalIncidentCount(sessions: Phase0SessionEvidenceDto[]): number {
+  const counts = new Map<string, number>();
+  sessions.forEach((session) => {
+    if (session.criticalIncidentCause) {
+      counts.set(session.criticalIncidentCause, (counts.get(session.criticalIncidentCause) || 0) + 1);
+    }
+  });
+  return Math.max(0, ...counts.values());
+}
+
+function phase0Metrics(inputMode: Phase0TaskInputMode, sessions: Phase0SessionEvidenceDto[]): Phase0MetricDto {
+  const completedCount = sessions.filter((session) => session.completed).length;
+  const guidedRepairSessions = sessions.filter((session) => session.eventNames.includes("repair_action_used") || session.eventNames.includes("repaired"));
+  const guidedRepairReadyCount = guidedRepairSessions.filter((session) => session.guidedRepairEvidence?.ready).length;
+  const noviceSessions = sessions.filter((session) => session.noviceNonDevStoryCreator);
+  const validPreviewWithoutHintCount = noviceSessions.filter((session) => session.reachedValidPreview && !session.usedModeratorHint).length;
+  const completionValues = sessions.map((session) => session.completionMs).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const blockingErrorTotal = sessions.reduce((sum, session) => sum + session.blockingErrorCount, 0);
+  const helpSessions = sessions.filter((session) => session.usedStaticTutorial || session.usedModeratorHint);
+  const helpRecoveredCount = helpSessions.filter((session) => session.completed || session.reachedValidPreview).length;
+  return {
+    inputMode,
+    sessionCount: sessions.length,
+    completedCount,
+    completionRate: phase0Rate(completedCount, sessions.length),
+    guidedRepairCompletionRate: phase0Rate(guidedRepairReadyCount, guidedRepairSessions.length || sessions.length),
+    noviceNonDevStoryCreatorCount: noviceSessions.length,
+    majorityValidPreviewWithoutHint: noviceSessions.length > 0 && validPreviewWithoutHintCount > noviceSessions.length / 2,
+    medianCompletionMinutes: phase0MedianMinutes(completionValues),
+    averageBlockingErrors: sessions.length ? Math.round((blockingErrorTotal / sessions.length) * 10) / 10 : 0,
+    helpRecoveryRate: helpSessions.length ? phase0Rate(helpRecoveredCount, helpSessions.length) : 1,
+    sameCauseCriticalIncidentCount: phase0SameCauseCriticalIncidentCount(sessions),
+    fakeOrMockPreviewCount: sessions.filter((session) => session.mockPreview).length
+  };
+}
+
+function phase0Denominator(sessions: Phase0SessionEvidenceDto[]): Phase0DenominatorDto {
+  return {
+    totalSessions: sessions.length,
+    failedSessions: sessions.filter((session) => !session.completed).length,
+    abandonedSessions: sessions.filter((session) => session.abandoned).length,
+    stall90sSessions: sessions.filter((session) => session.stall90s).length,
+    staticTutorialRecoverySessions: sessions.filter((session) => session.usedStaticTutorial && (session.completed || session.reachedValidPreview)).length,
+    moderatorHintSessions: sessions.filter((session) => session.usedModeratorHint).length,
+    includedFailedAbandonedAndHelpRecovery: true
+  };
+}
+
+function phase0Package(
+  id: string,
+  label: string,
+  status: Phase0WorkPackageStatus,
+  evidence: string[],
+  missing: string[]
+): Phase0WorkPackageStatusDto {
+  return {
+    id,
+    label,
+    status,
+    evidence,
+    missing
+  };
+}
+
+function phase0WorkPackageStatus(input: {
+  sessions: Phase0SessionEvidenceDto[];
+  events: UXDecisionEventDto[];
+  generationLogs: GenerationResultLogDto[];
+  participantResults: Phase0ParticipantResultDto[];
+  previewPreflight: PreviewPreflightDto;
+}): Phase0WorkPackageStatusDto[] {
+  const eventNames = new Set(input.events.map((event) => event.eventName));
+  const fixedSessions = input.sessions.filter((session) => session.inputMode === "fixed_prompt");
+  const freeSessions = input.sessions.filter((session) => session.inputMode === "free_input");
+  const guidedRepairReady = input.sessions.some((session) => session.guidedRepairEvidence?.ready);
+  const previewCanRun = input.sessions.some((session) => session.previewPreflightCanRun) || input.previewPreflight.canRun === true;
+  const noviceCount = input.sessions.filter((session) => session.noviceNonDevStoryCreator).length;
+  const packagesById: Record<string, Phase0WorkPackageStatusDto> = {
+    "alpha-input": phase0Package("alpha-input", "Alpha input", input.sessions.length ? "Ready" : "Missing", input.sessions.length ? ["started event or participant session present"] : [], input.sessions.length ? [] : ["started event"]),
+    "generation-summary": phase0Package("generation-summary", "generation summary", input.generationLogs.length || eventNames.has("generated") ? "Ready" : eventNames.has("recipe_used") ? "Partial" : "Missing", input.generationLogs.length ? [`generationResultLogs ${input.generationLogs.length}`] : eventNames.has("generated") ? ["generated event"] : [], input.generationLogs.length || eventNames.has("generated") ? [] : ["generation result log"]),
+    "studio-guided-recipe": phase0Package("studio-guided-recipe", "Studio guided recipe", eventNames.has("recipe_used") && fixedSessions.length ? "Ready" : eventNames.has("recipe_used") ? "Partial" : "Missing", eventNames.has("recipe_used") ? ["recipe_used fixed prompt event"] : [], eventNames.has("recipe_used") && fixedSessions.length ? [] : ["fixed prompt recipe event"]),
+    "problems-repair": phase0Package("problems-repair", "Problems repair", guidedRepairReady ? "Ready" : eventNames.has("repair_action_used") ? "Partial" : "Missing", guidedRepairReady ? ["issueCode, repairActionId, before/after revision, preflightResult, eventLogId"] : eventNames.has("repair_action_used") ? ["repair_action_used event"] : [], guidedRepairReady ? [] : ["complete guided repair evidence"]),
+    "preview-preflight": phase0Package("preview-preflight", "Preview preflight", previewCanRun ? "Ready" : eventNames.has("previewed") ? "Partial" : "Missing", previewCanRun ? ["preflightResult.canRun actual preview evidence"] : eventNames.has("previewed") ? ["previewed event"] : [], previewCanRun ? [] : ["actual preview preflight canRun"]),
+    "event-log-export": phase0Package("event-log-export", "Event log export", input.events.some((event) => event.eventLogId) ? "Ready" : input.events.length ? "Partial" : "Missing", input.events.some((event) => event.eventLogId) ? ["eventLogId present in exported UX events"] : [], input.events.some((event) => event.eventLogId) ? [] : ["eventLogId"]),
+    "participant-protocol": phase0Package("participant-protocol", "participant screening protocol", noviceCount >= 6 ? "Ready" : input.participantResults.length ? "Partial" : "Missing", input.participantResults.length ? [`novice non-dev story creators ${noviceCount}`] : [], noviceCount >= 6 ? [] : ["validation sample novice non-dev story creators >= 6"]),
+    "fixed-free-separation": phase0Package("fixed-free-separation", "fixed/free input separation", fixedSessions.length && freeSessions.length ? "Ready" : fixedSessions.length || freeSessions.length ? "Partial" : "Missing", [`fixed ${fixedSessions.length}`, `free ${freeSessions.length}`, "combined totals disabled"], fixedSessions.length && freeSessions.length ? [] : ["fixed and free input evidence"]),
+    "decision-thresholds": phase0Package("decision-thresholds", "Go/Iterate/Stop threshold report", "Ready", ["Go, Iterate, Stop/Rethink criteria calculated"], [])
+  };
+  return PHASE0_WORK_PACKAGES.map((item) => packagesById[item.id]);
+}
+
+export function phase0DecisionForMetrics(input: {
+  workPackages: Phase0WorkPackageStatusDto[];
+  fixedInputMetrics: Phase0MetricDto;
+  sessions: Phase0SessionEvidenceDto[];
+  mockActualSeparation: Phase0DecisionReportDto["mockActualSeparation"];
+}): { decision: Phase0Decision; maximumDecisionDueToMissing?: Phase0Decision; decisionReasons: string[] } {
+  const reasons: string[] = [];
+  const missingOrMockReplacement = input.workPackages.some((item) => item.status === "Missing")
+    || input.mockActualSeparation.fakeOrMockPreviewCount > 0
+    || input.mockActualSeparation.mockGenerationResultCount > 0
+    || input.mockActualSeparation.unavailableGenerationResultCount > 0;
+  const fixed = input.fixedInputMetrics;
+  const repeatedCriticalIncident = Math.max(fixed.sameCauseCriticalIncidentCount, phase0SameCauseCriticalIncidentCount(input.sessions)) >= 2;
+  const repeatedDataLossAnxiety = input.sessions.filter((session) => session.dataLossAnxiety).length >= 2;
+  const completionRate = fixed.sessionCount ? fixed.completionRate : phase0Metrics("all", input.sessions).completionRate;
+  if (completionRate < 0.5 && input.sessions.length > 0) {
+    reasons.push("completion rate below 50%");
+    return { decision: "Stop/Rethink", decisionReasons: reasons };
+  }
+  if (repeatedCriticalIncident || repeatedDataLossAnxiety) {
+    reasons.push(repeatedDataLossAnxiety ? "repeated data-loss anxiety" : "same-cause critical incident repeated");
+    return { decision: "Stop/Rethink", decisionReasons: reasons };
+  }
+  if (missingOrMockReplacement) {
+    reasons.push("Missing work package or fake/mock replacement caps Phase 0 at Iterate");
+  }
+  const goCriteria = [
+    fixed.guidedRepairCompletionRate >= 0.7,
+    fixed.noviceNonDevStoryCreatorCount >= 6,
+    fixed.majorityValidPreviewWithoutHint,
+    fixed.medianCompletionMinutes !== null && fixed.medianCompletionMinutes <= 20,
+    fixed.averageBlockingErrors <= 2,
+    fixed.helpRecoveryRate >= 0.8,
+    input.mockActualSeparation.fakeOrMockPreviewCount === 0,
+    fixed.sameCauseCriticalIncidentCount < 2
+  ];
+  if (!missingOrMockReplacement && goCriteria.every(Boolean)) {
+    reasons.push("all Go criteria passed");
+    return { decision: "Go", decisionReasons: reasons };
+  }
+  if (completionRate >= 0.5 && completionRate < 0.7) {
+    reasons.push("completion rate between 50% and 69%");
+  }
+  if (!goCriteria.every(Boolean)) {
+    reasons.push("one or more Go criteria require iteration");
+  }
+  return {
+    decision: "Iterate",
+    ...(missingOrMockReplacement ? { maximumDecisionDueToMissing: "Iterate" as const } : {}),
+    decisionReasons: reasons
+  };
+}
+
+function createPhase0DecisionReportDto(input: {
+  project: VnMakerProject;
+  projectRevision: ProjectRevisionDto;
+  previewPreflight: PreviewPreflightDto;
+  events: UXDecisionEventDto[];
+  generationLogs: GenerationResultLogDto[];
+  participantResults: Phase0ParticipantResultDto[];
+  generatedAt: string;
+}): Phase0DecisionReportDto {
+  const eventsBySession = new Map<string, UXDecisionEventDto[]>();
+  input.events.forEach((event) => {
+    const list = eventsBySession.get(event.sessionId) || [];
+    list.push(event);
+    eventsBySession.set(event.sessionId, list);
+  });
+  const participantsBySession = new Map(input.participantResults.map((participant) => [participant.sessionId, participant]));
+  const sessionIds = new Set<string>([
+    ...eventsBySession.keys(),
+    ...participantsBySession.keys()
+  ]);
+  const sessions = [...sessionIds]
+    .map((sessionId) => phase0SessionEvidence(sessionId, eventsBySession.get(sessionId) || [], participantsBySession.get(sessionId)))
+    .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+  const fixedSessions = sessions.filter((session) => session.inputMode === "fixed_prompt");
+  const freeSessions = sessions.filter((session) => session.inputMode === "free_input");
+  const workPackages = phase0WorkPackageStatus({
+    sessions,
+    events: input.events,
+    generationLogs: input.generationLogs,
+    participantResults: input.participantResults,
+    previewPreflight: input.previewPreflight
+  });
+  const fixedInputMetrics = phase0Metrics("fixed_prompt", fixedSessions);
+  const freeInputFindings = phase0Metrics("free_input", freeSessions);
+  const mockActualSeparation: Phase0DecisionReportDto["mockActualSeparation"] = {
+    combinedTotalsUsed: false,
+    actualPreviewCount: sessions.filter((session) => session.actualPreview).length,
+    fakeOrMockPreviewCount: sessions.filter((session) => session.mockPreview).length,
+    mockGenerationResultCount: input.generationLogs.filter((log) => log.sourceType === "mock").length,
+    unavailableGenerationResultCount: input.generationLogs.filter((log) => log.sourceType === "unavailable").length
+  };
+  const decision = phase0DecisionForMetrics({
+    workPackages,
+    fixedInputMetrics,
+    sessions,
+    mockActualSeparation
+  });
+  return {
+    reportId: `phase0-report-${input.project.id}-${input.generatedAt}`.replace(/[^A-Za-z0-9._:-]/g, "-"),
+    projectId: input.project.id,
+    projectRevision: input.projectRevision,
+    generatedAt: input.generatedAt,
+    decision: decision.decision,
+    ...(decision.maximumDecisionDueToMissing ? { maximumDecisionDueToMissing: decision.maximumDecisionDueToMissing } : {}),
+    decisionReasons: decision.decisionReasons,
+    workPackages,
+    sessions,
+    denominator: phase0Denominator(sessions),
+    fixedInputMetrics,
+    freeInputFindings,
+    conditionRuntime: {
+      supportFlag: input.previewPreflight.conditionRuntimeSupport.supportFlag,
+      supported: input.previewPreflight.conditionRuntimeSupport.supported,
+      strictPreviewStatus: input.previewPreflight.conditionRuntimeSupport.strictPreviewStatus,
+      conditionPreviewCountsAsStrictSuccess: false,
+      actualPreviewCanRun: input.previewPreflight.canRun === true || sessions.some((session) => session.previewPreflightCanRun),
+      message: input.previewPreflight.conditionRuntimeSupport.message
+    },
+    mockActualSeparation
   };
 }
 
@@ -4166,6 +4579,56 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           uxDecisionEvents: eventLog.events,
           events: eventLog.events
         }, { project, projectRevision: eventLog.projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async createPhase0DecisionReport(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const validationIssues = validateProjectSnapshot(project);
+        const validation = {
+          ok: validationIssues.every((issue) => issue.severity !== "error"),
+          issues: validationIssues
+        };
+        const previewPreflight = createPreviewPreflight(project, validation, projectRevision);
+        const sessionIds = new Set([
+          ...phase0StringList(record.sessionId),
+          ...phase0StringList(record.sessionIds)
+        ]);
+        const eventLogIds = new Set([
+          ...phase0StringList(record.eventLogId),
+          ...phase0StringList(record.eventLogIds)
+        ]);
+        const hasEventFilters = sessionIds.size > 0 || eventLogIds.size > 0;
+        const events = store.listUXDecisionEvents().filter((event) =>
+          !hasEventFilters || sessionIds.has(event.sessionId) || eventLogIds.has(event.eventLogId)
+        );
+        const participantResults = phase0ParticipantResultsFrom(input).filter((participant) =>
+          sessionIds.size === 0 || sessionIds.has(participant.sessionId)
+        );
+        const phase0DecisionReport = createPhase0DecisionReportDto({
+          project,
+          projectRevision,
+          previewPreflight,
+          events,
+          generationLogs: store.listGenerationResultLogs(),
+          participantResults,
+          generatedAt: stringField(record, "generatedAt") || new Date().toISOString()
+        });
+        return withStoreActionState("createPhase0DecisionReport", store, {
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          phase0DecisionReport,
+          decision: phase0DecisionReport.decision,
+          workPackages: phase0DecisionReport.workPackages,
+          denominator: phase0DecisionReport.denominator,
+          sessions: phase0DecisionReport.sessions
+        }, { project, validation, projectRevision });
       } finally {
         store.close();
       }

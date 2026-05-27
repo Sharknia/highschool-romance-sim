@@ -26,8 +26,10 @@ import type {
   ProjectPreviewPreflight,
   ProjectRepairAction,
   ProjectRevision,
+  Phase0DecisionReport,
   GenerationResultLog,
-  TestPromptFixture
+  TestPromptFixture,
+  UXDecisionEventLog
 } from "./projectPageTypes";
 
 export const STUDIO_MIN_WIDTH = 1280;
@@ -382,6 +384,10 @@ export function StudioWorkspace({
   const [generationLog, setGenerationLog] = useState<GenerationResultLog | null>(null);
   const [generationStatus, setGenerationStatus] = useState("고정 프롬프트 세트를 불러오는 중입니다.");
   const [generationBusy, setGenerationBusy] = useState(false);
+  const [phase0EventLog, setPhase0EventLog] = useState<UXDecisionEventLog | null>(null);
+  const [phase0Report, setPhase0Report] = useState<Phase0DecisionReport | null>(null);
+  const [phase0Status, setPhase0Status] = useState("Phase 0 decision report 생성 전입니다.");
+  const [phase0Busy, setPhase0Busy] = useState(false);
   const [localIssues, setLocalIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -632,6 +638,112 @@ export function StudioWorkspace({
     } finally {
       setGenerationBusy(false);
     }
+  }
+
+  async function exportCurrentUXEventLog(): Promise<void> {
+    if (!projectDirectory) {
+      setPhase0Status("이벤트 로그 export 실패: 프로젝트 저장 위치가 없습니다.");
+      return;
+    }
+    setPhase0Busy(true);
+    setPhase0Status("이벤트 로그 export 중입니다.");
+    try {
+      const result = await postJson("/api/events/ux/export", {
+        projectDirectory,
+        sessionId: uxSessionIdRef.current
+      });
+      if (isApiFailure(result)) {
+        setPhase0Status(result.message || result.error || "이벤트 로그를 export하지 못했습니다.");
+        return;
+      }
+      setPhase0EventLog(result.eventLog || null);
+      setPhase0Status(`eventLogId ${result.eventLogId || result.eventLog?.eventLogId || "기록 없음"} export 완료`);
+    } catch (error) {
+      setPhase0Status(`이벤트 로그 export 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setPhase0Busy(false);
+    }
+  }
+
+  async function createPhase0DecisionReport(): Promise<void> {
+    if (!projectDirectory) {
+      setPhase0Status("Phase 0 판정 실패: 프로젝트 저장 위치가 없습니다.");
+      return;
+    }
+    setPhase0Busy(true);
+    setPhase0Status("Phase 0 판정 리포트 생성 중입니다.");
+    try {
+      const result = await postJson("/api/phase0/decision-report", {
+        projectDirectory,
+        sessionIds: [uxSessionIdRef.current],
+        participantResults: [{
+          participantIdHash: "local-browser-session",
+          sessionId: uxSessionIdRef.current,
+          inputMode: generationLog?.promptId ? "fixed_prompt" : "manual",
+          taskId: "phase0-studio-decision-session",
+          promptId: generationLog?.promptId || selectedFixedPrompt?.promptId,
+          vnToolCompletedCount: 0,
+          professionalDeveloper: false,
+          regularScriptingWork: false,
+          storyCreatorLastYear: true,
+          completed: previewPreflight?.canRun === true,
+          reachedValidPreview: previewPreflight?.canRun === true,
+          usedModeratorHint: false,
+          usedStaticTutorial: false,
+          abandoned: false,
+          blockingErrorCount: errorCount,
+          actualPreview: previewPreflight?.canRun === true,
+          mockPreview: false
+        }]
+      });
+      if (isApiFailure(result)) {
+        setPhase0Status(result.message || result.error || "Phase 0 판정 리포트를 생성하지 못했습니다.");
+        return;
+      }
+      setPhase0Report(result.phase0DecisionReport || null);
+      setPhase0Status(`Phase 0 판정 ${result.phase0DecisionReport?.decision || "Iterate"} · eventLogId ${result.phase0DecisionReport?.sessions?.[0]?.eventLogId || "기록 없음"}`);
+    } catch (error) {
+      setPhase0Status(`Phase 0 판정 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setPhase0Busy(false);
+    }
+  }
+
+  function renderPhase0ProtocolPanel() {
+    return (
+      <section>
+        <h3>Phase 0 판정</h3>
+        <p className="studio-disabled-note">Ready/Partial/Missing 작업 패키지, fixed/free 분리, eventLogId, preflightResult 기준으로 Go · Iterate · Stop/Rethink를 계산합니다.</p>
+        <div className="button-row">
+          <Button disabled={phase0Busy} icon={<ListChecks size={16} />} onClick={() => void exportCurrentUXEventLog()}>
+            이벤트 로그 export
+          </Button>
+          <Button disabled={phase0Busy} icon={<CheckCircle2 size={16} />} onClick={() => void createPhase0DecisionReport()} variant="primary">
+            Phase 0 리포트
+          </Button>
+        </div>
+        <dl className="summary-list">
+          <div><dt>상태</dt><dd>{phase0Status}</dd></div>
+          <div><dt>eventLogId</dt><dd>{phase0Report?.sessions?.[0]?.eventLogId || phase0EventLog?.eventLogId || "export 전"}</dd></div>
+          <div><dt>판정</dt><dd>{phase0Report?.decision || "계산 전"}</dd></div>
+          <div><dt>고정/자유 입력</dt><dd>fixed {phase0Report?.fixedInputMetrics?.sessionCount ?? 0} · free {phase0Report?.freeInputFindings?.sessionCount ?? 0}</dd></div>
+          <div><dt>preflightResult</dt><dd>{phase0Report?.conditionRuntime?.actualPreviewCanRun ? "actual preview evidence 있음" : "actual preview evidence 확인 전"}</dd></div>
+        </dl>
+        {phase0Report?.workPackages?.length ? (
+          <ul className="studio-readonly-list">
+            {phase0Report.workPackages.map((item) => (
+              <li key={item.id || item.label}>
+                <strong>{item.label || item.id}</strong>
+                <span>{item.status || "Missing"} · {(item.evidence || item.missing || []).join(" · ") || "evidence 없음"}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <DiagnosticDrawer summary="Phase 0 decision report">
+          <pre>{phase0Report ? JSON.stringify({ phase0DecisionReport: phase0Report, eventLog: phase0EventLog }, null, 2) : "Phase 0 decision report 없음"}</pre>
+        </DiagnosticDrawer>
+      </section>
+    );
   }
 
   function patchDraftScene(patch: Partial<ProjectScene>): void {
@@ -1352,8 +1464,13 @@ export function StudioWorkspace({
                         <div><dt>source</dt><dd>{generationSourceText(generationLog)}</dd></div>
                         <div><dt>resultId</dt><dd>{generationLog?.resultId || "기록 없음"}</dd></div>
                       </dl>
+                      {renderPhase0ProtocolPanel()}
                     </section>
                   ) : null}
+                </div>
+              ) : selectedPanel === "validation" ? (
+                <div className="studio-inspector-body">
+                  {renderPhase0ProtocolPanel()}
                 </div>
               ) : (
                 <EmptyState title="Inspector 대상 없음" description="씬을 만들거나 선택하면 편집 필드가 표시됩니다." />

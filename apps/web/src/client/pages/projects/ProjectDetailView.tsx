@@ -1967,6 +1967,9 @@ export function ProjectDetailView({
                 <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
                 <div><dt>사전 점검</dt><dd>{previewPreflightStatusText(currentPreviewPreflight)}</dd></div>
                 <div><dt>조건 처리</dt><dd>{previewPreflightCapabilityText(currentPreviewPreflight)}</dd></div>
+                <div><dt>actual preview evidence</dt><dd>{currentPreviewPreflight?.canRun === true ? "preflightResult canRun true" : "preflightResult 확인 필요"}</dd></div>
+                <div><dt>condition preview not_evaluated</dt><dd>{currentPreviewPreflight?.conditionRuntimeSupport?.strictPreviewStatus || "not_evaluated"}</dd></div>
+                <div><dt>fake/mock preview</dt><dd>{dummyFallbackTargets.length ? `${dummyFallbackTargets.length}개 목 이미지 포함 가능` : "0"}</dd></div>
                 <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${requiredDataNameLabel(name)}: ${requiredDataValueLabel(value)}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>

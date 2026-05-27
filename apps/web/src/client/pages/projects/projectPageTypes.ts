@@ -451,6 +451,102 @@ export interface UXDecisionEventLog {
   events?: UXDecisionEvent[];
 }
 
+export type Phase0WorkPackageStatus = "Ready" | "Partial" | "Missing" | string;
+export type Phase0Decision = "Go" | "Iterate" | "Stop/Rethink" | string;
+
+export interface Phase0WorkPackage {
+  id?: string;
+  label?: string;
+  status?: Phase0WorkPackageStatus;
+  evidence?: string[];
+  missing?: string[];
+}
+
+export interface Phase0Metric {
+  inputMode?: string;
+  sessionCount?: number;
+  completedCount?: number;
+  completionRate?: number;
+  guidedRepairCompletionRate?: number;
+  noviceNonDevStoryCreatorCount?: number;
+  majorityValidPreviewWithoutHint?: boolean;
+  medianCompletionMinutes?: number | null;
+  averageBlockingErrors?: number;
+  helpRecoveryRate?: number;
+  sameCauseCriticalIncidentCount?: number;
+  fakeOrMockPreviewCount?: number;
+}
+
+export interface Phase0SessionEvidence {
+  sessionId?: string;
+  eventLogId?: string;
+  participantIdHash?: string;
+  noviceNonDevStoryCreator?: boolean;
+  inputMode?: string;
+  taskId?: string;
+  promptId?: string;
+  eventNames?: string[];
+  completed?: boolean;
+  reachedValidPreview?: boolean;
+  usedModeratorHint?: boolean;
+  usedStaticTutorial?: boolean;
+  abandoned?: boolean;
+  stall90s?: boolean;
+  blockingErrorCount?: number;
+  completionMs?: number;
+  actualPreview?: boolean;
+  mockPreview?: boolean;
+  previewPreflightCanRun?: boolean;
+  conditionPreviewStatus?: string;
+  guidedRepairEvidence?: {
+    ready?: boolean;
+    issueCode?: string;
+    repairActionId?: string;
+    revisionBefore?: ProjectRevision;
+    revisionAfter?: ProjectRevision;
+    preflightResult?: Record<string, unknown>;
+    eventLogId?: string;
+  };
+}
+
+export interface Phase0DecisionReport {
+  reportId?: string;
+  projectId?: string;
+  projectRevision?: ProjectRevision;
+  generatedAt?: string;
+  decision?: Phase0Decision;
+  maximumDecisionDueToMissing?: Phase0Decision;
+  decisionReasons?: string[];
+  workPackages?: Phase0WorkPackage[];
+  sessions?: Phase0SessionEvidence[];
+  denominator?: {
+    totalSessions?: number;
+    failedSessions?: number;
+    abandonedSessions?: number;
+    stall90sSessions?: number;
+    staticTutorialRecoverySessions?: number;
+    moderatorHintSessions?: number;
+    includedFailedAbandonedAndHelpRecovery?: boolean;
+  };
+  fixedInputMetrics?: Phase0Metric;
+  freeInputFindings?: Phase0Metric;
+  conditionRuntime?: {
+    supportFlag?: string;
+    supported?: boolean;
+    strictPreviewStatus?: string;
+    conditionPreviewCountsAsStrictSuccess?: boolean;
+    actualPreviewCanRun?: boolean;
+    message?: string;
+  };
+  mockActualSeparation?: {
+    combinedTotalsUsed?: boolean;
+    actualPreviewCount?: number;
+    fakeOrMockPreviewCount?: number;
+    mockGenerationResultCount?: number;
+    unavailableGenerationResultCount?: number;
+  };
+}
+
 export interface RecentProject {
   projectId: string;
   projectDirectory: string;
@@ -526,6 +622,7 @@ export interface ProjectApiResult extends ApiResult {
   uxDecisionEvents?: UXDecisionEvent[];
   events?: UXDecisionEvent[];
   eventLog?: UXDecisionEventLog;
+  phase0DecisionReport?: Phase0DecisionReport;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
   recentIndexRemoval?: {
