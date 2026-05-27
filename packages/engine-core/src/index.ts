@@ -193,10 +193,18 @@ export interface VnMakerGenerationJob {
   sourceGeneratedBy?: string;
 }
 
+export type ValidationIssueDomain = "schema" | "route" | "asset" | "character" | "project" | "generation";
+export type ValidationIssueCode = RouteGraphIssueCode;
+
 export interface ValidationIssue {
   severity: ValidationSeverity;
   path: string;
   message: string;
+  code?: ValidationIssueCode;
+  domain?: ValidationIssueDomain;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
 }
 
 export type RouteGraphIssueCode =
@@ -1646,9 +1654,14 @@ function routeGraphIssuePath(project: VnMakerProject, issue: RouteGraphIssue): s
 
 function routeGraphIssueToValidationIssue(project: VnMakerProject, issue: RouteGraphIssue): ValidationIssue {
   return {
+    code: issue.code,
+    domain: "route",
     severity: issue.severity,
     path: routeGraphIssuePath(project, issue),
-    message: issue.message
+    message: issue.message,
+    sceneIds: [...issue.sceneIds],
+    choiceIds: issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: issue.targetSceneId
   };
 }
 

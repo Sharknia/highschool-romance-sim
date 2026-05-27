@@ -363,6 +363,10 @@ function issueCodes(issues) {
   return issues.map((issue) => issue.code || issue.message);
 }
 
+function routeValidationIssue(project, code) {
+  return core.validateProject(project).find((issue) => issue.code === code);
+}
+
 const manualBranchProject = createManualBranchProject();
 assert.equal(typeof core.analyzeRouteGraph, "function");
 const branchAnalysis = core.analyzeRouteGraph(manualBranchProject);
@@ -475,3 +479,51 @@ const invalidEndingParse = core.parseVnMakerScene({
 });
 assert.equal(invalidEndingParse.ok, false);
 assert.equal(invalidEndingParse.issues.some((issue) => issue.path === "ending.kind"), true);
+
+const invalidEndingProject = createManualBranchProject({
+  scenes: manualBranchProject.scenes.map((scene) => scene.id === "scene-good-ending"
+    ? { ...scene, ending: { id: "ending-invalid", title: "잘못된 엔딩", kind: "special" } }
+    : scene)
+});
+const orphanSceneProject = createManualBranchProject({
+  scenes: [
+    ...manualBranchProject.scenes,
+    {
+      id: "scene-orphan",
+      label: "도달 불가",
+      speaker: "하루",
+      text: "route entry에서 닿지 않는 장면이다.",
+      characters: [],
+      choices: [],
+      ending: { id: "ending-orphan", title: "숨은 엔딩", kind: "normal" }
+    }
+  ]
+});
+const routeIssueValidationFixtures = new Map([
+  ["missing-target", missingTargetProject],
+  ["ending-has-outgoing", endingWithNextProject],
+  ["mixed-outgoing", mixedOutgoingProject],
+  ["uncovered-terminal", uncoveredBranchProject],
+  ["cycle-without-ending-path", cycleProject],
+  ["duplicate-choice-id", duplicateChoiceProject],
+  ["empty-choice-text", emptyChoiceTextProject],
+  ["duplicate-ending-id", duplicateEndingProject],
+  ["invalid-ending", invalidEndingProject],
+  ["orphan-scene", orphanSceneProject]
+]);
+
+for (const [code, fixtureProject] of routeIssueValidationFixtures) {
+  const issue = routeValidationIssue(fixtureProject, code);
+  assert.ok(issue, `${code} route issue code must be preserved in ValidationIssue DTO`);
+  assert.equal(issue.domain, "route");
+  assert.equal(typeof issue.path, "string");
+  assert.equal(issue.path.length > 0, true);
+  assert.equal(Array.isArray(issue.sceneIds), true);
+  assert.equal(typeof issue.message, "string");
+}
+
+const missingTargetValidationIssue = routeValidationIssue(missingTargetProject, "missing-target");
+assert.deepEqual(missingTargetValidationIssue.sceneIds, ["scene-opening"]);
+assert.deepEqual(missingTargetValidationIssue.choiceIds, ["choice-normal"]);
+assert.equal(missingTargetValidationIssue.targetSceneId, "scene-missing-ending");
+assert.equal(missingTargetValidationIssue.path, "scenes.0.choices.1");

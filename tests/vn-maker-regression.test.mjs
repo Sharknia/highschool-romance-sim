@@ -22,6 +22,7 @@ const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
 const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
+const validationDtoParityDirectory = join(tempRoot, "ValidationDtoParity.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
 const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
@@ -251,6 +252,81 @@ const apiValidation = await webHandlers.handleApiRequest({
 });
 assert.equal(apiValidation.status, 200);
 assert.equal(apiValidation.body.ok, true);
+
+const validationDtoProject = core.createStarterProject({
+  id: "validation-dto-parity",
+  title: "Validation DTO Parity",
+  premise: "Web API와 CLI가 같은 stable validation DTO를 반환한다."
+});
+const validationDtoEntrySceneId = validationDtoProject.routes[0].entrySceneId;
+const validationDtoInvalidProject = {
+  ...validationDtoProject,
+  scenes: validationDtoProject.scenes.map((scene) => scene.id === validationDtoEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{ id: "choice-missing", text: "없는 장면으로 간다", next: "scene-missing-target" }]
+      }
+    : scene)
+};
+const validationDtoStore = await projectStore.createProjectWorkspace({
+  projectDirectory: validationDtoParityDirectory,
+  project: validationDtoInvalidProject
+});
+validationDtoStore.close();
+
+const validationDtoApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/validate",
+  body: { projectDirectory: validationDtoParityDirectory }
+});
+assert.equal(validationDtoApi.status, 200);
+assert.equal(validationDtoApi.body.ok, false);
+const validationDtoApiIssue = validationDtoApi.body.issues.find((issue) => issue.code === "missing-target");
+assert.ok(validationDtoApiIssue, "Web API validation output must include the missing-target stable issue code");
+assert.deepEqual(
+  {
+    code: validationDtoApiIssue.code,
+    domain: validationDtoApiIssue.domain,
+    path: validationDtoApiIssue.path,
+    sceneIds: validationDtoApiIssue.sceneIds,
+    choiceIds: validationDtoApiIssue.choiceIds,
+    targetSceneId: validationDtoApiIssue.targetSceneId
+  },
+  {
+    code: "missing-target",
+    domain: "route",
+    path: "scenes.0.choices.0",
+    sceneIds: [validationDtoEntrySceneId],
+    choiceIds: ["choice-missing"],
+    targetSceneId: "scene-missing-target"
+  }
+);
+
+const validationDtoCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "validate"], {
+  input: JSON.stringify({ projectDirectory: validationDtoParityDirectory }),
+  encoding: "utf8"
+}));
+const validationDtoCliIssue = validationDtoCli.issues.find((issue) => issue.code === "missing-target");
+assert.ok(validationDtoCliIssue, "CLI validation output must include the missing-target stable issue code");
+assert.deepEqual(
+  {
+    code: validationDtoCliIssue.code,
+    domain: validationDtoCliIssue.domain,
+    path: validationDtoCliIssue.path,
+    sceneIds: validationDtoCliIssue.sceneIds,
+    choiceIds: validationDtoCliIssue.choiceIds,
+    targetSceneId: validationDtoCliIssue.targetSceneId
+  },
+  {
+    code: validationDtoApiIssue.code,
+    domain: validationDtoApiIssue.domain,
+    path: validationDtoApiIssue.path,
+    sceneIds: validationDtoApiIssue.sceneIds,
+    choiceIds: validationDtoApiIssue.choiceIds,
+    targetSceneId: validationDtoApiIssue.targetSceneId
+  }
+);
 
 const apiScene = await webHandlers.handleApiRequest({
   method: "POST",
