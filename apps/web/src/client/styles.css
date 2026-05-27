@@ -406,6 +406,50 @@ a {
   padding: 16px;
 }
 
+.app-shell.studio-shell {
+  height: 100vh;
+  min-height: 100vh;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+}
+
+.workspace-layout.studio-shell {
+  height: 100vh;
+  min-height: 0;
+  grid-template-columns: 56px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.workspace-layout.studio-shell .workspace-nav {
+  padding: 8px 6px;
+  justify-items: center;
+  overflow: hidden;
+}
+
+.workspace-layout.studio-shell .workspace-nav-item {
+  width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0;
+}
+
+.workspace-layout.studio-shell .workspace-nav-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.workspace-layout.studio-shell .workspace-page {
+  min-height: 0;
+  align-content: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .app-page {
   min-width: 0;
   display: grid;
@@ -1681,7 +1725,7 @@ a {
   min-width: 0;
   min-height: 720px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) var(--studio-problems-height);
+  grid-template-rows: 52px minmax(0, 1fr) var(--studio-problems-height);
   gap: 8px;
   color: var(--color-text);
 }
@@ -1699,12 +1743,13 @@ a {
 }
 
 .studio-command-bar {
-  min-height: 54px;
+  height: 52px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
-  padding: 8px 10px;
+  padding: 6px 10px;
+  overflow: visible;
 }
 
 .studio-command-main,
@@ -1719,30 +1764,56 @@ a {
 }
 
 .studio-command-main {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .studio-command-main strong,
 .studio-panel-toolbar strong,
 .studio-stage-header strong,
 .studio-script-editor strong {
+  min-width: 0;
   color: var(--color-text-strong);
 }
 
+.studio-command-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .studio-command-status {
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--color-text-muted);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .studio-command-actions {
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .studio-command-actions .diagnostic-drawer {
-  align-self: stretch;
-  min-width: 180px;
+  position: relative;
+  align-self: center;
+  min-width: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.studio-command-actions .diagnostic-drawer[open] .diagnostic-drawer-body {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  width: min(560px, calc(100vw - 24px));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
 }
 
 .studio-layout-controls {
@@ -1777,8 +1848,15 @@ a {
 .studio-inspector {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
+}
+
+.studio-route-map {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.studio-inspector {
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .studio-route-map.collapsed,
@@ -1789,7 +1867,7 @@ a {
 .studio-center {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(280px, 1fr) minmax(220px, 0.78fr);
+  grid-template-rows: minmax(220px, 1.08fr) minmax(132px, 1fr);
   gap: 8px;
   border: 0;
   background: transparent;
@@ -1835,7 +1913,7 @@ a {
   min-width: 0;
   min-height: 0;
   aspect-ratio: 16 / 9;
-  width: min(100%, 1000px);
+  width: min(calc(100% - 32px), 1000px);
   max-height: 100%;
   align-self: center;
   justify-self: center;
@@ -1986,6 +2064,7 @@ a {
 
 .studio-node {
   width: 100%;
+  min-height: 64px;
   min-width: 0;
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
@@ -1998,6 +2077,13 @@ a {
   text-align: left;
   background: var(--color-surface-muted);
   cursor: pointer;
+}
+
+@media (max-width: 1366px), (max-height: 768px) {
+  .studio-node {
+    min-height: 52px;
+    padding: 7px;
+  }
 }
 
 .studio-node.selected {
@@ -2044,12 +2130,17 @@ a {
 
 .studio-panel-tabs button {
   min-width: 0;
+  height: 40px;
   border: 1px solid var(--color-border);
   border-radius: 7px;
-  padding: 7px 5px;
+  padding: 6px 3px;
   color: var(--color-text-muted);
+  font-size: 0.84rem;
   background: var(--color-surface-muted);
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .studio-panel-tabs button.selected,
@@ -2830,6 +2921,18 @@ pre {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     border-right: 0;
     border-bottom: 1px solid #33302a;
+  }
+
+  .workspace-layout.studio-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-layout.studio-shell .workspace-nav {
+    display: none;
+  }
+
+  .workspace-layout.studio-shell .workspace-page {
+    padding: 0;
   }
 
   .workspace-nav-item {

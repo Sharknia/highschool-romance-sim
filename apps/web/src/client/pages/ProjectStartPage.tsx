@@ -522,6 +522,10 @@ export function ProjectStartPage() {
     </StatusRegion>
   );
 
+  if (projectId && activeTab === "studio") {
+    return detailView;
+  }
+
   return (
     <section className="app-page" aria-labelledby="projectsTitle">
       {!projectId ? (

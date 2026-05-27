@@ -64,20 +64,55 @@ interface StudioWorkspaceProps {
   repairActions: ProjectRepairAction[];
 }
 
-const defaultStudioLayout: StudioLayout = {
-  routeWidth: 240,
-  inspectorWidth: 320,
-  problemsHeight: 220,
-  routeCollapsed: false,
-  inspectorCollapsed: false,
-  problemsCollapsed: false
-};
+export function studioDefaultLayoutForViewport(viewportWidth = STUDIO_MIN_WIDTH, viewportHeight = STUDIO_MIN_HEIGHT): StudioLayout {
+  const problemsHeight = viewportHeight <= STUDIO_MIN_HEIGHT ? 180 : 220;
+  if (viewportWidth >= 1920) {
+    return {
+      routeWidth: 340,
+      inspectorWidth: 420,
+      problemsHeight,
+      routeCollapsed: false,
+      inspectorCollapsed: false,
+      problemsCollapsed: false
+    };
+  }
+  if (viewportWidth >= 1440) {
+    return {
+      routeWidth: 300,
+      inspectorWidth: 380,
+      problemsHeight,
+      routeCollapsed: false,
+      inspectorCollapsed: false,
+      problemsCollapsed: false
+    };
+  }
+  if (viewportWidth >= 1366) {
+    return {
+      routeWidth: 260,
+      inspectorWidth: 340,
+      problemsHeight: 180,
+      routeCollapsed: false,
+      inspectorCollapsed: false,
+      problemsCollapsed: true
+    };
+  }
+  return {
+    routeWidth: 240,
+    inspectorWidth: 320,
+    problemsHeight: 180,
+    routeCollapsed: false,
+    inspectorCollapsed: false,
+    problemsCollapsed: false
+  };
+}
+
+const defaultStudioLayout: StudioLayout = studioDefaultLayoutForViewport();
 
 const panelTabs: Array<{ id: StudioPanelId; label: string }> = [
   { id: "scene", label: "씬" },
-  { id: "choices", label: "연결" },
+  { id: "choices", label: "선택지" },
   { id: "stats", label: "조건" },
-  { id: "assets", label: "표시" },
+  { id: "assets", label: "에셋" },
   { id: "validation", label: "검증" }
 ];
 
@@ -90,11 +125,12 @@ export function studioLayoutStorageKey(projectId?: string): string {
   return `vn-maker:studio-layout:${projectId || "unknown"}`;
 }
 
-export function clampStudioLayout(input: Partial<StudioLayout>): StudioLayout {
+export function clampStudioLayout(input: Partial<StudioLayout>, fallback = defaultStudioLayout, viewportHeight = STUDIO_MIN_HEIGHT): StudioLayout {
+  const maxProblemsHeight = Math.max(96, Math.floor(viewportHeight * 0.4));
   return {
-    routeWidth: clampNumber(input.routeWidth, defaultStudioLayout.routeWidth, 200, 380),
-    inspectorWidth: clampNumber(input.inspectorWidth, defaultStudioLayout.inspectorWidth, 280, 460),
-    problemsHeight: clampNumber(input.problemsHeight, defaultStudioLayout.problemsHeight, 128, 320),
+    routeWidth: clampNumber(input.routeWidth, fallback.routeWidth, 240, 420),
+    inspectorWidth: clampNumber(input.inspectorWidth, fallback.inspectorWidth, 320, 520),
+    problemsHeight: clampNumber(input.problemsHeight, fallback.problemsHeight, 96, maxProblemsHeight),
     routeCollapsed: input.routeCollapsed === true,
     inspectorCollapsed: input.inspectorCollapsed === true,
     problemsCollapsed: input.problemsCollapsed === true
@@ -374,7 +410,7 @@ export function StudioWorkspace({
 }: StudioWorkspaceProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const viewport = useViewportSize();
-  const [layout, setLayout] = useState(defaultStudioLayout);
+  const [layout, setLayout] = useState(() => studioDefaultLayoutForViewport());
   const [layoutStorageReadyKey, setLayoutStorageReadyKey] = useState("");
   const [draftScene, setDraftScene] = useState<ProjectScene | null>(null);
   const [saveState, setSaveState] = useState<StudioSaveState>("idle");
@@ -502,13 +538,14 @@ export function StudioWorkspace({
       setLayoutStorageReadyKey("");
       return;
     }
+    const viewportDefaultLayout = studioDefaultLayoutForViewport(viewport.width, viewport.height);
     const key = studioLayoutStorageKey(projectId);
     setLayoutStorageReadyKey("");
     try {
       const raw = localStorage.getItem(key);
-      setLayout(raw ? clampStudioLayout(JSON.parse(raw) as Partial<StudioLayout>) : defaultStudioLayout);
+      setLayout(raw ? clampStudioLayout(JSON.parse(raw) as Partial<StudioLayout>, viewportDefaultLayout, viewport.height) : viewportDefaultLayout);
     } catch {
-      setLayout(defaultStudioLayout);
+      setLayout(viewportDefaultLayout);
     } finally {
       setLayoutStorageReadyKey(key);
     }
@@ -517,8 +554,8 @@ export function StudioWorkspace({
   useEffect(() => {
     const key = projectId ? studioLayoutStorageKey(projectId) : "";
     if (!key || layoutStorageReadyKey !== key) return;
-    localStorage.setItem(key, JSON.stringify(clampStudioLayout(layout)));
-  }, [layout, layoutStorageReadyKey, projectId]);
+    localStorage.setItem(key, JSON.stringify(clampStudioLayout(layout, studioDefaultLayoutForViewport(viewport.width, viewport.height), viewport.height)));
+  }, [layout, layoutStorageReadyKey, projectId, viewport.height, viewport.width]);
 
   useEffect(() => {
     setDraftScene(cloneScene(selectedScene));
@@ -576,7 +613,7 @@ export function StudioWorkspace({
   }
 
   function updateLayout(nextLayout: Partial<StudioLayout>): void {
-    setLayout((current) => clampStudioLayout({ ...current, ...nextLayout }));
+    setLayout((current) => clampStudioLayout({ ...current, ...nextLayout }, current, viewport.height));
   }
 
   async function loadFixedPrompts(): Promise<void> {
@@ -1047,7 +1084,7 @@ export function StudioWorkspace({
   const selectedFixedPrompt = fixedPrompts.find((fixture) => fixture.promptId === selectedFixedPromptId) || fixedPrompts[0] || null;
   const rootStyle = {
     "--studio-inspector-width": `${layout.inspectorCollapsed ? 48 : layout.inspectorWidth}px`,
-    "--studio-problems-height": `${layout.problemsCollapsed ? 38 : layout.problemsHeight}px`,
+    "--studio-problems-height": `${layout.problemsCollapsed ? 34 : layout.problemsHeight}px`,
     "--studio-route-width": `${layout.routeCollapsed ? 48 : layout.routeWidth}px`
   } as CSSProperties;
 
@@ -1099,7 +1136,7 @@ export function StudioWorkspace({
           <Button disabled={Boolean(previewDisabledReason)} icon={<Play size={16} />} onClick={() => onNavigate(`/projects/${projectId}/preview`)} title={previewDisabledReason || "프리뷰로 이동"}>
             프리뷰
           </Button>
-          <Button icon={<Settings size={16} />} onClick={() => updateLayout(defaultStudioLayout)} variant="ghost">
+          <Button icon={<Settings size={16} />} onClick={() => updateLayout(studioDefaultLayoutForViewport(viewport.width, viewport.height))} variant="ghost">
             레이아웃 리셋
           </Button>
           <DiagnosticDrawer summary="Diagnostics">
@@ -1109,29 +1146,28 @@ export function StudioWorkspace({
               <div><dt>preview disabled reason</dt><dd>{previewDisabledReason || "없음"}</dd></div>
               <div><dt>검증 stale</dt><dd>{dirty ? "저장되지 않은 변경으로 stale 가능" : "현재 draft 기준"}</dd></div>
             </dl>
+            <div className="studio-layout-controls" aria-label="Studio layout settings">
+              <label>
+                <span>루트 맵 폭</span>
+                <input max="420" min="240" onChange={(event) => updateLayout({ routeWidth: Number(event.target.value) })} type="range" value={layout.routeWidth} />
+              </label>
+              <label>
+                <span>인스펙터 폭</span>
+                <input max="520" min="320" onChange={(event) => updateLayout({ inspectorWidth: Number(event.target.value) })} type="range" value={layout.inspectorWidth} />
+              </label>
+              <label>
+                <span>문제 패널 높이</span>
+                <input max={Math.max(96, Math.floor(viewport.height * 0.4))} min="96" onChange={(event) => updateLayout({ problemsHeight: Number(event.target.value) })} type="range" value={layout.problemsHeight} />
+              </label>
+            </div>
           </DiagnosticDrawer>
         </div>
       </header>
 
-      <div className="studio-layout-controls" aria-label="Studio layout settings">
-        <label>
-          <span>Route flow map 폭</span>
-          <input max="380" min="200" onChange={(event) => updateLayout({ routeWidth: Number(event.target.value) })} type="range" value={layout.routeWidth} />
-        </label>
-        <label>
-          <span>Inspector 폭</span>
-          <input max="460" min="280" onChange={(event) => updateLayout({ inspectorWidth: Number(event.target.value) })} type="range" value={layout.inspectorWidth} />
-        </label>
-        <label>
-          <span>Problems 높이</span>
-          <input max="320" min="128" onChange={(event) => updateLayout({ problemsHeight: Number(event.target.value) })} type="range" value={layout.problemsHeight} />
-        </label>
-      </div>
-
       <div className="studio-body">
         <aside aria-label="Route flow map" className={`studio-route-map ${layout.routeCollapsed ? "collapsed" : ""}`}>
           <div className="studio-panel-toolbar">
-            <strong>Route flow map</strong>
+            <strong>루트 맵</strong>
             <Button icon={layout.routeCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />} iconOnly onClick={() => updateLayout({ routeCollapsed: !layout.routeCollapsed })} title="루트 패널 접기" />
           </div>
           {layout.routeCollapsed ? null : (
@@ -1168,7 +1204,7 @@ export function StudioWorkspace({
                 <EmptyState
                   action={<Button icon={<Plus size={16} />} onClick={() => void createStartScene()} variant="primary">시작 씬 만들기</Button>}
                   title="씬이 아직 없습니다."
-                  description="첫 장면을 만들면 Route flow map과 Stage preview가 동시에 갱신됩니다."
+                  description="첫 장면을 만들면 루트 맵과 스테이지 미리보기가 동시에 갱신됩니다."
                 />
               )}
             </>
@@ -1179,7 +1215,7 @@ export function StudioWorkspace({
           <section aria-label="Stage preview" className="studio-stage">
             <div className="studio-stage-header">
               <div>
-                <strong>Stage preview</strong>
+                <strong>스테이지 미리보기</strong>
                 <span>{previewDisabledReason || "프리뷰 이동 가능"} · 문제 {problemCount}건</span>
               </div>
               <div className="button-row">
@@ -1219,7 +1255,7 @@ export function StudioWorkspace({
           <section aria-label="Script editor" className="studio-script-editor">
             <header>
               <div>
-                <strong>Script editor</strong>
+                <strong>스크립트 편집기</strong>
                 <span>{selectedScene?.id || "선택된 씬 없음"}</span>
               </div>
               <StatusChip tone={dirty ? "warning" : "success"}>{dirty ? "dirty" : "clean"}</StatusChip>
@@ -1240,14 +1276,14 @@ export function StudioWorkspace({
                 </label>
               </div>
             ) : (
-              <EmptyState title="선택된 씬이 없습니다." description="Route flow map에서 씬을 선택하거나 시작 씬을 만드세요." />
+              <EmptyState title="선택된 씬이 없습니다." description="루트 맵에서 씬을 선택하거나 시작 씬을 만드세요." />
             )}
           </section>
         </main>
 
         <aside aria-label="Inspector" className={`studio-inspector ${layout.inspectorCollapsed ? "collapsed" : ""}`}>
           <div className="studio-panel-toolbar">
-            <strong>Inspector</strong>
+            <strong>인스펙터</strong>
             <Button icon={layout.inspectorCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />} iconOnly onClick={() => updateLayout({ inspectorCollapsed: !layout.inspectorCollapsed })} title="인스펙터 접기" />
           </div>
           {layout.inspectorCollapsed ? null : (
@@ -1263,7 +1299,7 @@ export function StudioWorkspace({
                 <div className="studio-inspector-body">
                   {selectedPanel === "scene" ? (
                     <section>
-                      <h3>Scene</h3>
+                      <h3>씬</h3>
                       <label className="field-row">
                         <span>id</span>
                         <input readOnly ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.id || ""} />
@@ -1317,7 +1353,7 @@ export function StudioWorkspace({
                       <Button disabled={!draftScene.next || saveState === "saving"} icon={<GitBranch size={16} />} onClick={() => void linkExistingTarget({ targetSceneId: draftScene.next || "", type: "next" })}>
                         next 연결 저장
                       </Button>
-                      <h3>Choices 연결</h3>
+                      <h3>선택지 연결</h3>
                       <div className="button-row">
                         <Button disabled={Boolean(draftScene.next) || Boolean(draftScene.ending)} icon={<Plus size={16} />} onClick={addChoiceDraft}>
                           선택지 추가
@@ -1380,7 +1416,7 @@ export function StudioWorkspace({
 
                   {selectedPanel === "assets" ? (
                     <section>
-                      <h3>Assets</h3>
+                      <h3>에셋</h3>
                       <label className="field-row">
                         <span>background</span>
                         <select onChange={(event) => patchDraftScene({ backgroundAssetId: event.target.value || undefined })} ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.backgroundAssetId || ""}>
@@ -1395,7 +1431,7 @@ export function StudioWorkspace({
                           {cgAssets.map((asset) => <option key={asset.id || asset.uri} value={asset.id || ""}>{assetLabel(asset)}</option>)}
                         </select>
                       </label>
-                      <h3>relative characters</h3>
+                      <h3>캐릭터 표시</h3>
                       <div className="button-row">
                         <Button disabled={!project?.characters?.length} icon={<Plus size={16} />} onClick={addCharacterDisplay}>
                           캐릭터 표시 추가
@@ -1428,7 +1464,7 @@ export function StudioWorkspace({
 
                   {selectedPanel === "validation" ? (
                     <section>
-                      <h3>Validation</h3>
+                      <h3>검증</h3>
                       <p className="studio-disabled-note">저장 실패, 검증 stale, API failure 상태를 여기서 확인합니다.</p>
                       <ul className="studio-problem-list compact">
                         {visibleIssues.map((issue, index) => (
@@ -1440,7 +1476,7 @@ export function StudioWorkspace({
                           </li>
                         ))}
                       </ul>
-                      <h3>Generation result log</h3>
+                      <h3>생성 결과 로그</h3>
                       <label className="field-row">
                         <span>fixed prompt</span>
                         <select onChange={(event) => setSelectedFixedPromptId(event.target.value)} value={selectedFixedPrompt?.promptId || ""}>
@@ -1482,7 +1518,7 @@ export function StudioWorkspace({
 
       <section aria-label="Problems" className={`studio-problems-panel ${layout.problemsCollapsed ? "collapsed" : ""}`}>
         <div className="studio-panel-toolbar">
-          <strong>Problems</strong>
+          <strong>문제 패널</strong>
           <div className="button-row">
             <Button icon={<ListChecks size={16} />} onClick={() => void validateStudio()} variant="ghost">
               다시 검증
