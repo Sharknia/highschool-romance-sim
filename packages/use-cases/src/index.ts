@@ -3297,11 +3297,11 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
 
           const scene = sceneFromInput(project, record.scene);
           let route = project.routes[0];
-          if (!route && linkType === "none") {
+          if (!route && linkType === "none" && project.characters[0]?.id) {
             route = {
               id: "route-main",
               title: "기본 루트",
-              heroineId: project.characters[0]?.id || "manual-heroine",
+              heroineId: project.characters[0].id,
               summary: "",
               entrySceneId: scene.id,
               endings: []
@@ -3309,11 +3309,10 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             project.routes.push(route);
           }
           if (linkType === "none" && project.scenes.length === 0) {
-            if (!route) {
-              throw manualInputError("프로젝트에 route가 없습니다.", "routes");
+            if (route) {
+              route.entrySceneId = scene.id;
             }
-            route.entrySceneId = scene.id;
-            if (!project.settings.defaultRouteId) {
+            if (route && !project.settings.defaultRouteId) {
               project.settings.defaultRouteId = route.id;
             }
           }

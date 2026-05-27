@@ -472,6 +472,24 @@ assert.doesNotMatch(projectDetailViewSource, /studio-under-construction|제작 �
   const pattern = new RegExp(blockedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.doesNotMatch(`${studioBranch}\n${studioWorkspaceSource}`, pattern, `studio 탭은 '${blockedText}'를 노출하면 안 됩니다.`);
 });
+[
+  "sceneContentSavePayload",
+  "contentDirty",
+  "routingDirty",
+  "mergedStudioIssues",
+  "canonicalStudioQuery",
+  "unsupportedProjectPath",
+  "issuePanel",
+  "conditional-choice-runtime-unsupported",
+  "return \"stats\""
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace review 보정에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.match(studioWorkspaceSource, /scene:\s*sceneContentSavePayload\(draftScene,\s*selectedScene\)/, "Studio generic 저장은 next/choices/ending을 직접 우회 저장하면 안 됩니다.");
+assert.doesNotMatch(studioWorkspaceSource, /scene:\s*draftScene/, "Studio generic 저장은 draftScene 전체를 그대로 API에 보내면 안 됩니다.");
+assert.doesNotMatch(studioWorkspaceSource, /selectScene\(sceneId\);[\s\S]{0,120}setPanel\(nextPanel\);/, "문제 row focus는 stale searchParams 기반 scene/panel 연속 업데이트로 query를 덮으면 안 됩니다.");
+assert.match(projectDetailViewSource, /if \(activeTab === "studio"\)[\s\S]{0,220}return studioWorkspace/, "Studio 탭은 미지원 viewport에서 상세 shell chrome을 노출하지 않도록 workspace를 상위에서 바로 반환해야 합니다.");
 assert.doesNotMatch(studioWorkspaceSource, /conditionDraft|effectsDraft|setCondition|setEffects/, "조건/효과는 #105 전까지 프론트 임시 canonical 편집 모델을 만들면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /analyzeRouteGraph|routeGraphIssueToValidationIssue/, "StudioWorkspace는 route graph/domain 판단을 재구현하지 말고 API DTO를 표시해야 합니다.");
 [

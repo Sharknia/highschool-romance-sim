@@ -1011,9 +1011,9 @@ const noRouteStartInserted = await useCases.insertManualScene({
   }
 });
 assert.equal(noRouteStartInserted.ok, true);
-assert.equal(noRouteStartInserted.project.routes.length, 1);
-assert.equal(noRouteStartInserted.project.routes[0].entrySceneId, "scene-first-no-route");
-assert.equal(noRouteStartInserted.project.settings.defaultRouteId, noRouteStartInserted.project.routes[0].id);
+assert.equal(noRouteStartInserted.project.scenes.length, 1);
+assert.equal(noRouteStartInserted.project.routes.length, 0);
+assert.equal(noRouteStartInserted.validation.issues.some((issue) => issue.path === "routes.0.heroineId"), false);
 
 const preserveCreated = await useCases.createProjectFromHeroine({
   projectDirectory: preserveNextProjectDirectory,

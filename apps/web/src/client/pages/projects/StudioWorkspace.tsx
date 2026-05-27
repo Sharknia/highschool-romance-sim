@@ -55,6 +55,7 @@ interface StudioWorkspaceProps {
   previewPreflight: ProjectPreviewPreflight | null;
   project: ProjectData | null;
   projectDirectory: string;
+  projectId?: string;
   projectRevision?: ProjectRevision | null;
   repairActions: ProjectRepairAction[];
 }
@@ -158,6 +159,47 @@ function serializeScene(scene: ProjectScene | null): string {
   return JSON.stringify(scene || null);
 }
 
+function sceneContentSnapshot(scene: ProjectScene | null): Record<string, unknown> | null {
+  if (!scene) return null;
+  return {
+    id: scene.id || "",
+    label: scene.label || "",
+    speaker: scene.speaker || "",
+    text: scene.text || "",
+    backgroundAssetId: scene.backgroundAssetId || "",
+    cgAssetId: scene.cgAssetId || "",
+    characters: (scene.characters || []).map((character) => ({
+      assetId: character.assetId || "",
+      characterId: character.characterId || "",
+      expression: character.expression || "",
+      position: character.position || ""
+    }))
+  };
+}
+
+function sceneRoutingSnapshot(scene: ProjectScene | null): Record<string, unknown> | null {
+  if (!scene) return null;
+  return {
+    choices: (scene.choices || []).map((choice) => ({
+      id: choice.id || "",
+      next: choice.next || "",
+      text: choice.text || ""
+    })),
+    ending: scene.ending ? { ...scene.ending } : null,
+    next: scene.next || ""
+  };
+}
+
+function sceneContentSavePayload(draft: ProjectScene, source: ProjectScene | null): ProjectScene {
+  const content = sceneContentSnapshot(draft) || {};
+  return {
+    ...content,
+    choices: (source?.choices || []).map((choice) => ({ ...choice })),
+    ending: source?.ending ? { ...source.ending } : undefined,
+    next: source?.next
+  } as ProjectScene;
+}
+
 function issueText(issue: ProjectIssue): string {
   const code = issue.code ? `[${issue.code}] ` : "";
   const path = issue.path ? `${issue.path}: ` : "";
@@ -190,6 +232,29 @@ function preflightToIssues(preflight: ProjectPreviewPreflight | null): ProjectIs
     severity: "warning"
   }));
   return [...blockers, ...warnings];
+}
+
+function studioIssueKey(issue: ProjectIssue): string {
+  return [
+    issue.severity || "info",
+    issue.code || "",
+    issue.path || "",
+    issue.message || "",
+    (issue.sceneIds || []).join(","),
+    (issue.choiceIds || []).join(","),
+    issue.targetSceneId || ""
+  ].join("::");
+}
+
+function mergedStudioIssues(localIssues: ProjectIssue[], preflightIssues: ProjectIssue[]): ProjectIssue[] {
+  const issues = [...localIssues, ...preflightIssues];
+  const seen = new Set<string>();
+  return issues.filter((issue) => {
+    const key = studioIssueKey(issue);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function resultIssues(result: ProjectApiResult): ProjectIssue[] {
@@ -248,10 +313,25 @@ function findIssueSceneId(issue: ProjectIssue, project: ProjectData | null): str
 
 function issuePanel(issue: ProjectIssue): StudioPanelId {
   const path = issue.path || "";
+  if (issue.code === "conditional-choice-runtime-unsupported" || path.includes("condition") || path.includes("effects")) return "stats";
   if (path.includes("choices") || issue.choiceIds?.length) return "choices";
   if (path.includes("background") || path.includes("cgAssetId") || path.includes("characters")) return "assets";
   if (path.includes("ending") || path.includes("next")) return "choices";
   return "scene";
+}
+
+function canonicalStudioQuery(current: URLSearchParams, nextValues: { scene?: string; panel?: StudioPanelId }): URLSearchParams {
+  const next = new URLSearchParams(current);
+  if (nextValues.scene !== undefined) {
+    if (nextValues.scene) next.set("scene", nextValues.scene);
+    else next.delete("scene");
+  }
+  if (nextValues.panel !== undefined) {
+    next.set("panel", nextValues.panel);
+  } else if (!panelTabs.some((tab) => tab.id === next.get("panel"))) {
+    next.set("panel", "scene");
+  }
+  return next;
 }
 
 function focusLater(ref: RefObject<HTMLElement | null>): void {
@@ -270,6 +350,7 @@ export function StudioWorkspace({
   previewPreflight,
   project,
   projectDirectory,
+  projectId: routeProjectId,
   projectRevision,
   repairActions
 }: StudioWorkspaceProps) {
@@ -285,7 +366,7 @@ export function StudioWorkspace({
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inspectorFirstFieldRef = useRef<HTMLElement | null>(null);
 
-  const projectId = project?.id || "";
+  const projectId = project?.id || routeProjectId || "";
   const scenes = project?.scenes || [];
   const routes = project?.routes || [];
   const activeRoute = routes[0] || null;
@@ -297,8 +378,11 @@ export function StudioWorkspace({
   }, [activeRoute?.entrySceneId, scenes, selectedSceneQuery]);
   const originalSceneJson = useMemo(() => serializeScene(selectedScene), [selectedScene]);
   const draftSceneJson = useMemo(() => serializeScene(draftScene), [draftScene]);
-  const dirty = draftSceneJson !== originalSceneJson;
-  const visibleIssues = localIssues.length > 0 ? localIssues : preflightToIssues(previewPreflight);
+  const contentDirty = useMemo(() => JSON.stringify(sceneContentSnapshot(draftScene)) !== JSON.stringify(sceneContentSnapshot(selectedScene)), [draftSceneJson, originalSceneJson]);
+  const routingDirty = useMemo(() => JSON.stringify(sceneRoutingSnapshot(draftScene)) !== JSON.stringify(sceneRoutingSnapshot(selectedScene)), [draftSceneJson, originalSceneJson]);
+  const dirty = contentDirty || routingDirty;
+  const preflightIssues = useMemo(() => preflightToIssues(previewPreflight), [previewPreflight]);
+  const visibleIssues = useMemo(() => mergedStudioIssues(localIssues, preflightIssues), [localIssues, preflightIssues]);
   const problemCount = visibleIssues.length;
   const errorCount = visibleIssues.filter((issue) => issue.severity === "error").length;
   const previewDisabledReason = errorCount > 0
@@ -311,6 +395,7 @@ export function StudioWorkspace({
   const cgAssets = (project?.assets || []).filter((asset) => asset.kind === "cg");
   const sceneBackgroundAsset = backgroundAssets.find((asset) => asset.id === draftScene?.backgroundAssetId) || null;
   const sceneCgAsset = cgAssets.find((asset) => asset.id === draftScene?.cgAssetId) || null;
+  const unsupportedProjectPath = projectId ? `/projects/${projectId}/overview` : "/projects";
   const routeMapScenes = useMemo(() => {
     if (!activeRoute?.entrySceneId) {
       return scenes;
@@ -382,22 +467,17 @@ export function StudioWorkspace({
   }, [dirty, saveState]);
 
   useEffect(() => {
-    if (!selectedScene?.id || selectedSceneQuery === selectedScene.id) {
-      return;
+    const next = canonicalStudioQuery(searchParams, {
+      panel: selectedPanel,
+      scene: selectedScene?.id || selectedSceneQuery || ""
+    });
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
     }
-    updateQuery({ scene: selectedScene.id }, true);
-  }, [selectedScene?.id, selectedSceneQuery]);
+  }, [searchParams, selectedPanel, selectedScene?.id, selectedSceneQuery, setSearchParams]);
 
   function updateQuery(nextValues: { scene?: string; panel?: StudioPanelId }, replace = false): void {
-    const next = new URLSearchParams(searchParams);
-    if (nextValues.scene !== undefined) {
-      if (nextValues.scene) next.set("scene", nextValues.scene);
-      else next.delete("scene");
-    }
-    if (nextValues.panel !== undefined) {
-      if (nextValues.panel) next.set("panel", nextValues.panel);
-      else next.delete("panel");
-    }
+    const next = canonicalStudioQuery(searchParams, nextValues);
     setSearchParams(next, { replace });
   }
 
@@ -423,14 +503,6 @@ export function StudioWorkspace({
       if (!current) return current;
       const choices = [...(current.choices || [])];
       choices[index] = { ...choices[index], ...patch };
-      return { ...current, choices };
-    });
-  }
-
-  function removeChoice(index: number): void {
-    setDraftScene((current) => {
-      if (!current) return current;
-      const choices = (current.choices || []).filter((_, itemIndex) => itemIndex !== index);
       return { ...current, choices };
     });
   }
@@ -556,7 +628,7 @@ export function StudioWorkspace({
       const result = await postJson("/api/project/scenes", {
         expectedProjectRevision,
         projectDirectory,
-        scene: draftScene
+        scene: sceneContentSavePayload(draftScene, selectedScene)
       });
       if (isApiFailure(result)) {
         applyFailedResult(result, "씬을 저장하지 못했습니다.");
@@ -697,11 +769,8 @@ export function StudioWorkspace({
 
   function handleProblemFocus(issue: ProjectIssue): void {
     const sceneId = findIssueSceneId(issue, project);
-    if (sceneId) {
-      selectScene(sceneId);
-    }
     const nextPanel = issuePanel(issue);
-    setPanel(nextPanel);
+    updateQuery({ panel: nextPanel, scene: sceneId || selectedScene?.id || "" });
     if (nextPanel === "scene") {
       focusLater(scriptTextareaRef);
     } else {
@@ -725,7 +794,7 @@ export function StudioWorkspace({
           <p className="page-muted">현재 창: {viewport.width}x{viewport.height}</p>
         </div>
         <div className="button-row">
-          <Button icon={<Eye size={16} />} onClick={() => onNavigate(`/projects/${projectId || ""}/overview`)} variant="primary">
+          <Button icon={<Eye size={16} />} onClick={() => onNavigate(unsupportedProjectPath)} variant="primary">
             프로젝트 상세로 이동
           </Button>
           <Button icon={<GitBranch size={16} />} onClick={() => onNavigate("/projects")} variant="ghost">
@@ -748,7 +817,7 @@ export function StudioWorkspace({
           <span className="studio-command-status">{statusText}</span>
         </div>
         <div className="studio-command-actions">
-          <Button disabled={!draftScene || saveState === "saving" || !dirty} icon={<Save size={16} />} onClick={() => void saveDraftScene()} variant="primary">
+          <Button disabled={!draftScene || saveState === "saving" || !contentDirty} icon={<Save size={16} />} onClick={() => void saveDraftScene()} variant="primary">
             저장
           </Button>
           <Button disabled={saveState === "saving"} icon={<RefreshCw size={16} />} onClick={() => void validateStudio()}>
@@ -1002,7 +1071,6 @@ export function StudioWorkspace({
                               <Button disabled={!choice.next || saveState === "saving"} onClick={() => void linkExistingTarget({ choiceId: choice.id, choiceText: choice.text, targetSceneId: choice.next || "", type: "choice" })}>
                                 선택지 연결 저장
                               </Button>
-                              <Button onClick={() => removeChoice(index)} variant="ghost">삭제</Button>
                             </div>
                           </li>
                         ))}

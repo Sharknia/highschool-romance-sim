@@ -1469,6 +1469,25 @@ export function ProjectDetailView({
     }
   }
 
+  const studioWorkspace = (
+    <StudioWorkspace
+      navigationLabel={studioNavigationLabel}
+      onNavigate={navigate}
+      onProjectResult={onProjectResult}
+      postJson={(path, body) => postAuthedJson<ProjectApiResult>(path, body)}
+      previewPreflight={currentPreviewPreflight}
+      project={currentProject}
+      projectDirectory={projectDirectory}
+      projectId={detailProjectId}
+      projectRevision={currentPreviewPreflight?.projectRevision || null}
+      repairActions={currentRepairActions}
+    />
+  );
+
+  if (activeTab === "studio") {
+    return studioWorkspace;
+  }
+
   return (
     <section className="page-panel project-detail-panel" aria-labelledby="projectDetailTitle">
       <div className="section-header page-header">
@@ -1645,19 +1664,6 @@ export function ProjectDetailView({
               )}
             </section>
           </div>
-        ) : null}
-        {activeTab === "studio" ? (
-          <StudioWorkspace
-            navigationLabel={studioNavigationLabel}
-            onNavigate={navigate}
-            onProjectResult={onProjectResult}
-            postJson={(path, body) => postAuthedJson<ProjectApiResult>(path, body)}
-            previewPreflight={currentPreviewPreflight}
-            project={currentProject}
-            projectDirectory={projectDirectory}
-            projectRevision={currentPreviewPreflight?.projectRevision || null}
-            repairActions={currentRepairActions}
-          />
         ) : null}
         {activeTab === "background" ? (
           <div className="detail-tab-grid">
