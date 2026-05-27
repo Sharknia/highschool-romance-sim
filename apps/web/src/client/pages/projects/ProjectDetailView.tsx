@@ -716,7 +716,7 @@ export function ProjectDetailView({
   }
 
   function applyEventFailure(result: ProjectApiResult, fallbackMessage: string): void {
-    const stale = result.code === "PATCH_STALE" || result.code === "PROJECT_REVISION_CONFLICT" || result.httpStatus === 409;
+    const stale = result.code === "PATCH_STALE" || result.code === "STALE_PROJECT_REVISION" || result.code === "PROJECT_REVISION_CONFLICT" || result.httpStatus === 409;
     setEventState(stale ? "patchStale" : "patchInvalid");
     setEventStatus(result.message || result.error || fallbackMessage);
     setEventIssues(result.issues || result.validation?.issues || []);
@@ -782,6 +782,7 @@ export function ProjectDetailView({
     try {
       const result = await postAuthedJson<ProjectApiResult>("/api/events/approve", {
         projectDirectory,
+        expectedProjectRevision: pendingPatch.projectRevision,
         request: pendingPatch.request,
         plan: pendingPatch.plan,
         patchHistoryId: pendingPatch.patchHistoryEntry?.id

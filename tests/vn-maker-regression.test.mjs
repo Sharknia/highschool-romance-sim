@@ -23,6 +23,7 @@ const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const validationDtoParityDirectory = join(tempRoot, "ValidationDtoParity.vnmaker");
+const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
 const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
@@ -216,10 +217,14 @@ const cliOpen = JSON.parse(cliOpenOutput);
 assert.equal(cliOpen.ok, true);
 assert.equal(cliOpen.project.characters.some((character) => character.id === "mira"), true);
 assert.equal(cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.kind, "normal");
+const cliOpenRevisionStore = await projectStore.openProjectStore(projectDirectory);
+assert.deepEqual(cliOpen.projectRevision, cliOpenRevisionStore.getProjectRevision());
+cliOpenRevisionStore.close();
 
 const cliSaveSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
     projectDirectory,
+    expectedProjectRevision: cliOpen.projectRevision,
     scene: {
       ...cliOpen.project.scenes[0],
       text: "CLI가 같은 SQLite 프로젝트에 저장한 장면."
@@ -234,6 +239,7 @@ assert.match(cliSaveScene.project.scenes[0].text, /CLI가 같은 SQLite 프로�
 const cliSaveEndingSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
     projectDirectory,
+    expectedProjectRevision: cliSaveScene.projectRevision,
     scene: {
       ...cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
       text: "CLI가 ending metadata를 포함한 장면을 저장했다."
@@ -328,11 +334,95 @@ assert.deepEqual(
   }
 );
 
+const revisionGuardProject = core.createStarterProject({
+  id: "revision-guard",
+  title: "Revision Guard",
+  premise: "expectedProjectRevision과 transactional apply를 검증한다."
+});
+const revisionGuardStore = await projectStore.createProjectWorkspace({
+  projectDirectory: revisionGuardDirectory,
+  project: revisionGuardProject
+});
+const revisionGuardInitialRevision = revisionGuardStore.getProjectRevision();
+const revisionGuardEntrySceneId = revisionGuardProject.routes[0].entrySceneId;
+const revisionGuardEntryScene = revisionGuardProject.scenes.find((scene) => scene.id === revisionGuardEntrySceneId);
+revisionGuardStore.close();
+
+const revisionGuardInvalidScene = {
+  ...revisionGuardEntryScene,
+  text: "revision guard가 검증 문제 저장까지 한 번에 처리한다.",
+  next: undefined,
+  choices: [{ id: "choice-stale-target", text: "사라진 장면으로 간다", next: "scene-stale-missing" }]
+};
+const revisionGuardApiApply = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes",
+  body: {
+    projectDirectory: revisionGuardDirectory,
+    expectedProjectRevision: revisionGuardInitialRevision,
+    scene: revisionGuardInvalidScene
+  }
+});
+assert.equal(revisionGuardApiApply.status, 200);
+assert.equal(revisionGuardApiApply.body.ok, true);
+assert.equal(revisionGuardApiApply.body.previousRevision.revision, revisionGuardInitialRevision.revision);
+assert.notEqual(revisionGuardApiApply.body.projectRevision.revision, revisionGuardInitialRevision.revision);
+assert.equal(revisionGuardApiApply.body.validation.ok, false);
+assert.equal(revisionGuardApiApply.body.validation.issues.some((issue) => issue.code === "missing-target"), true);
+
+const revisionGuardAfterApplyStore = await projectStore.openProjectStore(revisionGuardDirectory);
+const storedRevisionGuardIssue = revisionGuardAfterApplyStore.readValidationIssues().find((issue) => issue.code === "missing-target");
+assert.ok(storedRevisionGuardIssue, "transactional apply must store validation issue codes");
+assert.deepEqual(storedRevisionGuardIssue.sceneIds, [revisionGuardEntrySceneId]);
+assert.deepEqual(storedRevisionGuardIssue.choiceIds, ["choice-stale-target"]);
+revisionGuardAfterApplyStore.close();
+
+const staleRevisionGuardScene = {
+  ...revisionGuardInvalidScene,
+  text: "stale mutation이 이 텍스트로 덮어쓰면 안 된다."
+};
+const revisionGuardApiStale = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes",
+  body: {
+    projectDirectory: revisionGuardDirectory,
+    expectedProjectRevision: revisionGuardInitialRevision,
+    scene: staleRevisionGuardScene
+  }
+});
+assert.equal(revisionGuardApiStale.status, 409);
+assert.equal(revisionGuardApiStale.body.code, "STALE_PROJECT_REVISION");
+assert.equal(revisionGuardApiStale.body.expectedRevision, revisionGuardInitialRevision.revision);
+assert.equal(revisionGuardApiStale.body.actualRevision.revision, revisionGuardApiApply.body.projectRevision.revision);
+assert.equal(revisionGuardApiStale.body.nextAction, "최신 프로젝트를 다시 불러온 뒤 시도하세요.");
+
+const revisionGuardCliStale = spawnSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+  input: JSON.stringify({
+    projectDirectory: revisionGuardDirectory,
+    expectedProjectRevision: revisionGuardInitialRevision,
+    scene: staleRevisionGuardScene
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(revisionGuardCliStale.status, 0);
+const revisionGuardCliStaleBody = JSON.parse(revisionGuardCliStale.stdout);
+assert.equal(revisionGuardCliStaleBody.code, "STALE_PROJECT_REVISION");
+assert.equal(revisionGuardCliStaleBody.expectedRevision, revisionGuardApiStale.body.expectedRevision);
+assert.equal(revisionGuardCliStaleBody.actualRevision.revision, revisionGuardApiStale.body.actualRevision.revision);
+assert.equal(revisionGuardCliStaleBody.nextAction, revisionGuardApiStale.body.nextAction);
+
+const revisionGuardAfterStaleStore = await projectStore.openProjectStore(revisionGuardDirectory);
+const revisionGuardAfterStaleProject = revisionGuardAfterStaleStore.requireProject();
+assert.equal(revisionGuardAfterStaleProject.scenes.find((scene) => scene.id === revisionGuardEntrySceneId).text, revisionGuardInvalidScene.text);
+assert.notEqual(revisionGuardAfterStaleProject.scenes.find((scene) => scene.id === revisionGuardEntrySceneId).text, staleRevisionGuardScene.text);
+revisionGuardAfterStaleStore.close();
+
 const apiScene = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/project/scenes",
   body: {
     projectDirectory,
+    expectedProjectRevision: cliSaveEndingScene.projectRevision,
     scene: {
       ...cliSaveEndingScene.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
       text: "Web API가 ending metadata를 포함한 장면을 저장했다."
@@ -400,9 +490,10 @@ const manualCliCreate = JSON.parse(manualCliCreateOutput);
 assert.equal(manualCliCreate.ok, true);
 const manualCliOpeningId = manualCliCreate.project.routes[0].entrySceneId;
 
-execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+const manualCliOpenBranchOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliCreate.projectRevision,
     scene: {
       ...manualCliCreate.project.scenes.find((scene) => scene.id === manualCliOpeningId),
       next: undefined
@@ -410,10 +501,12 @@ execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   }),
   encoding: "utf8"
 });
+const manualCliOpenBranch = JSON.parse(manualCliOpenBranchOutput);
 
 const manualCliInsertOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "insert-scene"], {
   input: JSON.stringify({
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliOpenBranch.projectRevision,
     sourceSceneId: manualCliOpeningId,
     link: { type: "choice", choiceId: "choice-good", choiceText: "고백한다" },
     scene: {
@@ -434,6 +527,7 @@ assert.equal(manualCliInsert.selectedSceneId, "scene-cli-good-ending");
 const manualCliEndingOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "set-scene-ending"], {
   input: JSON.stringify({
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliInsert.projectRevision,
     sceneId: "scene-cli-good-ending",
     ending: { id: "ending-cli-good", title: "CLI의 약속", kind: "good" }
   }),
@@ -448,6 +542,7 @@ const manualApiInsert = await webHandlers.handleApiRequest({
   path: "/api/project/scenes/insert",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliEnding.projectRevision,
     link: { type: "none" },
     scene: {
       id: "scene-api-normal-ending",
@@ -468,6 +563,7 @@ const manualApiLink = await webHandlers.handleApiRequest({
   path: "/api/project/scenes/link",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualApiInsert.body.projectRevision,
     sourceSceneId: manualCliOpeningId,
     targetSceneId: "scene-api-normal-ending",
     link: { type: "choice", choiceId: "choice-normal", choiceText: "전시를 마무리한다" }
@@ -478,11 +574,87 @@ assert.equal(manualApiLink.body.ok, true);
 assert.deepEqual(manualApiLink.body.routeGraphAnalysis.uncoveredTerminalSceneIds, []);
 assert.deepEqual([...manualApiLink.body.routeGraphAnalysis.reachableEndingIds].sort(), ["ending-api-normal", "ending-cli-good"]);
 
+const manualStaleRevision = manualApiInsert.body.projectRevision;
+const manualApiStaleInsert = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/insert",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sourceSceneId: "scene-does-not-exist",
+    link: { type: "choice", choiceText: "stale insert가 먼저 막힌다" },
+    scene: {
+      id: "scene-stale-insert",
+      label: "Stale Insert",
+      speaker: "하루",
+      text: "이 장면은 저장되면 안 된다.",
+      characters: [],
+      choices: []
+    }
+  }
+});
+assert.equal(manualApiStaleInsert.status, 409);
+assert.equal(manualApiStaleInsert.body.code, "STALE_PROJECT_REVISION");
+assert.equal(manualApiStaleInsert.body.expectedRevision, manualStaleRevision.revision);
+assert.equal(manualApiStaleInsert.body.actualRevision.revision, manualApiLink.body.projectRevision.revision);
+assert.equal(manualApiStaleInsert.body.nextAction, "최신 프로젝트를 다시 불러온 뒤 시도하세요.");
+
+const manualApiStaleLink = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/link",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sourceSceneId: "scene-does-not-exist",
+    targetSceneId: "scene-also-missing",
+    link: { type: "choice", choiceText: "stale link가 먼저 막힌다" }
+  }
+});
+assert.equal(manualApiStaleLink.status, 409);
+assert.equal(manualApiStaleLink.body.code, "STALE_PROJECT_REVISION");
+assert.equal(manualApiStaleLink.body.expectedRevision, manualStaleRevision.revision);
+assert.equal(manualApiStaleLink.body.actualRevision.revision, manualApiLink.body.projectRevision.revision);
+assert.equal(manualApiStaleLink.body.nextAction, manualApiStaleInsert.body.nextAction);
+
+const manualApiStaleEnding = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/ending",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sceneId: "scene-does-not-exist",
+    ending: { id: "ending-stale", title: "Stale Ending", kind: "bad" }
+  }
+});
+assert.equal(manualApiStaleEnding.status, 409);
+assert.equal(manualApiStaleEnding.body.code, "STALE_PROJECT_REVISION");
+assert.equal(manualApiStaleEnding.body.expectedRevision, manualStaleRevision.revision);
+assert.equal(manualApiStaleEnding.body.actualRevision.revision, manualApiLink.body.projectRevision.revision);
+assert.equal(manualApiStaleEnding.body.nextAction, manualApiStaleInsert.body.nextAction);
+
+const manualCliStaleLink = spawnSync(process.execPath, ["packages/cli/dist/index.js", "link-scene"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sourceSceneId: "scene-does-not-exist",
+    targetSceneId: "scene-also-missing",
+    link: { type: "choice", choiceText: "stale CLI link가 먼저 막힌다" }
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(manualCliStaleLink.status, 0);
+const manualCliStaleLinkBody = JSON.parse(manualCliStaleLink.stdout);
+assert.equal(manualCliStaleLinkBody.code, "STALE_PROJECT_REVISION");
+assert.equal(manualCliStaleLinkBody.expectedRevision, manualApiStaleLink.body.expectedRevision);
+assert.equal(manualCliStaleLinkBody.actualRevision.revision, manualApiStaleLink.body.actualRevision.revision);
+assert.equal(manualCliStaleLinkBody.nextAction, manualApiStaleLink.body.nextAction);
+
 const manualApiMissingTarget = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/project/scenes/link",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualApiLink.body.projectRevision,
     sourceSceneId: manualCliOpeningId,
     targetSceneId: "scene-does-not-exist",
     link: { type: "choice", choiceText: "없는 장면으로 간다" }
@@ -496,6 +668,7 @@ const manualApiEndingFailure = await webHandlers.handleApiRequest({
   path: "/api/project/scenes/ending",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualApiLink.body.projectRevision,
     sceneId: manualCliOpeningId,
     ending: { id: "ending-api-bad", title: "갑작스런 끝", kind: "bad" },
     clearOutgoing: false
@@ -1555,6 +1728,7 @@ const apiApprove = await mockApi({
   path: "/api/events/approve",
   body: {
     projectDirectory: alphaDirectory,
+    expectedProjectRevision: apiExpand.body.projectRevision,
     request: apiExpand.body.request,
     plan: apiExpand.body.plan
   }
@@ -1562,6 +1736,8 @@ const apiApprove = await mockApi({
 assert.equal(apiApprove.status, 200);
 assert.equal(apiApprove.body.validation.ok, true);
 assert.equal(apiApprove.body.project.scenes.length, 5);
+assert.equal(apiApprove.body.previousRevision.revision, apiExpand.body.projectRevision.revision);
+assert.notEqual(apiApprove.body.projectRevision.revision, apiExpand.body.projectRevision.revision);
 
 const approvedProject = apiApprove.body.project;
 const plannedCgJob = approvedProject.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");

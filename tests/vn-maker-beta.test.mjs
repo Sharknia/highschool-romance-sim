@@ -154,7 +154,8 @@ const expressionScene = {
   characters: [{ characterId: "haru-festival", expression: "happy", position: "center" }],
   choices: []
 };
-await useCases.saveScene({ projectDirectory: activeProjectDirectory, scene: expressionScene });
+const afterTaggedOpen = await useCases.openProject({ projectDirectory: activeProjectDirectory });
+const savedExpressionScene = await useCases.saveScene({ projectDirectory: activeProjectDirectory, expectedProjectRevision: afterTaggedOpen.projectRevision, scene: expressionScene });
 const expressionPreview = await useCases.previewProject({ projectDirectory: activeProjectDirectory, startSceneId: "scene-happy-expression" });
 const previewScene = expressionPreview.runtime.scenes.find((scene) => scene.id === "scene-happy-expression");
 assert.equal(previewScene.characters[0].asset.id, defaults.project.characters[0].expressionAssetIds.happy);
@@ -169,7 +170,7 @@ const expressionSceneWithPortrait = {
     position: "center"
   }]
 };
-await useCases.saveScene({ projectDirectory: activeProjectDirectory, scene: expressionSceneWithPortrait });
+await useCases.saveScene({ projectDirectory: activeProjectDirectory, expectedProjectRevision: savedExpressionScene.projectRevision, scene: expressionSceneWithPortrait });
 const expressionPriorityPreview = await useCases.previewProject({ projectDirectory: activeProjectDirectory, startSceneId: "scene-happy-expression-explicit-portrait" });
 const priorityScene = expressionPriorityPreview.runtime.scenes.find((scene) => scene.id === "scene-happy-expression-explicit-portrait");
 assert.equal(priorityScene.characters[0].asset.id, defaults.project.characters[0].expressionAssetIds.happy);
@@ -228,7 +229,12 @@ const badPlan = {
   }
 };
 await assert.rejects(
-  () => useCases.approveEvent({ projectDirectory: activeProjectDirectory, request: expanded.request, plan: badPlan }),
+  () => useCases.approveEvent({
+    projectDirectory: activeProjectDirectory,
+    expectedProjectRevision: expanded.projectRevision,
+    request: expanded.request,
+    plan: badPlan
+  }),
   /패치 검증 실패/
 );
 const failedHistory = await useCases.listPatchHistory({ projectDirectory: activeProjectDirectory });
@@ -236,6 +242,7 @@ assert.equal(failedHistory.entries.some((entry) => entry.status === "failed" && 
 
 const approved = await useCases.approveEvent({
   projectDirectory: activeProjectDirectory,
+  expectedProjectRevision: expanded.projectRevision,
   request: expanded.request,
   plan: expanded.plan,
   patchHistoryId: expanded.patchHistoryEntry.id
@@ -269,6 +276,7 @@ const secondExpanded = await useCases.expandEvent({
 assert.equal(secondExpanded.ok, true);
 const secondApproved = await useCases.approveEvent({
   projectDirectory: activeProjectDirectory,
+  expectedProjectRevision: secondExpanded.projectRevision,
   request: secondExpanded.request,
   plan: secondExpanded.plan,
   patchHistoryId: secondExpanded.patchHistoryEntry.id
@@ -277,7 +285,7 @@ const manuallyEditedScene = {
   ...secondApproved.project.scenes[0],
   text: `${secondApproved.project.scenes[0].text} 수동 수정`
 };
-await useCases.saveScene({ projectDirectory: activeProjectDirectory, scene: manuallyEditedScene });
+await useCases.saveScene({ projectDirectory: activeProjectDirectory, expectedProjectRevision: secondApproved.projectRevision, scene: manuallyEditedScene });
 await assert.rejects(
   () => useCases.undoPatch({ projectDirectory: activeProjectDirectory, patchHistoryId: secondApproved.patchHistoryEntry.id }),
   /현재 프로젝트가 패치 적용 직후 상태와 달라/

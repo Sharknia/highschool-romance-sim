@@ -40,6 +40,7 @@ interface CliInput {
   heroineId?: string;
   sourceHeroineId?: string;
   expectedHeroineRevision?: unknown;
+  expectedProjectRevision?: unknown;
   confirmName?: string;
   confirmId?: string;
   draft?: unknown;

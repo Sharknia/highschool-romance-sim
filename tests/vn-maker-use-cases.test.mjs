@@ -845,6 +845,7 @@ assert.equal(assignedSnapshot.workflowSummary.primaryAction, "goToBackground");
 const blankOpeningSceneId = assignedSnapshot.project.routes[0].entrySceneId;
 const blankSceneBeforeBackground = await useCases.insertManualScene({
   projectDirectory: blankProjectDirectory,
+  expectedProjectRevision: assignedSnapshot.projectRevision,
   sourceSceneId: blankOpeningSceneId,
   link: {
     type: "next",
@@ -873,8 +874,10 @@ assert.equal(
   blankAssignedBackground.project.scenes.every((scene) => scene.backgroundAssetId === "asset-blank-assigned-background"),
   true
 );
+const blankAfterBackgroundOpen = await useCases.openProject({ projectDirectory: blankProjectDirectory });
 const blankSceneAfterBackground = await useCases.insertManualScene({
   projectDirectory: blankProjectDirectory,
+  expectedProjectRevision: blankAfterBackgroundOpen.projectRevision,
   sourceSceneId: "scene-blank-before-background",
   link: {
     type: "next",
@@ -940,6 +943,7 @@ const preserveOpening = preserveCreated.project.routes[0].entrySceneId;
 const previousNext = preserveCreated.project.scenes.find((scene) => scene.id === preserveOpening).next;
 const preservedInsert = await useCases.insertManualScene({
   projectDirectory: preserveNextProjectDirectory,
+  expectedProjectRevision: preserveCreated.projectRevision,
   sourceSceneId: preserveOpening,
   link: {
     type: "next",
@@ -962,6 +966,7 @@ assert.equal(preservedInsert.validation.ok, true);
 const manualOpening = manualCreated.project.routes[0].entrySceneId;
 const openedBranch = await useCases.saveScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: manualCreated.projectRevision,
   scene: {
     ...manualCreated.project.scenes.find((scene) => scene.id === manualOpening),
     next: undefined
@@ -994,6 +999,7 @@ assert.equal(invalidPreview.previewReadiness.nextAction.includes("해결 탭으�
 
 const insertedGood = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: openedBranch.projectRevision,
   sourceSceneId: manualOpening,
   link: {
     type: "choice",
@@ -1015,6 +1021,7 @@ assert.equal(insertedGood.routeGraphAnalysis.issues.some((issue) => issue.code =
 
 const goodEnded = await useCases.setSceneEnding({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: insertedGood.projectRevision,
   sceneId: "scene-good-ending",
   ending: {
     id: "ending-good",
@@ -1027,6 +1034,7 @@ assert.equal(goodEnded.routeGraphAnalysis.reachableEndingIds.includes("ending-go
 
 const insertedNormal = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: goodEnded.projectRevision,
   link: { type: "none" },
   scene: {
     id: "scene-normal-ending",
@@ -1047,6 +1055,7 @@ assert.equal(insertedNormal.routeGraphAnalysis.orphanSceneIds.includes("scene-no
 
 const linkedNormal = await useCases.linkManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: insertedNormal.projectRevision,
   sourceSceneId: manualOpening,
   targetSceneId: "scene-normal-ending",
   link: {
@@ -1063,6 +1072,7 @@ assert.equal(linkedNormal.project.scenes.find((scene) => scene.id === manualOpen
 await assert.rejects(
   () => useCases.linkManualScene({
     projectDirectory: manualProjectDirectory,
+    expectedProjectRevision: linkedNormal.projectRevision,
     sourceSceneId: "scene-good-ending",
     targetSceneId: "scene-normal-ending",
     link: { type: "next" }
@@ -1072,6 +1082,7 @@ await assert.rejects(
 
 const nextInserted = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: linkedNormal.projectRevision,
   sourceSceneId: "scene-normal-ending",
   link: { type: "next" },
   scene: {
@@ -1087,6 +1098,7 @@ assert.match(nextInserted.message, /엔딩 장면 뒤에는 연결할 수 없습
 
 const endingNeedsConfirmation = await useCases.setSceneEnding({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: linkedNormal.projectRevision,
   sceneId: manualOpening,
   ending: {
     id: "ending-opening",
@@ -1099,6 +1111,7 @@ assert.match(endingNeedsConfirmation.message, /다음 장면이나 선택지를 
 
 const clearedOpeningEnding = await useCases.setSceneEnding({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: linkedNormal.projectRevision,
   sceneId: manualOpening,
   ending: {
     id: "ending-opening",
@@ -1120,6 +1133,7 @@ assert.equal(expanded.plan.decision.sceneCount, 3);
 
 const approved = await useCases.approveEvent({
   projectDirectory,
+  expectedProjectRevision: expanded.projectRevision,
   request: expanded.request,
   plan: expanded.plan
 });

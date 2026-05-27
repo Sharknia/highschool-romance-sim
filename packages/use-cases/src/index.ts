@@ -12,6 +12,7 @@ import {
   createHeroineProfile,
   createHeroinePortraitPrompt,
   createImageGenerationJob,
+  createProjectRevision,
   planExpressionAssetsForHeroine,
   createProjectFromHeroine,
   createStarterProject,
@@ -23,6 +24,7 @@ import {
   parseVnMakerCharacter,
   parseVnMakerProject,
   parseVnMakerScene,
+  upsertProjectScene,
   validateEventExpansionPlan,
   validateProject as validateProjectSnapshot,
   type CreateImageGenerationJobInput,
@@ -32,6 +34,7 @@ import {
   type EventExpansionRequest,
   type EventExpansionValidationResult,
   type HeroineProfile,
+  type ProjectRevisionDto,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -52,6 +55,7 @@ import {
   type RecentProjectIndexEntry,
   type RecentProjectValidationState,
   type ProjectStore,
+  type ProjectRevisionInput,
   type StoredHeroineProfile
 } from "@vn-maker/project-store";
 
@@ -265,6 +269,7 @@ export type ProjectActionFailureCode =
   | "RECENT_PROJECT_INDEX_MISS"
   | "PROJECT_DIRECTORY_MISSING"
   | "PROJECT_ID_MISMATCH"
+  | "STALE_PROJECT_REVISION"
   | "PROJECT_REVISION_CONFLICT"
   | "HEROINE_REQUIRED"
   | "HEROINE_REPLACE_BLOCKED"
@@ -288,6 +293,8 @@ export interface ProjectActionFailureDto {
   projectDirectory?: string;
   expectedProjectId?: string;
   actualProjectId?: string;
+  expectedRevision?: string;
+  actualRevision?: ProjectRevisionDto;
   workflowSummary?: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
   exportPlan?: ProjectExportPlanDto;
@@ -339,6 +346,11 @@ const projectFailureContracts: Record<ProjectActionFailureCode, Omit<ProjectFail
     retryable: false
   },
   PROJECT_REVISION_CONFLICT: {
+    message: "프로젝트가 다른 곳에서 변경되었습니다.",
+    nextAction: "최신 프로젝트를 다시 불러온 뒤 시도하세요.",
+    retryable: false
+  },
+  STALE_PROJECT_REVISION: {
     message: "프로젝트가 다른 곳에서 변경되었습니다.",
     nextAction: "최신 프로젝트를 다시 불러온 뒤 시도하세요.",
     retryable: false
@@ -945,13 +957,13 @@ function attachProjectFailureContext(
 function withActionState<T extends JsonRecord>(
   action: MakerActionId,
   body: T,
-  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] } } = {}
+  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] }; projectRevision?: ProjectRevisionDto } = {}
 ): T & {
   ok: boolean;
   requestId: string;
   action: MakerActionId;
   baseProjectHash?: string;
-  projectRevision?: string;
+  projectRevision?: ProjectRevisionDto;
   workflowSummary: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
   exportPlan?: ProjectExportPlanDto;
@@ -960,6 +972,7 @@ function withActionState<T extends JsonRecord>(
   const validation = options.validation || (asRecord(body).validation as { ok?: boolean; issues?: ValidationIssue[] } | undefined);
   const explicitPreviewReadiness = asRecord(body).previewReadiness as ProjectPreviewReadinessDto | undefined;
   const explicitExportPlan = asRecord(body).exportPlan as ProjectExportPlanDto | undefined;
+  const explicitProjectRevision = options.projectRevision || (asRecord(body).projectRevision as ProjectRevisionDto | undefined);
   const stateValidation = project ? validationForProjectState(project, validation) : validation;
   const projectHash = project ? hashProjectSnapshot(project) : undefined;
   const previewReadiness = project
@@ -974,11 +987,27 @@ function withActionState<T extends JsonRecord>(
     requestId: createRequestId(),
     action,
     baseProjectHash: projectHash,
-    projectRevision: projectHash,
+    projectRevision: explicitProjectRevision || (project ? createProjectRevision(project, new Date().toISOString()) : undefined),
     workflowSummary: createWorkflowSummary(project, stateValidation),
     ...(previewReadiness ? { previewReadiness } : {}),
     ...(exportPlan ? { exportPlan } : {})
   };
+}
+
+function withStoreActionState<T extends JsonRecord>(
+  action: MakerActionId,
+  store: ProjectStore,
+  body: T,
+  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] } } = {}
+) {
+  const projectRevision = store.getProjectRevision();
+  return withActionState(action, {
+    ...body,
+    projectRevision
+  }, {
+    ...options,
+    projectRevision
+  });
 }
 
 function backgroundPolicy(project: VnMakerProject): BackgroundPolicyDto {
@@ -1013,6 +1042,7 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
     || code === "RECENT_PROJECT_INDEX_MISS"
     || code === "PROJECT_DIRECTORY_MISSING"
     || code === "PROJECT_ID_MISMATCH"
+    || code === "STALE_PROJECT_REVISION"
     || code === "PROJECT_REVISION_CONFLICT"
     || code === "HEROINE_REQUIRED"
     || code === "HEROINE_REPLACE_BLOCKED"
@@ -1099,6 +1129,8 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
     expectedProjectId,
     actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
+    expectedRevision: typeof errorRecord.expectedRevision === "string" ? errorRecord.expectedRevision : undefined,
+    actualRevision: errorRecord.actualRevision && typeof errorRecord.actualRevision === "object" ? errorRecord.actualRevision as ProjectRevisionDto : undefined,
     workflowSummary,
     previewReadiness,
     exportPlan,
@@ -1306,8 +1338,22 @@ function uniqueEndingId(project: VnMakerProject, sceneId: string): string {
   throw new Error(`ending id를 생성할 수 없습니다: ${base}`);
 }
 
-function projectClone(project: VnMakerProject): VnMakerProject {
-  return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+function expectedProjectRevisionFrom(input: unknown): ProjectRevisionInput {
+  const value = asRecord(input).expectedProjectRevision;
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (value && typeof value === "object") {
+    const revision = asRecord(value).revision;
+    if (typeof revision === "string" && revision.trim()) {
+      return value as ProjectRevisionDto;
+    }
+  }
+  throw new InputValidationError("expectedProjectRevision 입력이 필요합니다.", [{
+    severity: "error",
+    path: "expectedProjectRevision",
+    message: "최신 projectRevision 기준으로만 변경할 수 있습니다."
+  }]);
 }
 
 function manualInputError(message: string, path: string, sceneIds?: string[], choiceIds?: string[]): InputValidationError {
@@ -1365,15 +1411,31 @@ function endingFromInput(project: VnMakerProject, sceneId: string, inputEnding: 
   return candidate as VnMakerSceneEnding;
 }
 
-function manualMutationResult(store: ProjectStore, project: VnMakerProject, selectedSceneId: string) {
-  const savedProject = store.saveProject(project);
-  const validation = store.validateAndStore();
-  const routeGraphAnalysis = analyzeRouteGraph(savedProject);
+function manualTransactionalMutationResult(
+  store: ProjectStore,
+  input: unknown,
+  mutate: (project: VnMakerProject) => { project: VnMakerProject; selectedSceneId: string }
+) {
+  let selectedSceneId = "";
+  const result = store.applyProjectMutation({
+    expectedProjectRevision: expectedProjectRevisionFrom(input),
+    mutate: (project) => {
+      const outcome = mutate(project);
+      if (!outcome.selectedSceneId) {
+        throw new Error("selectedSceneId를 결정할 수 없습니다.");
+      }
+      selectedSceneId = outcome.selectedSceneId;
+      return outcome.project;
+    }
+  });
+  const routeGraphAnalysis = analyzeRouteGraph(result.project);
   return {
     ok: true,
     projectDirectory: store.paths.projectDirectory,
-    project: savedProject,
-    validation,
+    project: result.project,
+    previousRevision: result.previousRevision,
+    projectRevision: result.projectRevision,
+    validation: result.validation,
     routeGraphAnalysis,
     selectedSceneId
   };
@@ -2144,7 +2206,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return withActionState("createProject", {
+        return withStoreActionState("createProject", store, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           project: savedProject,
@@ -2190,7 +2252,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return withActionState("createProjectFromHeroine", {
+        return withStoreActionState("createProjectFromHeroine", store, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           heroine,
@@ -2224,7 +2286,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const savedProject = store.saveProject(nextProject);
         store.recordHeroineReuse(heroine.id, savedProject);
         const validation = store.validateAndStore();
-        return withActionState("assignHeroineSnapshot", {
+        return withStoreActionState("assignHeroineSnapshot", store, {
           projectDirectory: store.paths.projectDirectory,
           heroine,
           project: savedProject,
@@ -2246,7 +2308,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return withActionState(action, {
+        return withStoreActionState(action, store, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           project,
@@ -2610,9 +2672,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async saveScene(input: unknown) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = store.upsertScene(requiredScene(input));
-        const validation = store.validateAndStore();
-        return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation };
+        const scene = requiredScene(input);
+        const result = store.applyProjectMutation({
+          expectedProjectRevision: expectedProjectRevisionFrom(input),
+          mutate: (project) => upsertProjectScene(project, scene)
+        });
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project: result.project,
+          previousRevision: result.previousRevision,
+          projectRevision: result.projectRevision,
+          validation: result.validation
+        };
       } finally {
         store.close();
       }
@@ -2622,58 +2694,59 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = projectClone(store.requireProject());
-        const route = project.routes[0];
-        if (!route) {
-          throw manualInputError("프로젝트에 route가 없습니다.", "routes");
-        }
-
-        const link = asRecord(record.link);
-        const linkType = typeof link.type === "string" ? link.type : "none";
-        if (!["none", "next", "choice"].includes(linkType)) {
-          throw manualInputError("link.type은 none, next, choice 중 하나여야 합니다.", "link.type");
-        }
-        if (linkType !== "none" && typeof record.sourceSceneId !== "string") {
-          throw manualInputError("sourceSceneId 입력이 필요합니다.", "sourceSceneId");
-        }
-
-        const sourceScene = typeof record.sourceSceneId === "string"
-          ? project.scenes.find((scene) => scene.id === record.sourceSceneId)
-          : undefined;
-        if (linkType !== "none" && !sourceScene) {
-          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [String(record.sourceSceneId || "")]);
-        }
-        if (sourceScene?.ending) {
-          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
-        }
-
-        const scene = sceneFromInput(project, record.scene);
-        if (linkType === "next" && sourceScene) {
-          if (sourceScene.choices.length > 0) {
-            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+        return manualTransactionalMutationResult(store, input, (project) => {
+          const route = project.routes[0];
+          if (!route) {
+            throw manualInputError("프로젝트에 route가 없습니다.", "routes");
           }
-          if (sourceScene.next && link.preservePreviousNext === true && !scene.ending && !scene.next) {
-            scene.next = sourceScene.next;
-          }
-          sourceScene.next = scene.id;
-        }
-        if (linkType === "choice" && sourceScene) {
-          if (sourceScene.next) {
-            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
-          }
-          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
-          if (!choiceText) {
-            throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id]);
-          }
-          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
-            ? link.choiceId.trim()
-            : uniqueChoiceId(sourceScene, choiceText);
-          const choice: VnMakerChoice = { id: choiceId, text: choiceText, next: scene.id };
-          sourceScene.choices.push(choice);
-        }
 
-        project.scenes.push(scene);
-        return manualMutationResult(store, project, scene.id);
+          const link = asRecord(record.link);
+          const linkType = typeof link.type === "string" ? link.type : "none";
+          if (!["none", "next", "choice"].includes(linkType)) {
+            throw manualInputError("link.type은 none, next, choice 중 하나여야 합니다.", "link.type");
+          }
+          if (linkType !== "none" && typeof record.sourceSceneId !== "string") {
+            throw manualInputError("sourceSceneId 입력이 필요합니다.", "sourceSceneId");
+          }
+
+          const sourceScene = typeof record.sourceSceneId === "string"
+            ? project.scenes.find((scene) => scene.id === record.sourceSceneId)
+            : undefined;
+          if (linkType !== "none" && !sourceScene) {
+            throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [String(record.sourceSceneId || "")]);
+          }
+          if (sourceScene?.ending) {
+            throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+          }
+
+          const scene = sceneFromInput(project, record.scene);
+          if (linkType === "next" && sourceScene) {
+            if (sourceScene.choices.length > 0) {
+              throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            if (sourceScene.next && link.preservePreviousNext === true && !scene.ending && !scene.next) {
+              scene.next = sourceScene.next;
+            }
+            sourceScene.next = scene.id;
+          }
+          if (linkType === "choice" && sourceScene) {
+            if (sourceScene.next) {
+              throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+            if (!choiceText) {
+              throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id]);
+            }
+            const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+              ? link.choiceId.trim()
+              : uniqueChoiceId(sourceScene, choiceText);
+            const choice: VnMakerChoice = { id: choiceId, text: choiceText, next: scene.id };
+            sourceScene.choices.push(choice);
+          }
+
+          project.scenes.push(scene);
+          return { project, selectedSceneId: scene.id };
+        });
       } finally {
         store.close();
       }
@@ -2683,53 +2756,54 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = projectClone(store.requireProject());
-        const sourceSceneId = String(record.sourceSceneId || "");
-        const targetSceneId = String(record.targetSceneId || "");
-        const sourceScene = project.scenes.find((scene) => scene.id === sourceSceneId);
-        const targetScene = project.scenes.find((scene) => scene.id === targetSceneId);
-        if (!sourceScene) {
-          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [sourceSceneId]);
-        }
-        if (!targetScene) {
-          throw manualInputError("연결할 target scene을 찾을 수 없습니다.", "targetSceneId", [targetSceneId]);
-        }
-        if (sourceScene.ending) {
-          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
-        }
+        return manualTransactionalMutationResult(store, input, (project) => {
+          const sourceSceneId = String(record.sourceSceneId || "");
+          const targetSceneId = String(record.targetSceneId || "");
+          const sourceScene = project.scenes.find((scene) => scene.id === sourceSceneId);
+          const targetScene = project.scenes.find((scene) => scene.id === targetSceneId);
+          if (!sourceScene) {
+            throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [sourceSceneId]);
+          }
+          if (!targetScene) {
+            throw manualInputError("연결할 target scene을 찾을 수 없습니다.", "targetSceneId", [targetSceneId]);
+          }
+          if (sourceScene.ending) {
+            throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+          }
 
-        const link = asRecord(record.link);
-        const linkType = typeof link.type === "string" ? link.type : "next";
-        if (linkType === "next") {
-          if (sourceScene.choices.length > 0) {
-            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
-          }
-          sourceScene.next = targetScene.id;
-        } else if (linkType === "choice") {
-          if (sourceScene.next) {
-            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
-          }
-          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
-          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
-            ? link.choiceId.trim()
-            : uniqueChoiceId(sourceScene, choiceText || targetScene.label);
-          const existingChoice = sourceScene.choices.find((choice) => choice.id === choiceId);
-          if (existingChoice) {
-            existingChoice.next = targetScene.id;
-            if (choiceText) {
-              existingChoice.text = choiceText;
+          const link = asRecord(record.link);
+          const linkType = typeof link.type === "string" ? link.type : "next";
+          if (linkType === "next") {
+            if (sourceScene.choices.length > 0) {
+              throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            sourceScene.next = targetScene.id;
+          } else if (linkType === "choice") {
+            if (sourceScene.next) {
+              throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+            const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+              ? link.choiceId.trim()
+              : uniqueChoiceId(sourceScene, choiceText || targetScene.label);
+            const existingChoice = sourceScene.choices.find((choice) => choice.id === choiceId);
+            if (existingChoice) {
+              existingChoice.next = targetScene.id;
+              if (choiceText) {
+                existingChoice.text = choiceText;
+              }
+            } else {
+              if (!choiceText) {
+                throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id], [choiceId]);
+              }
+              sourceScene.choices.push({ id: choiceId, text: choiceText, next: targetScene.id });
             }
           } else {
-            if (!choiceText) {
-              throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id], [choiceId]);
-            }
-            sourceScene.choices.push({ id: choiceId, text: choiceText, next: targetScene.id });
+            throw manualInputError("link.type은 next 또는 choice여야 합니다.", "link.type", [sourceScene.id]);
           }
-        } else {
-          throw manualInputError("link.type은 next 또는 choice여야 합니다.", "link.type", [sourceScene.id]);
-        }
 
-        return manualMutationResult(store, project, targetScene.id);
+          return { project, selectedSceneId: targetScene.id };
+        });
       } finally {
         store.close();
       }
@@ -2739,27 +2813,28 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = projectClone(store.requireProject());
-        const sceneId = String(record.sceneId || "");
-        const scene = project.scenes.find((item) => item.id === sceneId);
-        if (!scene) {
-          throw manualInputError("엔딩을 설정할 scene을 찾을 수 없습니다.", "sceneId", [sceneId]);
-        }
+        return manualTransactionalMutationResult(store, input, (project) => {
+          const sceneId = String(record.sceneId || "");
+          const scene = project.scenes.find((item) => item.id === sceneId);
+          if (!scene) {
+            throw manualInputError("엔딩을 설정할 scene을 찾을 수 없습니다.", "sceneId", [sceneId]);
+          }
 
-        if (record.ending === null) {
-          scene.ending = undefined;
-          return manualMutationResult(store, project, scene.id);
-        }
+          if (record.ending === null) {
+            scene.ending = undefined;
+            return { project, selectedSceneId: scene.id };
+          }
 
-        if ((scene.next || scene.choices.length > 0) && record.clearOutgoing !== true) {
-          throw manualInputError("엔딩으로 지정하려면 다음 장면이나 선택지를 제거해야 합니다.", "clearOutgoing", [scene.id]);
-        }
-        if (record.clearOutgoing === true) {
-          scene.next = undefined;
-          scene.choices = [];
-        }
-        scene.ending = endingFromInput(project, scene.id, record.ending);
-        return manualMutationResult(store, project, scene.id);
+          if ((scene.next || scene.choices.length > 0) && record.clearOutgoing !== true) {
+            throw manualInputError("엔딩으로 지정하려면 다음 장면이나 선택지를 제거해야 합니다.", "clearOutgoing", [scene.id]);
+          }
+          if (record.clearOutgoing === true) {
+            scene.next = undefined;
+            scene.choices = [];
+          }
+          scene.ending = endingFromInput(project, scene.id, record.ending);
+          return { project, selectedSceneId: scene.id };
+        });
       } finally {
         store.close();
       }
@@ -2782,7 +2857,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       try {
         const validation = store.validateAndStore();
         const project = store.requireProject();
-        return withActionState("validateProject", {
+        return withStoreActionState("validateProject", store, {
           ok: validation.ok,
           projectDirectory: store.paths.projectDirectory,
           issues: validation.issues,
@@ -2862,7 +2937,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             attempts: result.attempts,
             validation
           });
-          return withActionState("expandEvent", {
+          return withStoreActionState("expandEvent", store, {
             ok: false,
             projectDirectory: store.paths.projectDirectory,
             request,
@@ -2883,7 +2958,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           beforeProject: project,
           afterProject: result.validation.appliedProject
         });
-        return withActionState("expandEvent", {
+        return withStoreActionState("expandEvent", store, {
           projectDirectory: store.paths.projectDirectory,
           request,
           plan: result.plan,
@@ -2903,8 +2978,13 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const sourcePatchHistoryId = typeof record.patchHistoryId === "string" ? record.patchHistoryId : undefined;
-        const result = store.applyEventExpansionPlan(requiredEventRequest(input), requiredEventPlan(input), sourcePatchHistoryId);
-        return withActionState("approveEvent", { projectDirectory: store.paths.projectDirectory, ...result }, {
+        const result = store.applyEventExpansionPlan({
+          expectedProjectRevision: expectedProjectRevisionFrom(input),
+          request: requiredEventRequest(input),
+          plan: requiredEventPlan(input),
+          sourcePatchHistoryId
+        });
+        return withStoreActionState("approveEvent", store, { projectDirectory: store.paths.projectDirectory, ...result }, {
           project: result.project,
           validation: result.validation
         });
@@ -2926,7 +3006,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const validation = store.validateAndStore();
         const initialReadiness = previewReadinessFor(project, validation);
         if (!initialReadiness.canRun) {
-          return withActionState("previewProject", {
+          return withStoreActionState("previewProject", store, {
             ok: false,
             code: "PREVIEW_BLOCKED",
             message: initialReadiness.failureCause,
@@ -2948,7 +3028,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             failureCause: messageFromError(error),
             retryable: true
           });
-          return withActionState("previewProject", {
+          return withStoreActionState("previewProject", store, {
             ok: false,
             code: "SERVER_ERROR",
             message: messageFromError(error),
@@ -2960,7 +3040,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         }
         const previewReadiness = previewReadinessFor(project, runtime.validation);
         if (!previewReadiness.canRun) {
-          return withActionState("previewProject", {
+          return withStoreActionState("previewProject", store, {
             ok: false,
             code: "PREVIEW_BLOCKED",
             message: previewReadiness.failureCause,
@@ -2970,7 +3050,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             previewReadiness
           }, { project, validation: runtime.validation });
         }
-        return withActionState("previewProject", {
+        return withStoreActionState("previewProject", store, {
           projectDirectory: store.paths.projectDirectory,
           runtime,
           validation: runtime.validation,
@@ -3019,7 +3099,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           failureCause: result.smoke.ok ? undefined : "실행 확인 결과 실패했습니다.",
           retryable: !result.smoke.ok
         });
-        return withActionState("exportProject", {
+        return withStoreActionState("exportProject", store, {
           projectDirectory: store.paths.projectDirectory,
           ...result,
           ok: result.smoke.ok,
@@ -3110,7 +3190,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             ...job,
             asset: job.outputAssetId ? assetMap.get(job.outputAssetId) : undefined
           }));
-        return withActionState("listGenerationJobs", { projectDirectory: store.paths.projectDirectory, jobs, backgroundPolicy: backgroundPolicy(project) }, { project });
+        return withStoreActionState("listGenerationJobs", store, { projectDirectory: store.paths.projectDirectory, jobs, backgroundPolicy: backgroundPolicy(project) }, { project });
       } finally {
         store.close();
       }
@@ -3168,7 +3248,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           }
         }
         const failure = errors.length > 0 ? imageGenerationFailureFromMessages(errors) : null;
-        return withActionState("runGenerationJobs", {
+        return withStoreActionState("runGenerationJobs", store, {
           ok: errors.length === 0,
           ...(failure || {}),
           projectDirectory: store.paths.projectDirectory,

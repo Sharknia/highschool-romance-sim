@@ -31,6 +31,14 @@ export interface VnMakerProject {
   settings: VnMakerProjectSettings;
 }
 
+export const PROJECT_REVISION_HASH_ALGORITHM = "vn-maker-project-snapshot-fnv1a/v1";
+
+export interface ProjectRevisionDto {
+  revision: string;
+  hashAlgorithm: typeof PROJECT_REVISION_HASH_ALGORITHM;
+  createdAt: string;
+}
+
 export interface VnMakerProjectSettings {
   defaultRouteId: string;
   outputFileName: string;
@@ -1042,6 +1050,14 @@ function hashString(value: string): string {
 
 export function hashProjectSnapshot(project: VnMakerProject): string {
   return hashString(JSON.stringify(project));
+}
+
+export function createProjectRevision(project: VnMakerProject, createdAt: string): ProjectRevisionDto {
+  return {
+    revision: hashProjectSnapshot(project),
+    hashAlgorithm: PROJECT_REVISION_HASH_ALGORITHM,
+    createdAt
+  };
 }
 
 function uniqueById<T extends { id: string }>(items: T[], path: string, issues: ValidationIssue[]): Set<string> {

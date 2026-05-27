@@ -9,6 +9,7 @@ import {
   buildPlayerRuntimeScript,
   buildProjectHtml,
   applyGenerationResultToProject,
+  createProjectRevision,
   createPlayerRuntimeData,
   createStarterProject,
   hashProjectSnapshot,
@@ -26,6 +27,7 @@ import {
   type CreateStarterProjectInput,
   type EventExpansionValidationResult,
   type HeroineReuseRecord,
+  type ProjectRevisionDto,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -123,6 +125,15 @@ export interface ProjectValidationResult {
   issues: ValidationIssue[];
 }
 
+export type ProjectRevisionInput = ProjectRevisionDto | string;
+
+export interface TransactionalProjectMutationResult {
+  project: VnMakerProject;
+  validation: ProjectValidationResult;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+}
+
 export class PatchStaleError extends Error {
   readonly code = "PATCH_STALE";
   readonly issues: ValidationIssue[];
@@ -134,11 +145,34 @@ export class PatchStaleError extends Error {
   }
 }
 
+export class StaleProjectRevisionError extends Error {
+  readonly code = "STALE_PROJECT_REVISION";
+  readonly expectedRevision: string;
+  readonly actualRevision: ProjectRevisionDto;
+  readonly nextAction = "최신 프로젝트를 다시 불러온 뒤 시도하세요.";
+
+  constructor(input: { expectedRevision: string; actualRevision: ProjectRevisionDto }) {
+    super("프로젝트가 다른 곳에서 변경되었습니다.");
+    this.name = "StaleProjectRevisionError";
+    this.expectedRevision = input.expectedRevision;
+    this.actualRevision = input.actualRevision;
+  }
+}
+
 export interface ApplyEventExpansionResult {
   project: VnMakerProject;
   validation: ProjectValidationResult;
   diff: ProjectPatchDescription;
   patchHistoryEntry: PatchHistoryEntry;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+}
+
+export interface ApplyEventExpansionInput {
+  request: EventExpansionRequest;
+  plan: EventExpansionPlan;
+  expectedProjectRevision: ProjectRevisionInput;
+  sourcePatchHistoryId?: string;
 }
 
 export type PatchHistoryStatus = "proposed" | "applied" | "failed";
@@ -212,6 +246,7 @@ interface ProjectRow {
   version: string;
   title: string;
   premise: string;
+  updated_at: string;
 }
 
 interface SettingsRow {
@@ -325,6 +360,17 @@ interface GenerationJobRow {
   prompt_hash: string | null;
   adapter: string | null;
   position: number;
+}
+
+interface ValidationIssueRow {
+  severity: ValidationIssue["severity"];
+  path: string;
+  message: string;
+  code: string | null;
+  domain: string | null;
+  scene_ids_json: string | null;
+  choice_ids_json: string | null;
+  target_scene_id: string | null;
 }
 
 interface PatchHistoryRow {
@@ -552,6 +598,17 @@ ALTER TABLE generation_jobs ADD COLUMN fallback_reason TEXT;
 ALTER TABLE generation_jobs ADD COLUMN pack_version TEXT;
 ALTER TABLE generation_jobs ADD COLUMN source_generated_by TEXT;
 `
+  },
+  {
+    id: 7,
+    name: "validation_issue_metadata",
+    sql: `
+ALTER TABLE validation_issues ADD COLUMN code TEXT;
+ALTER TABLE validation_issues ADD COLUMN domain TEXT;
+ALTER TABLE validation_issues ADD COLUMN scene_ids_json TEXT;
+ALTER TABLE validation_issues ADD COLUMN choice_ids_json TEXT;
+ALTER TABLE validation_issues ADD COLUMN target_scene_id TEXT;
+`
   }
 ] as const;
 
@@ -576,6 +633,23 @@ function hashText(value: string): string {
 
 function normalizeNullable(value: string | undefined): string | null {
   return value && value.length > 0 ? value : null;
+}
+
+function revisionValue(input: ProjectRevisionInput): string {
+  return typeof input === "string" ? input : input.revision;
+}
+
+function validationIssueFromRow(row: ValidationIssueRow): ValidationIssue {
+  return {
+    severity: row.severity,
+    path: row.path,
+    message: row.message,
+    code: row.code ? row.code as ValidationIssue["code"] : undefined,
+    domain: row.domain ? row.domain as ValidationIssue["domain"] : undefined,
+    sceneIds: parseJson<string[] | undefined>(row.scene_ids_json, undefined),
+    choiceIds: parseJson<string[] | undefined>(row.choice_ids_json, undefined),
+    targetSceneId: row.target_scene_id || undefined
+  };
 }
 
 function assertProjectSnapshot(project: VnMakerProject): void {
@@ -1028,7 +1102,7 @@ export class ProjectStore {
   }
 
   getProject(): VnMakerProject | null {
-    const project = this.db.prepare("SELECT id, version, title, premise FROM projects ORDER BY updated_at DESC LIMIT 1").get() as ProjectRow | undefined;
+    const project = this.db.prepare("SELECT id, version, title, premise, updated_at FROM projects ORDER BY updated_at DESC LIMIT 1").get() as ProjectRow | undefined;
     if (!project) {
       return null;
     }
@@ -1158,6 +1232,12 @@ ORDER BY position ASC, id ASC
       throw new Error("프로젝트 저장소가 비어 있습니다. 먼저 프로젝트를 생성하거나 가져와야 합니다.");
     }
     return project;
+  }
+
+  getProjectRevision(): ProjectRevisionDto {
+    const project = this.requireProject();
+    const row = this.db.prepare("SELECT updated_at FROM projects WHERE id = ?").get(project.id) as { updated_at: string } | undefined;
+    return createProjectRevision(project, row?.updated_at || nowIso());
   }
 
   listHeroines(): HeroineProfile[] {
@@ -1316,20 +1396,23 @@ WHERE project_id = @projectId AND id = @id AND consumed_at IS NULL
   }
 
   saveProject(project: VnMakerProject): VnMakerProject {
+    return this.runInTransaction(() => this.writeProject(project));
+  }
+
+  private writeProject(project: VnMakerProject): VnMakerProject {
     project = applySingleBackgroundScenePolicy(project);
     assertProjectSnapshot(project);
 
-    this.runInTransaction(() => {
-      const now = nowIso();
-      const previousProject = this.db.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
-      const preservedAssets = this.readAssetMetadata(project.id);
-      const preservedJobs = this.readGenerationJobMetadata(project.id);
+    const now = nowIso();
+    const previousProject = this.db.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
+    const preservedAssets = this.readAssetMetadata(project.id);
+    const preservedJobs = this.readGenerationJobMetadata(project.id);
 
-      if (previousProject && previousProject.id !== project.id) {
-        this.db.prepare("DELETE FROM projects WHERE id = ?").run(previousProject.id);
-      }
+    if (previousProject && previousProject.id !== project.id) {
+      this.db.prepare("DELETE FROM projects WHERE id = ?").run(previousProject.id);
+    }
 
-      this.db.prepare(`
+    this.db.prepare(`
 INSERT INTO projects (id, version, title, premise, created_at, updated_at)
 VALUES (@id, @version, @title, @premise, @now, @now)
 ON CONFLICT(id) DO UPDATE SET
@@ -1339,7 +1422,7 @@ ON CONFLICT(id) DO UPDATE SET
   updated_at = excluded.updated_at
 `).run({ ...project, now });
 
-      this.db.prepare(`
+    this.db.prepare(`
 INSERT INTO project_settings (project_id, default_route_id, output_file_name, language)
 VALUES (@projectId, @defaultRouteId, @outputFileName, @language)
 ON CONFLICT(project_id) DO UPDATE SET
@@ -1500,7 +1583,6 @@ VALUES (
           now
         });
       });
-    });
 
     return this.requireProject();
   }
@@ -1511,6 +1593,38 @@ VALUES (
 
   upsertScene(scene: VnMakerScene): VnMakerProject {
     return this.saveProject(upsertProjectScene(this.requireProject(), scene));
+  }
+
+  private assertExpectedProjectRevision(expectedProjectRevision: ProjectRevisionInput): ProjectRevisionDto {
+    const previousRevision = this.getProjectRevision();
+    const expectedRevision = revisionValue(expectedProjectRevision);
+    if (expectedRevision !== previousRevision.revision) {
+      throw new StaleProjectRevisionError({
+        expectedRevision,
+        actualRevision: previousRevision
+      });
+    }
+    return previousRevision;
+  }
+
+  applyProjectMutation(input: {
+    expectedProjectRevision: ProjectRevisionInput;
+    mutate: (project: VnMakerProject) => VnMakerProject;
+  }): TransactionalProjectMutationResult {
+    return this.runInTransaction(() => {
+      const currentProject = this.requireProject();
+      const previousRevision = this.assertExpectedProjectRevision(input.expectedProjectRevision);
+
+      const nextProject = input.mutate(JSON.parse(JSON.stringify(currentProject)) as VnMakerProject);
+      const savedProject = this.writeProject(nextProject);
+      const validation = this.validateAndStoreCurrentProject();
+      return {
+        project: savedProject,
+        validation,
+        previousRevision,
+        projectRevision: this.getProjectRevision()
+      };
+    });
   }
 
   async storeGenerationResult(input: StoreGenerationResultInput): Promise<VnMakerProject> {
@@ -1527,65 +1641,78 @@ VALUES (
   }
 
   validateAndStore(): ProjectValidationResult {
+    return this.runInTransaction(() => this.validateAndStoreCurrentProject());
+  }
+
+  private validateAndStoreCurrentProject(): ProjectValidationResult {
     const project = this.requireProject();
     const issues = validateProject(project);
-    this.saveValidationIssues(project.id, issues);
+    this.writeValidationIssues(project.id, issues);
     return {
       ok: issues.every((issue) => issue.severity !== "error"),
       issues
     };
   }
 
-  applyEventExpansionPlan(
-    request: EventExpansionRequest,
-    plan: EventExpansionPlan,
-    sourcePatchHistoryId?: string
-  ): ApplyEventExpansionResult {
-    const project = this.requireProject();
-    const sourcePatchHistoryEntry = sourcePatchHistoryId ? this.getPatchHistoryEntry(sourcePatchHistoryId) : null;
-    if (sourcePatchHistoryId && !sourcePatchHistoryEntry) {
-      throw new Error(`패치 제안 이력을 찾을 수 없습니다: ${sourcePatchHistoryId}`);
-    }
-    const patchValidation = validateEventExpansionPlan(project, request, plan);
-    if (!patchValidation.ok || !patchValidation.appliedProject) {
-      this.saveValidationIssues(project.id, patchValidation.issues);
-      this.recordPatchHistory({
-        status: "failed",
-        summary: plan.summary || "패치 검증 실패",
-        request,
-        plan,
+  applyEventExpansionPlan(input: ApplyEventExpansionInput): ApplyEventExpansionResult {
+    const outcome = this.runInTransaction<ApplyEventExpansionResult | { error: Error }>(() => {
+      const project = this.requireProject();
+      const previousRevision = this.assertExpectedProjectRevision(input.expectedProjectRevision);
+      const sourcePatchHistoryEntry = input.sourcePatchHistoryId ? this.getPatchHistoryEntry(input.sourcePatchHistoryId) : null;
+      if (input.sourcePatchHistoryId && !sourcePatchHistoryEntry) {
+        throw new Error(`패치 제안 이력을 찾을 수 없습니다: ${input.sourcePatchHistoryId}`);
+      }
+      const patchValidation = validateEventExpansionPlan(project, input.request, input.plan);
+      if (!patchValidation.ok || !patchValidation.appliedProject) {
+        this.writeValidationIssues(project.id, patchValidation.issues);
+        this.recordPatchHistory({
+          status: "failed",
+          summary: input.plan.summary || "패치 검증 실패",
+          request: input.request,
+          plan: input.plan,
+          rawOutput: sourcePatchHistoryEntry?.rawOutput,
+          attempts: sourcePatchHistoryEntry?.attempts,
+          validation: patchValidation,
+          diff: patchValidation.diff,
+          beforeProject: project
+        });
+        return {
+          error: patchValidation.issues.some((issue) => issue.path === "request.baseProjectHash")
+            ? new StaleProjectRevisionError({
+                expectedRevision: previousRevision.revision,
+                actualRevision: previousRevision
+              })
+            : new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`)
+        };
+      }
+
+      const savedProject = this.writeProject(patchValidation.appliedProject);
+      const validation = this.validateAndStoreCurrentProject();
+      const patchHistoryEntry = this.recordPatchHistory({
+        status: "applied",
+        summary: input.plan.summary,
+        request: input.request,
+        plan: input.plan,
         rawOutput: sourcePatchHistoryEntry?.rawOutput,
         attempts: sourcePatchHistoryEntry?.attempts,
-        validation: patchValidation,
+        validation,
         diff: patchValidation.diff,
-        beforeProject: project
+        beforeProject: project,
+        afterProject: savedProject
       });
-      if (patchValidation.issues.some((issue) => issue.path === "request.baseProjectHash")) {
-        throw new PatchStaleError(patchValidation.issues);
-      }
-      throw new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`);
-    }
-
-    const savedProject = this.saveProject(patchValidation.appliedProject);
-    const validation = this.validateAndStore();
-    const patchHistoryEntry = this.recordPatchHistory({
-      status: "applied",
-      summary: plan.summary,
-      request,
-      plan,
-      rawOutput: sourcePatchHistoryEntry?.rawOutput,
-      attempts: sourcePatchHistoryEntry?.attempts,
-      validation,
-      diff: patchValidation.diff,
-      beforeProject: project,
-      afterProject: savedProject
+      return {
+        project: savedProject,
+        validation,
+        diff: patchValidation.diff,
+        patchHistoryEntry,
+        previousRevision,
+        projectRevision: this.getProjectRevision()
+      };
     });
-    return {
-      project: savedProject,
-      validation,
-      diff: patchValidation.diff,
-      patchHistoryEntry
-    };
+    if ("error" in outcome) {
+      throw outcome.error;
+    }
+    return outcome;
   }
 
   previewProject(startSceneId?: string): PlayerRuntimeData {
@@ -1634,12 +1761,12 @@ VALUES (
   readValidationIssues(): ValidationIssue[] {
     const project = this.requireProject();
     const rows = this.db.prepare(`
-SELECT severity, path, message
+SELECT severity, path, message, code, domain, scene_ids_json, choice_ids_json, target_scene_id
 FROM validation_issues
 WHERE project_id = ?
 ORDER BY id ASC
-`).all(project.id) as ValidationIssue[];
-    return rows;
+`).all(project.id) as ValidationIssueRow[];
+    return rows.map(validationIssueFromRow);
   }
 
   listPatchHistory(): PatchHistoryEntry[] {
@@ -1775,16 +1902,31 @@ WHERE project_id = ? AND id = ?
     return rewrites;
   }
 
-  private saveValidationIssues(projectId: string, issues: ValidationIssue[]): void {
-    this.runInTransaction(() => {
-      const createdAt = nowIso();
-      this.db.prepare("DELETE FROM validation_issues WHERE project_id = ?").run(projectId);
-      const insertIssue = this.db.prepare(`
-INSERT INTO validation_issues (project_id, severity, path, message, created_at)
-VALUES (@projectId, @severity, @path, @message, @createdAt)
+  private writeValidationIssues(projectId: string, issues: ValidationIssue[]): void {
+    const createdAt = nowIso();
+    this.db.prepare("DELETE FROM validation_issues WHERE project_id = ?").run(projectId);
+    const insertIssue = this.db.prepare(`
+INSERT INTO validation_issues (
+  project_id, severity, path, message, code, domain, scene_ids_json,
+  choice_ids_json, target_scene_id, created_at
+)
+VALUES (
+  @projectId, @severity, @path, @message, @code, @domain, @sceneIdsJson,
+  @choiceIdsJson, @targetSceneId, @createdAt
+)
 `);
-      issues.forEach((issue) => insertIssue.run({ projectId, ...issue, createdAt }));
-    });
+    issues.forEach((issue) => insertIssue.run({
+      projectId,
+      severity: issue.severity,
+      path: issue.path,
+      message: issue.message,
+      code: issue.code || null,
+      domain: issue.domain || null,
+      sceneIdsJson: issue.sceneIds ? json(issue.sceneIds) : null,
+      choiceIdsJson: issue.choiceIds ? json(issue.choiceIds) : null,
+      targetSceneId: issue.targetSceneId || null,
+      createdAt
+    }));
   }
 
   private readAssetMetadata(projectId: string): Map<string, AssetRow> {

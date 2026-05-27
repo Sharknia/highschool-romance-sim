@@ -74,6 +74,17 @@ export interface ProjectIssue {
   severity?: string;
   path?: string;
   message?: string;
+  code?: string;
+  domain?: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+}
+
+export interface ProjectRevision {
+  revision: string;
+  hashAlgorithm: string;
+  createdAt: string;
 }
 
 export interface ProjectPatchDescription {
@@ -234,7 +245,10 @@ export interface ProjectApiResult extends ApiResult {
   project?: ProjectData;
   projectDirectory?: string;
   projectId?: string;
-  projectRevision?: string;
+  expectedRevision?: string;
+  actualRevision?: ProjectRevision;
+  previousRevision?: ProjectRevision;
+  projectRevision?: ProjectRevision;
   projects?: RecentProject[];
   count?: number;
   missingCount?: number;

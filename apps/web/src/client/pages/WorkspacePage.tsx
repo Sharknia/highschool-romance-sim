@@ -94,6 +94,12 @@ interface ProjectData {
   generationJobs: GenerationJob[];
 }
 
+interface ProjectRevision {
+  revision: string;
+  hashAlgorithm: string;
+  createdAt: string;
+}
+
 interface SceneDraft {
   id: string;
   label: string;
@@ -122,6 +128,7 @@ interface GenerationJob {
 
 interface PendingPatch {
   request: unknown;
+  projectRevision?: ProjectRevision;
   plan: {
     summary?: string;
     decision?: {
@@ -251,6 +258,7 @@ export function WorkspacePage() {
   const [projectJson, setProjectJson] = useState(() => JSON.stringify({ starter: starterProject }, null, 2));
   const [projectDirectory, setProjectDirectory] = useState("");
   const [project, setProject] = useState<ProjectData | null>(null);
+  const [projectRevision, setProjectRevision] = useState<ProjectRevision | null>(null);
   const [heroineDraft, setHeroineDraft] = useState<HeroineDraft>(defaultHeroine);
   const [heroines, setHeroines] = useState<HeroineDraft[]>([]);
   const [selectedHeroineId, setSelectedHeroineId] = useState(defaultHeroine.id || "");
@@ -363,6 +371,9 @@ export function WorkspacePage() {
       const record = actionResult as ApiResult;
       if (typeof record.projectDirectory === "string") {
         setProjectDirectory(record.projectDirectory);
+      }
+      if (record.projectRevision && typeof record.projectRevision === "object") {
+        setProjectRevision(record.projectRevision as ProjectRevision);
       }
       if (record.project && typeof record.project === "object") {
         setProjectState(record.project as ProjectData, typeof record.selectedSceneId === "string" ? record.selectedSceneId : undefined);
@@ -564,6 +575,7 @@ export function WorkspacePage() {
     }
     await runAction("이벤트 패치 승인", async () => postAuthedJson<ApiResult>("/api/events/approve", {
       projectDirectory: projectDirectory || undefined,
+      expectedProjectRevision: pendingPatch.projectRevision || projectRevision || undefined,
       request: pendingPatch.request,
       plan: pendingPatch.plan,
       patchHistoryId: pendingPatch.patchHistoryEntry?.id
@@ -596,6 +608,7 @@ export function WorkspacePage() {
     }
     const response = await runAction("씬 저장", async () => postAuthedJson<ApiResult>("/api/project/scenes", {
       projectDirectory: projectDirectory || undefined,
+      expectedProjectRevision: projectRevision || undefined,
       scene: sceneDraft
     }));
     if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
@@ -618,6 +631,7 @@ export function WorkspacePage() {
   async function insertManualScene(input: { sourceSceneId?: string; link: unknown; scene: SceneDraft }): Promise<void> {
     const response = await runAction("수동 장면 추가", async () => postAuthedJson<ApiResult>("/api/project/scenes/insert", {
       projectDirectory: projectDirectory || undefined,
+      expectedProjectRevision: projectRevision || undefined,
       ...input
     }));
     if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
@@ -628,6 +642,7 @@ export function WorkspacePage() {
   async function linkManualScene(input: { sourceSceneId: string; targetSceneId: string; link: unknown }): Promise<void> {
     const response = await runAction("수동 장면 연결", async () => postAuthedJson<ApiResult>("/api/project/scenes/link", {
       projectDirectory: projectDirectory || undefined,
+      expectedProjectRevision: projectRevision || undefined,
       ...input
     }));
     if (response && typeof response === "object" && (response as ApiResult).ok !== false) {
@@ -638,6 +653,7 @@ export function WorkspacePage() {
   async function setSceneEnding(input: { sceneId: string; ending: unknown; clearOutgoing?: boolean }): Promise<void> {
     const response = await runAction("엔딩 지정", async () => postAuthedJson<ApiResult>("/api/project/scenes/ending", {
       projectDirectory: projectDirectory || undefined,
+      expectedProjectRevision: projectRevision || undefined,
       ...input
     }));
     if (response && typeof response === "object" && (response as ApiResult).ok !== false) {

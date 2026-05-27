@@ -163,7 +163,7 @@ assert.match(projectDetailSource, /lastResetProjectIdRef/, "ProjectDetailView는
 assert.doesNotMatch(projectDetailSource, /\}, \[currentProject\?\.id,\s*projectExportPlan,\s*projectPreviewReadiness\]\)/, "ProjectDetailView의 reset effect는 projectPreviewReadiness/projectExportPlan prop 객체 변경에 직접 매달리면 안 됩니다.");
 assert.doesNotMatch(projectDetailSource, /createPreviewReadinessFallback|createExportPlanFallback/, "프로젝트 상세는 preview/export readiness를 프론트 fallback으로 계산하면 안 됩니다.");
 assert.doesNotMatch(projectDetailStateSource, /createPreviewReadinessFallback|createExportPlanFallback/, "projectDetailState는 preview/export 도메인 readiness fallback 계산을 소유하면 안 됩니다.");
-assert.match(useCasesSource, /async validateProject\(input: unknown\)[\s\S]{0,900}withActionState\("validateProject"/, "validateProject use-case/API 응답은 action state 계약을 사용해야 합니다.");
+assert.match(useCasesSource, /async validateProject\(input: unknown\)[\s\S]{0,900}withStoreActionState\("validateProject"/, "validateProject use-case/API 응답은 action state 계약을 사용해야 합니다.");
 assert.doesNotMatch(projectDetailSource, /프로젝트 상태 DTO를 기다리는 중입니다/, "프로젝트 상세는 내부 DTO 대기 문구를 사용자 화면 fallback으로 노출하면 안 됩니다.");
 assert.match(projectDetailSource, /tabsWithLocalPrimaryAction/, "프로젝트 상세 헤더 CTA는 탭 본문 primary action과 경쟁하지 않도록 로컬 CTA 탭에서 숨겨야 합니다.");
 assert.match(projectDetailSource, /showHeaderPrimaryAction/, "프로젝트 상세는 헤더 CTA 노출 조건을 명시해야 합니다.");
