@@ -16,6 +16,7 @@ import {
   type ProjectIssue,
   type ProjectPreviewPreflight,
   type ProjectPreviewReadiness,
+  type ProjectRepairAction,
   type ProjectRuntime,
   type ProjectRuntimeScene,
   type ProjectSmokeResult,
@@ -55,6 +56,7 @@ interface ProjectDetailViewProps {
   projectId?: string;
   projectPreviewPreflight: ProjectPreviewPreflight | null;
   projectPreviewReadiness: ProjectPreviewReadiness | null;
+  projectRepairActions: ProjectRepairAction[];
   shellProjectTitle: string;
   workflowSummary: ProjectWorkflowSummary | null;
 }
@@ -342,6 +344,22 @@ function previewPreflightIssueText(issue: NonNullable<ProjectPreviewPreflight["b
   return `${code}${path}${issue.message || "확인이 필요합니다."}${repairs}`;
 }
 
+function repairActionInputText(action: ProjectRepairAction): string {
+  const inputs = (action.requiredInputs || []).map((input) => input.label || input.name).filter(Boolean);
+  return inputs.length ? `필요 입력 ${inputs.join(", ")}` : "추가 입력 없음";
+}
+
+function repairActionMetaText(action: ProjectRepairAction): string {
+  const metadata = [
+    action.issueCode ? `문제 코드 ${action.issueCode}` : "",
+    action.targetPath ? `대상 ${action.targetPath}` : "",
+    action.destructive ? "삭제/변경 포함" : "비파괴",
+    action.requiresConfirmation ? "확인 필요" : "",
+    repairActionInputText(action)
+  ].filter(Boolean);
+  return metadata.join(" · ");
+}
+
 function requiredDataNameLabel(name: string): string {
   if (name === "heroine") return "히로인";
   if (name === "background") return "배경";
@@ -434,6 +452,7 @@ export function ProjectDetailView({
   projectId,
   projectPreviewPreflight,
   projectPreviewReadiness,
+  projectRepairActions,
   shellProjectTitle,
   workflowSummary
 }: ProjectDetailViewProps) {
@@ -468,6 +487,7 @@ export function ProjectDetailView({
   const [previewIssues, setPreviewIssues] = useState<string[]>([]);
   const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
   const [previewPreflight, setPreviewPreflight] = useState<ProjectPreviewPreflight | null>(null);
+  const [repairActions, setRepairActions] = useState<ProjectRepairAction[] | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
@@ -526,6 +546,7 @@ export function ProjectDetailView({
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
   const currentPreviewReadiness = previewReadiness || projectPreviewReadiness || emptyPreviewReadiness;
   const currentPreviewPreflight = previewPreflight || projectPreviewPreflight || null;
+  const currentRepairActions = repairActions ?? projectRepairActions;
   const previewRunBlocked = currentPreviewReadiness.canRun !== true || currentPreviewPreflight?.canRun === false;
   const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
   const dummyImageAssets = collectDummyImageAssets(currentProject, currentExportPlan, previewRuntime);
@@ -647,6 +668,7 @@ export function ProjectDetailView({
     previewReadiness?: ProjectPreviewReadiness | null;
     previewStatus?: string;
     project?: ProjectData | null;
+    repairActions?: ProjectRepairAction[];
     workflowSummary?: ProjectWorkflowSummary | null;
   } = {}): void {
     const nextState = createPreviewExportResetState({
@@ -659,6 +681,7 @@ export function ProjectDetailView({
     setPreviewIssues([]);
     setPreviewReadiness(input.previewReadiness || null);
     setPreviewPreflight(input.previewPreflight || null);
+    setRepairActions(input.repairActions ?? null);
     setPreviewState(nextState.previewState);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
@@ -681,9 +704,14 @@ export function ProjectDetailView({
     resetPreviewAndExportState({
       exportPlan: projectExportPlan,
       previewPreflight: projectPreviewPreflight,
-      previewReadiness: projectPreviewReadiness
+      previewReadiness: projectPreviewReadiness,
+      repairActions: projectRepairActions
     });
   }, [currentProject?.id]);
+
+  useEffect(() => {
+    setRepairActions(null);
+  }, [projectRepairActions]);
 
   useEffect(() => {
     if (activeTab !== "background" || !currentProject) {
@@ -715,6 +743,7 @@ export function ProjectDetailView({
         previewReadiness: result.previewReadiness || null,
         previewStatus: "히로인 변경으로 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
+        repairActions: result.repairActions || [],
         workflowSummary: result.workflowSummary
       });
       setHeroineStatus("히로인 스냅샷이 프로젝트에 배정되었습니다.");
@@ -840,6 +869,7 @@ export function ProjectDetailView({
         previewReadiness: result.previewReadiness || null,
         previewStatus: "프로젝트 이벤트가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
+        repairActions: result.repairActions || [],
         workflowSummary: result.workflowSummary
       });
       setPendingPatch(null);
@@ -948,6 +978,7 @@ export function ProjectDetailView({
           previewReadiness: run.previewReadiness || null,
           previewStatus: "배경 화면이 생성되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: run.project,
+          repairActions: run.repairActions || [],
           workflowSummary: run.workflowSummary
         });
       }
@@ -1000,6 +1031,7 @@ export function ProjectDetailView({
           previewReadiness: result.previewReadiness || null,
           previewStatus: "배경 화면 작업이 추가되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
+          repairActions: result.repairActions || [],
           workflowSummary: result.workflowSummary
         });
       }
@@ -1039,6 +1071,7 @@ export function ProjectDetailView({
           previewReadiness: result.previewReadiness || null,
           previewStatus: "이미지 결과가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
+          repairActions: result.repairActions || [],
           workflowSummary: result.workflowSummary
         });
       }
@@ -1084,6 +1117,7 @@ export function ProjectDetailView({
       nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
     } : currentPreviewReadiness);
     setPreviewPreflight(result.previewPreflight || null);
+    setRepairActions(result.repairActions || []);
     setExportPlan(result.exportPlan || null);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
       const blocked = result.previewPreflight?.canRun === false || hasBlockingPreviewErrors(issues);
@@ -1128,6 +1162,7 @@ export function ProjectDetailView({
         setPreviewSceneId("");
         setExportPlan(result.exportPlan || null);
         setPreviewPreflight(result.previewPreflight || null);
+        setRepairActions(result.repairActions || []);
         setPreviewReadiness(result.previewReadiness || {
           ...currentPreviewReadiness,
           state: blocked ? "blocked" : "failed",
@@ -1148,6 +1183,7 @@ export function ProjectDetailView({
       const blocked = nextReadiness?.canRun === false || nextPreflight?.canRun === false;
       setPreviewReadiness(nextReadiness);
       setPreviewPreflight(nextPreflight);
+      setRepairActions(result.repairActions || []);
       setExportPlan(result.exportPlan || null);
       setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
       setPreviewStatus(blocked ? nextPreflight?.disabledReason || nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
@@ -1157,6 +1193,7 @@ export function ProjectDetailView({
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewPreflight(null);
+      setRepairActions([]);
       setPreviewReadiness({
         ...currentPreviewReadiness,
         state: "failed",
@@ -1182,6 +1219,7 @@ export function ProjectDetailView({
       });
       setExportResult(result.export || null);
       setExportPlan(result.exportPlan || null);
+      setRepairActions(result.repairActions || []);
       setSmokeResult(result.smoke || null);
       if (result.ok === false) {
         setExportState(result.code === "EXPORT_BLOCKED" ? "blocked" : "failed");
@@ -1641,6 +1679,24 @@ export function ProjectDetailView({
                   <h4>사전 점검 참고 항목</h4>
                   <ul className="compact-list">
                     {currentPreviewPreflight.warnings.map((warning, index) => <li key={`${warning.issueCode || "warning"}-${warning.path || index}`}>{previewPreflightIssueText(warning)}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {currentRepairActions.length ? (
+                <div>
+                  <h4>수리 후보</h4>
+                  <p className="page-muted">적용은 다음 단계에서 연결됩니다.</p>
+                  <ul className="repair-action-list">
+                    {currentRepairActions.map((action, index) => (
+                      <li key={`${action.issueCode || "issue"}-${action.actionId || index}-${action.targetPath || "target"}`}>
+                        <Button disabled={true} icon={<ArrowRight size={16} />} variant={action.destructive ? "danger" : "ghost"}>
+                          {action.label || action.actionId || "수리 후보"}
+                        </Button>
+                        <span>{action.description || "문제 확인 결과에 맞는 수리 후보입니다."}</span>
+                        <small>{repairActionMetaText(action)}</small>
+                        {action.disabledReason ? <small>비활성 사유 {action.disabledReason}</small> : null}
+                      </li>
+                    ))}
                   </ul>
                 </div>
               ) : null}

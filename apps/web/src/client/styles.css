@@ -1580,6 +1580,28 @@ a {
   padding-left: 18px;
 }
 
+.repair-action-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.repair-action-list li {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #403b34;
+  border-radius: 7px;
+  background: #1b1916;
+}
+
+.repair-action-list .button {
+  justify-self: start;
+}
+
 .asset-job-list {
   display: grid;
   gap: 10px;

@@ -264,6 +264,43 @@ export interface ProjectExportPlanDto {
   nextAction: string;
 }
 
+export interface RepairActionRequiredInputDto {
+  name: string;
+  label: string;
+  inputType: "text" | "select";
+  options?: Array<{ value: string; label: string }>;
+}
+
+export interface RepairActionExpectedTargetDto {
+  targetPath: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+}
+
+export interface RepairActionPreflightBlockerDto {
+  issueCode: string;
+  path: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+  repairActionIds: string[];
+}
+
+export interface RepairActionDto {
+  actionId: "create-target-scene" | "connect-existing-scene" | "set-scene-ending" | "remove-next";
+  issueCode: string;
+  targetPath: string;
+  label: string;
+  description: string;
+  destructive: boolean;
+  requiresConfirmation: boolean;
+  requiredInputs: RepairActionRequiredInputDto[];
+  disabledReason: string | null;
+  expectedTarget: RepairActionExpectedTargetDto;
+  preflightBlocker: RepairActionPreflightBlockerDto;
+}
+
 export type ProjectActionFailureCode =
   | "PROJECT_INPUT_INVALID"
   | "PROJECT_ID_RESERVED"
@@ -301,6 +338,7 @@ export interface ProjectActionFailureDto {
   workflowSummary?: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
   previewPreflight?: PreviewPreflightDto;
+  repairActions?: RepairActionDto[];
   exportPlan?: ProjectExportPlanDto;
   issues?: ValidationIssue[];
   retryable: boolean;
@@ -930,6 +968,144 @@ function validationForProjectState(project: VnMakerProject, validation?: { ok?: 
   };
 }
 
+function sceneLabelForRepair(project: VnMakerProject, sceneId: string): string {
+  const scene = project.scenes.find((item) => item.id === sceneId);
+  return scene?.label || scene?.id || sceneId;
+}
+
+function sceneForIssue(project: VnMakerProject, issue: ValidationIssue): VnMakerScene | undefined {
+  const sceneId = issue.sceneIds?.[0];
+  return sceneId ? project.scenes.find((scene) => scene.id === sceneId) : undefined;
+}
+
+function repairExpectedTarget(issue: ValidationIssue): RepairActionExpectedTargetDto {
+  return {
+    targetPath: issue.path,
+    sceneIds: issue.sceneIds ? [...issue.sceneIds] : undefined,
+    choiceIds: issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: issue.targetSceneId
+  };
+}
+
+function repairPreflightBlockerFor(issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionPreflightBlockerDto {
+  const matchedBlocker = preflight?.blockers.find((blocker) => blocker.issueCode === issue.code && blocker.path === issue.path);
+  return {
+    issueCode: matchedBlocker?.issueCode || issue.code || "validation-issue",
+    path: matchedBlocker?.path || issue.path,
+    sceneIds: matchedBlocker?.sceneIds ? [...matchedBlocker.sceneIds] : issue.sceneIds ? [...issue.sceneIds] : undefined,
+    choiceIds: matchedBlocker?.choiceIds ? [...matchedBlocker.choiceIds] : issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: matchedBlocker?.targetSceneId || issue.targetSceneId,
+    repairActionIds: matchedBlocker?.repairActionIds ? [...matchedBlocker.repairActionIds] : []
+  };
+}
+
+function createTargetSceneRepairAction(issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  return {
+    actionId: "create-target-scene",
+    issueCode: issue.code || "missing-target",
+    targetPath: issue.path,
+    label: "타깃 씬 만들기",
+    description: `${issue.targetSceneId || "누락된 타깃"}으로 연결할 새 씬을 만듭니다.`,
+    destructive: false,
+    requiresConfirmation: false,
+    requiredInputs: [{ name: "sceneLabel", label: "새 씬 이름", inputType: "text" }],
+    disabledReason: null,
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function connectExistingSceneRepairAction(project: VnMakerProject, issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  const sourceSceneIds = new Set(issue.sceneIds || []);
+  const options = project.scenes
+    .filter((scene) => !sourceSceneIds.has(scene.id))
+    .map((scene) => ({ value: scene.id, label: sceneLabelForRepair(project, scene.id) }));
+  return {
+    actionId: "connect-existing-scene",
+    issueCode: issue.code || "missing-target",
+    targetPath: issue.path,
+    label: "기존 씬에 연결",
+    description: "없는 타깃 대신 프로젝트의 기존 씬을 선택지 또는 다음 장면에 연결합니다.",
+    destructive: false,
+    requiresConfirmation: false,
+    requiredInputs: [{ name: "existingSceneId", label: "연결할 기존 씬", inputType: "select", options }],
+    disabledReason: options.length > 0 ? null : "연결할 기존 씬이 없습니다.",
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function setSceneEndingRepairAction(issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  return {
+    actionId: "set-scene-ending",
+    issueCode: issue.code || "uncovered-terminal",
+    targetPath: issue.path,
+    label: "엔딩 지정",
+    description: "엔딩 없이 끝나는 씬에 엔딩 정보를 추가합니다.",
+    destructive: false,
+    requiresConfirmation: false,
+    requiredInputs: [
+      { name: "endingTitle", label: "엔딩 제목", inputType: "text" },
+      {
+        name: "endingKind",
+        label: "엔딩 종류",
+        inputType: "select",
+        options: [
+          { value: "normal", label: "일반 엔딩" },
+          { value: "good", label: "굿 엔딩" },
+          { value: "bad", label: "배드 엔딩" }
+        ]
+      }
+    ],
+    disabledReason: null,
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function removeNextRepairAction(project: VnMakerProject, issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  const scene = sceneForIssue(project, issue);
+  return {
+    actionId: "remove-next",
+    issueCode: issue.code || "validation-issue",
+    targetPath: issue.path,
+    label: "next 연결 제거",
+    description: "충돌을 만드는 다음 장면 연결을 제거합니다.",
+    destructive: true,
+    requiresConfirmation: true,
+    requiredInputs: [],
+    disabledReason: scene?.next ? null : "제거할 next 연결이 없습니다.",
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function repairActionsForValidation(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  preflight?: PreviewPreflightDto
+): RepairActionDto[] {
+  const actions: RepairActionDto[] = [];
+  (validation.issues || []).forEach((issue) => {
+    if (issue.severity !== "error") {
+      return;
+    }
+    if (issue.code === "missing-target") {
+      actions.push(createTargetSceneRepairAction(issue, preflight));
+      actions.push(connectExistingSceneRepairAction(project, issue, preflight));
+      return;
+    }
+    if (issue.code === "uncovered-terminal") {
+      actions.push(setSceneEndingRepairAction(issue, preflight));
+      return;
+    }
+    if (issue.code === "mixed-outgoing" || issue.code === "ending-has-outgoing") {
+      actions.push(removeNextRepairAction(project, issue, preflight));
+    }
+  });
+  return actions;
+}
+
 function attachProjectFailureContext(
   error: unknown,
   input: {
@@ -969,6 +1145,7 @@ function withActionState<T extends JsonRecord>(
   baseProjectHash?: string;
   projectRevision?: ProjectRevisionDto;
   previewPreflight?: PreviewPreflightDto;
+  repairActions?: RepairActionDto[];
   workflowSummary: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
   exportPlan?: ProjectExportPlanDto;
@@ -977,6 +1154,7 @@ function withActionState<T extends JsonRecord>(
   const validation = options.validation || (asRecord(body).validation as { ok?: boolean; issues?: ValidationIssue[] } | undefined);
   const explicitPreviewReadiness = asRecord(body).previewReadiness as ProjectPreviewReadinessDto | undefined;
   const explicitPreviewPreflight = asRecord(body).previewPreflight as PreviewPreflightDto | undefined;
+  const explicitRepairActions = asRecord(body).repairActions as RepairActionDto[] | undefined;
   const explicitExportPlan = asRecord(body).exportPlan as ProjectExportPlanDto | undefined;
   const explicitProjectRevision = options.projectRevision || (asRecord(body).projectRevision as ProjectRevisionDto | undefined);
   const stateValidation = project ? validationForProjectState(project, validation) : validation;
@@ -988,6 +1166,9 @@ function withActionState<T extends JsonRecord>(
   const previewPreflight = project && projectRevision
     ? explicitPreviewPreflight || createPreviewPreflight(project, stateValidation || { ok: true, issues: [] }, projectRevision)
     : explicitPreviewPreflight;
+  const repairActions = project
+    ? explicitRepairActions || repairActionsForValidation(project, stateValidation || { ok: true, issues: [] }, previewPreflight)
+    : explicitRepairActions;
   const exportPlan = project
     ? explicitExportPlan || exportPlanFor(project, stateValidation || { ok: true, issues: [] })
     : explicitExportPlan;
@@ -1001,6 +1182,7 @@ function withActionState<T extends JsonRecord>(
     workflowSummary: createWorkflowSummary(project, stateValidation),
     ...(previewReadiness ? { previewReadiness } : {}),
     ...(previewPreflight ? { previewPreflight } : {}),
+    ...(repairActions ? { repairActions } : {}),
     ...(exportPlan ? { exportPlan } : {})
   };
 }
@@ -3451,7 +3633,13 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
 
     validateProjectSnapshot(project: VnMakerProject) {
       const issues = validateProjectSnapshot(project);
-      return { ok: issues.every((issue) => issue.severity !== "error"), issues };
+      const validation = { ok: issues.every((issue) => issue.severity !== "error"), issues };
+      return withActionState("validateProject", {
+        ok: validation.ok,
+        issues,
+        project,
+        validation
+      }, { project, validation });
     }
   };
 }

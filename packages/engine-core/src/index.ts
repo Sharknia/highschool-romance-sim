@@ -1093,15 +1093,9 @@ const PREVIEW_REPAIR_ACTION_IDS: Record<string, string[]> = {
   "event-scenes-required": ["open-studio"],
   "image-generation-incomplete": ["run-generation-jobs"],
   "missing-target": ["create-target-scene", "connect-existing-scene"],
-  "ending-has-outgoing": ["remove-outgoing", "clear-ending"],
-  "mixed-outgoing": ["remove-next", "edit-choices"],
-  "uncovered-terminal": ["set-scene-ending", "add-choice-target"],
-  "cycle-without-ending-path": ["connect-ending-path", "set-scene-ending"],
-  "duplicate-choice-id": ["rename-choice-id"],
-  "empty-choice-text": ["edit-choice-text"],
-  "orphan-scene": ["connect-existing-scene", "delete-orphan-scene"],
-  "duplicate-ending-id": ["rename-ending-id"],
-  "invalid-ending": ["edit-ending"]
+  "ending-has-outgoing": ["remove-next"],
+  "mixed-outgoing": ["remove-next"],
+  "uncovered-terminal": ["set-scene-ending"]
 };
 
 function previewRepairActionIds(issueCode: string | undefined): string[] {

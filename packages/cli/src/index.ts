@@ -16,7 +16,6 @@ import {
   createImageGenerationJob,
   createStarterProject,
   parseVnMakerProject,
-  validateProject,
   type VnMakerCharacter,
   type VnMakerProject,
   type VnMakerScene
@@ -353,8 +352,7 @@ async function run(): Promise<void> {
       writeJson(await useCases.validateProject(input));
       return;
     }
-    const issues = validateProject(getProject(input));
-    writeJson({ ok: issues.every((issue) => issue.severity !== "error"), issues });
+    writeJson(useCases.validateProjectSnapshot(getProject(input)));
     return;
   }
 

@@ -22,6 +22,7 @@ import {
   type ProjectExportPlan,
   type ProjectPreviewPreflight,
   type ProjectPreviewReadiness,
+  type ProjectRepairAction,
   type ProjectWorkflowSummary,
   type RecentProject
 } from "./projects/projectPageTypes";
@@ -163,6 +164,7 @@ export function ProjectStartPage() {
   const [workflowSummary, setWorkflowSummary] = useState<ProjectWorkflowSummary | null>(null);
   const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
   const [previewPreflight, setPreviewPreflight] = useState<ProjectPreviewPreflight | null>(null);
+  const [repairActions, setRepairActions] = useState<ProjectRepairAction[]>([]);
   const [exportPlan, setExportPlan] = useState<ProjectExportPlan | null>(null);
   const [reconnectProjectId, setReconnectProjectId] = useState<string | null>(null);
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
@@ -225,6 +227,7 @@ export function ProjectStartPage() {
     setWorkflowSummary(result.workflowSummary || null);
     setPreviewReadiness(result.previewReadiness || null);
     setPreviewPreflight(result.previewPreflight || null);
+    setRepairActions(result.repairActions || []);
     setExportPlan(result.exportPlan || null);
     setProjectDirectoryInput(nextDirectory);
     setShellState({
@@ -242,11 +245,13 @@ export function ProjectStartPage() {
     setStatus(`${label} 실패: ${message}`);
     setPreviewReadiness(result.previewReadiness || null);
     setPreviewPreflight(result.previewPreflight || null);
+    setRepairActions(result.repairActions || []);
     setExportPlan(result.exportPlan || null);
     if (projectId) {
       setCurrentProject(null);
       setWorkflowSummary(null);
       setPreviewPreflight(null);
+      setRepairActions([]);
     }
   }
 
@@ -460,6 +465,7 @@ export function ProjectStartPage() {
       setWorkflowSummary(null);
       setPreviewReadiness(null);
       setPreviewPreflight(null);
+      setRepairActions([]);
       setExportPlan(null);
     }
     if (tab && normalizeTab(tab) !== tab) {
@@ -495,6 +501,7 @@ export function ProjectStartPage() {
       projectExportPlan={exportPlan}
       projectPreviewPreflight={previewPreflight}
       projectPreviewReadiness={previewReadiness}
+      projectRepairActions={repairActions}
       shellProjectTitle={shellState.projectTitle}
       workflowSummary={workflowSummary}
     />

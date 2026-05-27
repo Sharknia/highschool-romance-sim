@@ -27,6 +27,11 @@ const previewPreflightBlockedDirectory = join(tempRoot, "PreviewPreflightBlocked
 const previewPreflightMissingBackgroundDirectory = join(tempRoot, "PreviewPreflightMissingBackground.vnmaker");
 const previewPreflightRouteGateDirectory = join(tempRoot, "PreviewPreflightRouteGate.vnmaker");
 const previewPreflightReadyDirectory = join(tempRoot, "PreviewPreflightReady.vnmaker");
+const repairActionMissingTargetDirectory = join(tempRoot, "RepairActionMissingTarget.vnmaker");
+const repairActionUncoveredTerminalDirectory = join(tempRoot, "RepairActionUncoveredTerminal.vnmaker");
+const repairActionMixedOutgoingDirectory = join(tempRoot, "RepairActionMixedOutgoing.vnmaker");
+const repairActionEndingOutgoingDirectory = join(tempRoot, "RepairActionEndingOutgoing.vnmaker");
+const repairActionUnknownIssueDirectory = join(tempRoot, "RepairActionUnknownIssue.vnmaker");
 const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
@@ -553,6 +558,194 @@ assert.equal(previewPreflightReadyCli.previewPreflight.disabledReason, null);
 assert.equal(previewPreflightReadyCli.previewPreflight.runtimeCapabilities.choiceConditionFiltering, false);
 assert.equal(previewPreflightReadyCli.previewPreflight.warnings[0].issueCode, previewPreflightReadyApi.body.previewPreflight.warnings[0].issueCode);
 assert.ok(previewPreflightReadyCli.runtime);
+
+function findRepairAction(result, issueCode, actionId) {
+  return (result.repairActions || []).find((action) => action.issueCode === issueCode && action.actionId === actionId);
+}
+
+function repairActionTuple(action) {
+  return {
+    actionId: action.actionId,
+    destructive: action.destructive,
+    disabledReason: action.disabledReason,
+    issueCode: action.issueCode,
+    preflightRepairActionIds: action.preflightBlocker?.repairActionIds || [],
+    requiredInputs: (action.requiredInputs || []).map((input) => ({
+      inputType: input.inputType,
+      label: input.label,
+      name: input.name,
+      options: (input.options || []).map((option) => ({ label: option.label, value: option.value }))
+    })),
+    requiresConfirmation: action.requiresConfirmation,
+    targetPath: action.targetPath
+  };
+}
+
+async function validateRepairFixture(projectDirectoryForFixture, projectForFixture) {
+  const store = await projectStore.createProjectWorkspace({
+    projectDirectory: projectDirectoryForFixture,
+    project: projectForFixture
+  });
+  store.close();
+  const api = await webHandlers.handleApiRequest({
+    method: "POST",
+    path: "/api/project/validate",
+    body: { projectDirectory: projectDirectoryForFixture }
+  });
+  const cli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "validate"], {
+    input: JSON.stringify({ projectDirectory: projectDirectoryForFixture }),
+    encoding: "utf8"
+  }));
+  return { api: api.body, cli };
+}
+
+const repairActionMissingTargetBaseProject = core.createStarterProject({
+  id: "repair-action-missing-target",
+  title: "Repair Action Missing Target",
+  premise: "missing target repair action 후보를 검증한다."
+});
+const repairActionMissingTargetEntrySceneId = repairActionMissingTargetBaseProject.routes[0].entrySceneId;
+const repairActionMissingTargetProject = {
+  ...repairActionMissingTargetBaseProject,
+  scenes: repairActionMissingTargetBaseProject.scenes.map((scene) => scene.id === repairActionMissingTargetEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{ id: "choice-repair-missing", text: "없는 타깃", next: "scene-repair-missing" }]
+      }
+    : scene)
+};
+const repairActionMissingTargetResult = await validateRepairFixture(repairActionMissingTargetDirectory, repairActionMissingTargetProject);
+const repairActionMissingTargetProjectCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "validate"], {
+  input: JSON.stringify({ project: repairActionMissingTargetProject }),
+  encoding: "utf8"
+}));
+const createTargetRepair = findRepairAction(repairActionMissingTargetResult.api, "missing-target", "create-target-scene");
+assert.ok(createTargetRepair, "missing-target must expose create-target-scene repair action");
+assert.equal(createTargetRepair.targetPath, "scenes.0.choices.0");
+assert.equal(createTargetRepair.destructive, false);
+assert.equal(createTargetRepair.requiresConfirmation, false);
+assert.equal(createTargetRepair.disabledReason, null);
+assert.deepEqual(createTargetRepair.expectedTarget.sceneIds, [repairActionMissingTargetEntrySceneId]);
+assert.deepEqual(createTargetRepair.expectedTarget.choiceIds, ["choice-repair-missing"]);
+assert.equal(createTargetRepair.expectedTarget.targetSceneId, "scene-repair-missing");
+assert.equal(createTargetRepair.requiredInputs.some((input) => input.name === "sceneLabel"), true);
+assert.equal(createTargetRepair.preflightBlocker.issueCode, "missing-target");
+assert.equal(createTargetRepair.preflightBlocker.repairActionIds.includes("create-target-scene"), true);
+const connectExistingRepair = findRepairAction(repairActionMissingTargetResult.api, "missing-target", "connect-existing-scene");
+assert.ok(connectExistingRepair, "missing-target must expose connect-existing-scene repair action");
+assert.equal(connectExistingRepair.requiredInputs.some((input) => input.name === "existingSceneId"), true);
+assert.deepEqual(
+  repairActionMissingTargetResult.cli.repairActions.map(repairActionTuple),
+  repairActionMissingTargetResult.api.repairActions.map(repairActionTuple)
+);
+assert.deepEqual(
+  repairActionMissingTargetProjectCli.repairActions.map(repairActionTuple),
+  repairActionMissingTargetResult.api.repairActions.map(repairActionTuple),
+  "CLI direct project validation must expose the same repair action DTO candidates"
+);
+
+const repairActionUncoveredBaseProject = core.createStarterProject({
+  id: "repair-action-uncovered-terminal",
+  title: "Repair Action Uncovered Terminal",
+  premise: "uncovered terminal repair action 후보를 검증한다."
+});
+const repairActionUncoveredTerminalProject = {
+  ...repairActionUncoveredBaseProject,
+  scenes: repairActionUncoveredBaseProject.scenes.map((scene) => scene.id === "scene-haru-smile"
+    ? {
+        ...scene,
+        ending: undefined,
+        choices: [],
+        next: undefined
+      }
+    : scene)
+};
+const repairActionUncoveredResult = await validateRepairFixture(repairActionUncoveredTerminalDirectory, repairActionUncoveredTerminalProject);
+const setEndingRepair = findRepairAction(repairActionUncoveredResult.api, "uncovered-terminal", "set-scene-ending");
+assert.ok(setEndingRepair, "uncovered-terminal must expose set-scene-ending repair action");
+assert.equal(setEndingRepair.targetPath, "scenes.1");
+assert.equal(setEndingRepair.destructive, false);
+assert.equal(setEndingRepair.requiredInputs.some((input) => input.name === "endingTitle"), true);
+assert.equal(setEndingRepair.requiredInputs.some((input) => input.name === "endingKind"), true);
+assert.deepEqual(
+  repairActionUncoveredResult.cli.repairActions.map(repairActionTuple),
+  repairActionUncoveredResult.api.repairActions.map(repairActionTuple)
+);
+
+const repairActionMixedBaseProject = core.createStarterProject({
+  id: "repair-action-mixed-outgoing",
+  title: "Repair Action Mixed Outgoing",
+  premise: "mixed outgoing repair action 후보를 검증한다."
+});
+const repairActionMixedProject = {
+  ...repairActionMixedBaseProject,
+  scenes: repairActionMixedBaseProject.scenes.map((scene) => scene.id === repairActionMixedBaseProject.routes[0].entrySceneId
+    ? {
+        ...scene,
+        next: "scene-haru-smile"
+      }
+    : scene)
+};
+const repairActionMixedResult = await validateRepairFixture(repairActionMixedOutgoingDirectory, repairActionMixedProject);
+const removeMixedNextRepair = findRepairAction(repairActionMixedResult.api, "mixed-outgoing", "remove-next");
+assert.ok(removeMixedNextRepair, "mixed-outgoing must expose remove-next repair action");
+assert.equal(removeMixedNextRepair.targetPath, "scenes.0");
+assert.equal(removeMixedNextRepair.destructive, true);
+assert.equal(removeMixedNextRepair.requiresConfirmation, true);
+assert.deepEqual(removeMixedNextRepair.requiredInputs, []);
+
+const repairActionEndingBaseProject = core.createStarterProject({
+  id: "repair-action-ending-outgoing",
+  title: "Repair Action Ending Outgoing",
+  premise: "ending outgoing repair action 후보를 검증한다."
+});
+const repairActionEndingProject = {
+  ...repairActionEndingBaseProject,
+  scenes: repairActionEndingBaseProject.scenes.map((scene) => scene.id === "scene-haru-smile"
+    ? {
+        ...scene,
+        next: "scene-opening"
+      }
+    : scene)
+};
+const repairActionEndingResult = await validateRepairFixture(repairActionEndingOutgoingDirectory, repairActionEndingProject);
+const removeEndingNextRepair = findRepairAction(repairActionEndingResult.api, "ending-has-outgoing", "remove-next");
+assert.ok(removeEndingNextRepair, "ending-has-outgoing must expose remove-next repair action");
+assert.equal(removeEndingNextRepair.destructive, true);
+assert.equal(removeEndingNextRepair.requiresConfirmation, true);
+
+const repairActionUnknownBaseProject = core.createStarterProject({
+  id: "repair-action-unknown-issue",
+  title: "Repair Action Unknown Issue",
+  premise: "unknown issue에는 repair action 후보를 만들지 않는다."
+});
+const repairActionUnknownProject = {
+  ...repairActionUnknownBaseProject,
+  scenes: repairActionUnknownBaseProject.scenes.map((scene) => scene.id === "scene-opening"
+    ? {
+        ...scene,
+        choices: [
+          { id: "choice-duplicate", text: "첫 번째 중복 선택지", next: "scene-haru-smile" },
+          { id: "choice-duplicate", text: "두 번째 중복 선택지", next: "scene-haru-smile" }
+        ]
+      }
+    : scene)
+};
+const repairActionUnknownResult = await validateRepairFixture(repairActionUnknownIssueDirectory, repairActionUnknownProject);
+assert.equal(repairActionUnknownResult.api.issues.some((issue) => issue.code === "duplicate-choice-id"), true);
+assert.equal((repairActionUnknownResult.api.repairActions || []).some((action) => action.issueCode === "duplicate-choice-id"), false);
+assert.deepEqual(
+  (repairActionUnknownResult.api.previewPreflight?.blockers || [])
+    .filter((blocker) => blocker.issueCode === "duplicate-choice-id")
+    .flatMap((blocker) => blocker.repairActionIds || []),
+  [],
+  "unsupported validation issues must remain diagnostic-only in preflight repairActionIds"
+);
+assert.deepEqual(
+  repairActionUnknownResult.cli.repairActions.map(repairActionTuple),
+  repairActionUnknownResult.api.repairActions.map(repairActionTuple)
+);
 
 const revisionGuardProject = core.createStarterProject({
   id: "revision-guard",

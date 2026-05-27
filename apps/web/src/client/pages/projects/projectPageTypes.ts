@@ -201,6 +201,35 @@ export interface ProjectPreviewPreflight {
   };
 }
 
+export interface ProjectRepairActionRequiredInput {
+  name?: string;
+  label?: string;
+  inputType?: "text" | "select" | string;
+  options?: Array<{
+    value?: string;
+    label?: string;
+  }>;
+}
+
+export interface ProjectRepairAction {
+  actionId?: string;
+  issueCode?: string;
+  targetPath?: string;
+  label?: string;
+  description?: string;
+  destructive?: boolean;
+  requiresConfirmation?: boolean;
+  requiredInputs?: ProjectRepairActionRequiredInput[];
+  disabledReason?: string | null;
+  expectedTarget?: {
+    targetPath?: string;
+    sceneIds?: string[];
+    choiceIds?: string[];
+    targetSceneId?: string;
+  };
+  preflightBlocker?: ProjectPreviewPreflightIssue;
+}
+
 export interface ProjectExportPlan {
   state?: "ready" | "blocked" | "running" | "complete" | "failed" | string;
   canExport?: boolean;
@@ -306,6 +335,7 @@ export interface ProjectApiResult extends ApiResult {
   plan?: ProjectEventPlan;
   export?: ProjectExportResult;
   previewReadiness?: ProjectPreviewReadiness;
+  repairActions?: ProjectRepairAction[];
   exportPlan?: ProjectExportPlan;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
