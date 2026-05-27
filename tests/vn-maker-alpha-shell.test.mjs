@@ -60,9 +60,13 @@ assert.doesNotMatch(toolkitDocsSource, /웹앱에서 프로젝트 파일 선택\
 assert.match(
   appSource,
   /<Route path="\/" element={<RootRedirect \/?>} \/>/,
-  "`/`는 전용 RootRedirect로 인증 상태에 따라 분기해야 합니다."
+  "`/`는 전용 RootRedirect로 기본 제작 화면에 진입해야 합니다."
 );
-assert.match(appSource, /<Navigate to="\/heroines" replace \/>/, "`/` 인증 후 기본 화면은 히로인 관리여야 합니다.");
+assert.match(appSource, /<Navigate to="\/heroines" replace \/>/, "`/` 기본 화면은 히로인 관리여야 합니다.");
+assert.doesNotMatch(appSource, /AuthGate/, "App 라우팅은 Codex 연결 상태로 제작 화면 접근을 막는 AuthGate를 사용하면 안 됩니다.");
+assert.doesNotMatch(appSource, /\/login\?next/, "라우팅은 deep link를 /login?next로 강제 이동하면 안 됩니다.");
+assert.doesNotMatch(appSource, /status === "authenticated"|인증 상태 확인 중/, "앱 진입은 Codex 인증 완료 여부에 의존하면 안 됩니다.");
+assert.match(appSource, /path="\/login"/, "legacy /login deep link는 안전하게 처리해야 합니다.");
 ["/projects", "/heroines", "/settings"].forEach((path) => {
   assert.match(appSource, new RegExp(`<Route path="${path}"`), `${path} 인증 앱 라우트가 있어야 합니다.`);
 });
@@ -121,6 +125,12 @@ assert.match(notFoundSource, /to="\/heroines"/, "인증 후 Not Found 복귀 링
 const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
 assert.match(settingsStartSource, /page-status/, "SettingsStartPage는 page-local 상태 문장을 가져야 합니다.");
 assert.match(settingsStartSource, /상태 갱신|로그아웃|refreshSession/, "SettingsStartPage는 Codex 연결 상태 갱신과 로그아웃을 설정 화면에서 소유해야 합니다.");
+const authGateSource = readText("apps/web/src/client/auth/AuthGate.tsx");
+assert.doesNotMatch(authGateSource, /Navigate|useLocation|\/login\?next|encodeNextPath/, "AuthGate는 더 이상 /login?next 리다이렉트 책임을 가지면 안 됩니다.");
+assert.match(authGateSource, /<Outlet \/>/, "AuthGate legacy wrapper는 제작 라우팅을 그대로 통과시켜야 합니다.");
+const loginPageSource = readText("apps/web/src/client/pages/LoginPage.tsx");
+assert.doesNotMatch(loginPageSource, /startBrowserLogin|브라우저로 로그인|ChatGPT 인증을 완료|로그인이 필요/, "LoginPage는 독립 로그인 화면 역할을 유지하면 안 됩니다.");
+assert.match(loginPageSource, /\/settings/, "legacy /login은 Codex 연결 관리가 설정 화면 책임임을 반영해야 합니다.");
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");

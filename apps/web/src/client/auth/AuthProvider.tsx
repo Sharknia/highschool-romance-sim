@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const postAuthedJson = useCallback(async <T extends ApiResult = ApiResult>(path: string, body: unknown): Promise<T> => {
     const result = await postJson<T>(path, body);
     if (isAuthFailure(result)) {
-      markAnonymous(result.error || "Codex OAuth 로그인이 필요합니다.");
+      markAnonymous(result.error || "Codex 연결이 필요합니다.");
     }
     return result;
   }, [markAnonymous]);
@@ -113,7 +113,7 @@ export function useAuth(): AuthContextValue {
 
 export function describeSession(session: CodexSessionResult | null): string {
   if (!session) {
-    return "Codex OAuth: 확인 중";
+    return "Codex 연결: 확인 중";
   }
 
   if (session.mode === "alpha-sandbox") {
@@ -123,8 +123,8 @@ export function describeSession(session: CodexSessionResult | null): string {
   if (session.connected) {
     const email = session.account?.email ? ` · ${session.account.email}` : "";
     const plan = session.account?.planType ? `/${session.account.planType}` : "";
-    return `Codex OAuth: ${session.mode || "연결됨"}${plan}${email}`;
+    return `Codex 연결: ${session.mode || "연결됨"}${plan}${email}`;
   }
 
-  return session.error ? "Codex OAuth: 확인 실패" : "Codex OAuth: 로그인 필요";
+  return session.error ? "Codex 연결: 확인 실패" : "Codex 연결 필요";
 }
