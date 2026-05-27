@@ -123,24 +123,22 @@ export async function readCodexSession(): Promise<CodexSessionResult> {
   }
 }
 
-export async function startBrowserLogin(authWindow: Window | null): Promise<CodexLoginResponse> {
+export async function startBrowserLogin(authWindow: Window): Promise<CodexLoginResponse> {
   const result = await postJson<CodexLoginResponse>("/api/codex/login", { flow: "browser" });
 
   if (result.ok === false) {
-    authWindow?.close();
+    authWindow.close();
     throw new Error(result.error || "로그인 요청에 실패했습니다.");
   }
 
   if (!result.login?.authUrl) {
-    authWindow?.close();
+    authWindow.close();
     throw new Error("브라우저 로그인 URL을 받지 못했습니다.");
   }
 
-  if (authWindow && !authWindow.closed) {
+  if (!authWindow.closed) {
     authWindow.opener = null;
     authWindow.location.assign(result.login.authUrl);
-  } else if (!window.open(result.login.authUrl, "_blank", "noopener,noreferrer")) {
-    throw new Error("로그인 창이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.");
   }
 
   return result;

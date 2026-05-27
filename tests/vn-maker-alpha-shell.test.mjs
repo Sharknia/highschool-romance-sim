@@ -120,7 +120,7 @@ assert.match(notFoundSource, /to="\/heroines"/, "인증 후 Not Found 복귀 링
 });
 const settingsStartSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
 assert.match(settingsStartSource, /page-status/, "SettingsStartPage는 page-local 상태 문장을 가져야 합니다.");
-assert.doesNotMatch(settingsStartSource, /상태 갱신|로그아웃|refreshSession/, "SettingsStartPage는 수동 상태 갱신/로그아웃 버튼을 노출하면 안 됩니다.");
+assert.match(settingsStartSource, /상태 갱신|로그아웃|refreshSession/, "SettingsStartPage는 Codex 연결 상태 갱신과 로그아웃을 설정 화면에서 소유해야 합니다.");
 const projectStartSource = readText("apps/web/src/client/pages/ProjectStartPage.tsx");
 assert.match(projectStartSource, /shellState/, "ProjectStartPage는 현재 프로젝트 요약을 전역 shell state에서 읽어야 합니다.");
 assert.match(projectStartSource, /projectDirectory:/, "ProjectStartPage는 프로젝트 열기 성공 시 저장 위치를 전역 shell state에 반영해야 합니다.");
@@ -770,8 +770,9 @@ assert.doesNotMatch(
   "WorkspacePage는 히로인 기반 프로젝트 생성 실행 책임을 소유하면 안 됩니다."
 );
 assert.doesNotMatch(settingsStartSource, /setShellState/, "SettingsStartPage는 현재 프로젝트 전역 요약을 초기화하면 안 됩니다.");
-assert.doesNotMatch(settingsStartSource, /describeSession|session\?|logout\(/, "SettingsStartPage는 SA-108의 Codex 상세/로그아웃 범위를 선점하면 안 됩니다.");
-assert.doesNotMatch(settingsStartSource, /생성 기본값|soft visual novel|Codex imageGeneration/, "SettingsStartPage는 SA-108의 생성 기본값 범위를 선점하면 안 됩니다.");
+assert.match(settingsStartSource, /session|logout\(/, "SettingsStartPage는 #83 범위의 Codex session 상세와 로그아웃을 소유해야 합니다.");
+assert.match(settingsStartSource, /생성 기본값|이미지 생성|패키징 목 이미지/, "SettingsStartPage는 #83 범위의 생성 기본값과 fallback 정책을 표시해야 합니다.");
+assert.doesNotMatch(settingsStartSource, /describeSession/, "SettingsStartPage는 shell용 describeSession 문자열을 재사용하지 않고 설정 표시 상태를 분리해야 합니다.");
 
 const styleSource = readText("apps/web/src/client/styles.css");
 [".workspace-layout", ".workspace-nav", ".page-hero", ".page-primary-action"].forEach((selector) => {
