@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Copy, ExternalLink, Heart, Image as ImageIcon, Play, RefreshCw, Settings } from "lucide-react";
+import { ArrowRight, CheckCircle2, Copy, ExternalLink, GitCompareArrows, Heart, Image as ImageIcon, Play, RefreshCw, Settings, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -14,7 +14,12 @@ import {
   type ProjectExportResult,
   type ProjectGenerationJob,
   type ProjectIssue,
+  type ProjectPreviewPreflight,
   type ProjectPreviewReadiness,
+  type ProjectRepairAction,
+  type ProjectRepairActionRequiredInput,
+  type ProjectRepairHistoryEntry,
+  type ProjectRepairPreview,
   type ProjectRuntime,
   type ProjectRuntimeScene,
   type ProjectSmokeResult,
@@ -42,8 +47,11 @@ import {
   imageJobKindLabel,
   isDummyAsset,
   isDummyGenerationJob,
-  jobStatusLabel
+  jobStatusLabel,
+  repairDiffOperationLabel,
+  repairDiffValueText
 } from "./projectDisplayText";
+import { StudioWorkspace } from "./StudioWorkspace";
 
 interface ProjectDetailViewProps {
   activeTab: ProjectTabId;
@@ -52,7 +60,9 @@ interface ProjectDetailViewProps {
   projectDirectory: string;
   projectExportPlan: ProjectExportPlan | null;
   projectId?: string;
+  projectPreviewPreflight: ProjectPreviewPreflight | null;
   projectPreviewReadiness: ProjectPreviewReadiness | null;
+  projectRepairActions: ProjectRepairAction[];
   shellProjectTitle: string;
   workflowSummary: ProjectWorkflowSummary | null;
 }
@@ -74,6 +84,7 @@ interface DummyFallbackTarget {
 }
 
 const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
+const studioNavigationLabel = "제작으로 이동";
 
 const emptyWorkflowSummary: ProjectWorkflowSummary = {
   primaryAction: "goToHeroine",
@@ -310,10 +321,89 @@ function previewReadinessStateLabel(value?: string): string {
   return value || "확인 전";
 }
 
+function previewPreflightStatusText(preflight: ProjectPreviewPreflight | null): string {
+  if (!preflight) {
+    return "확인 전";
+  }
+  return preflight.canRun ? "실행 가능" : preflight.disabledReason || "차단 항목 확인 필요";
+}
+
+function previewPreflightCapabilityText(preflight: ProjectPreviewPreflight | null): string {
+  if (!preflight) {
+    return "확인 전";
+  }
+  const conditionRuntimeSupport = preflight.conditionRuntimeSupport || preflight.runtimeCapabilities?.conditionRuntimeSupport;
+  if (conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated") {
+    const strictPreviewSuccess = conditionRuntimeSupport.strictPreviewSuccess === true;
+    const status = strictPreviewSuccess ? "strict success 포함" : "strict success 제외";
+    return `condition preview not evaluated · ${status}`;
+  }
+  const capabilities = preflight.runtimeCapabilities;
+  if (capabilities?.choiceConditionFiltering && capabilities?.choiceEffects) {
+    return "조건과 효과 반영";
+  }
+  const conditionWarning = preflight.warnings?.find((warning) => warning.issueCode === "conditional-choice-runtime-unsupported");
+  return conditionWarning ? "조건/효과는 아직 미리보기 판정에 반영하지 않습니다." : "조건 미리보기 미지원";
+}
+
+function previewPreflightIssueText(issue: NonNullable<ProjectPreviewPreflight["blockers"]>[number]): string {
+  if (issue.issueCode === "conditional-choice-runtime-unsupported") {
+    const choiceCount = issue.choiceIds?.length ? ` · 선택지 ${issue.choiceIds.length}개` : "";
+    return `조건/효과는 아직 미리보기 판정에 반영하지 않습니다.${choiceCount}`;
+  }
+  const code = issue.issueCode ? `[${issue.issueCode}] ` : "";
+  const path = issue.path ? `${issue.path}: ` : "";
+  const repairs = issue.repairActionIds?.length ? ` · 해결 경로 ${issue.repairActionIds.join(", ")}` : "";
+  return `${code}${path}${issue.message || "확인이 필요합니다."}${repairs}`;
+}
+
+function repairActionInputText(action: ProjectRepairAction): string {
+  const inputs = (action.requiredInputs || []).map((input) => input.label || input.name).filter(Boolean);
+  return inputs.length ? `필요 입력 ${inputs.join(", ")}` : "추가 입력 없음";
+}
+
+function repairActionMetaText(action: ProjectRepairAction): string {
+  const metadata = [
+    action.issueCode ? `문제 코드 ${action.issueCode}` : "",
+    action.targetPath ? `대상 ${action.targetPath}` : "",
+    action.destructive ? "삭제/변경 포함" : "비파괴",
+    action.requiresConfirmation ? "확인 필요" : "",
+    repairActionInputText(action)
+  ].filter(Boolean);
+  return metadata.join(" · ");
+}
+
+function repairActionKey(action: Pick<ProjectRepairAction, "actionId" | "issueCode" | "targetPath">): string {
+  return [action.issueCode || "issue", action.actionId || "action", action.targetPath || "target"].join("::");
+}
+
+function repairInputDefaultValue(input: ProjectRepairActionRequiredInput): string {
+  if (input.inputType === "select") {
+    return input.options?.[0]?.value || "";
+  }
+  return "";
+}
+
+function repairInputDisplayLabel(input: ProjectRepairActionRequiredInput): string {
+  return input.label || input.name || "입력";
+}
+
+function repairResultMessage(result: ProjectApiResult, fallback: string): string {
+  return result.message || result.error || result.issues?.[0]?.message || result.validation?.issues?.[0]?.message || fallback;
+}
+
+function activeRepairHistoryEntry(entry: ProjectRepairHistoryEntry | null): ProjectRepairHistoryEntry | null {
+  if (entry?.id && !entry.revertedAt) {
+    return entry;
+  }
+  return null;
+}
+
 function requiredDataNameLabel(name: string): string {
   if (name === "heroine") return "히로인";
   if (name === "background") return "배경";
   if (name === "event") return "장면";
+  if (name === "scenes") return "장면";
   if (name === "validation") return "검증";
   if (name === "generationJobs") return "이미지 작업";
   return name;
@@ -322,6 +412,8 @@ function requiredDataNameLabel(name: string): string {
 function requiredDataValueLabel(value?: string): string {
   if (value === "ready" || value === "valid" || value === "completed") return "준비됨";
   if (value === "missing") return "필요";
+  if (value === "pending") return "진행 중";
+  if (value === "invalid") return "확인 필요";
   if (value === "waiting" || value === "planned" || value === "running") return "진행 중";
   if (value === "error" || value === "failed" || value === "blocked") return "확인 필요";
   if (value === "empty" || value === "unknown") return "확인 전";
@@ -397,7 +489,9 @@ export function ProjectDetailView({
   projectDirectory,
   projectExportPlan,
   projectId,
+  projectPreviewPreflight,
   projectPreviewReadiness,
+  projectRepairActions,
   shellProjectTitle,
   workflowSummary
 }: ProjectDetailViewProps) {
@@ -431,6 +525,14 @@ export function ProjectDetailView({
   const [previewSceneId, setPreviewSceneId] = useState("");
   const [previewIssues, setPreviewIssues] = useState<string[]>([]);
   const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
+  const [previewPreflight, setPreviewPreflight] = useState<ProjectPreviewPreflight | null>(null);
+  const [repairActions, setRepairActions] = useState<ProjectRepairAction[] | null>(null);
+  const [repairPreview, setRepairPreview] = useState<ProjectRepairPreview | null>(null);
+  const [repairHistoryEntry, setRepairHistoryEntry] = useState<ProjectRepairHistoryEntry | null>(null);
+  const [repairHistory, setRepairHistory] = useState<ProjectRepairHistoryEntry[]>([]);
+  const [repairActionInputs, setRepairActionInputs] = useState<Record<string, Record<string, string>>>({});
+  const [repairStatus, setRepairStatus] = useState("수리 후보를 선택해 diff를 확인하세요.");
+  const [repairBusy, setRepairBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
@@ -439,6 +541,7 @@ export function ProjectDetailView({
   const [smokeResult, setSmokeResult] = useState<ProjectSmokeResult | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const lastResetProjectIdRef = useRef<string | null>(null);
+  const uxSessionIdRef = useRef(`detail-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const routeProjectLoaded = !projectId || loadedProject?.id === projectId;
   const currentProject = routeProjectLoaded ? loadedProject : null;
   const currentWorkflowSummary = routeProjectLoaded ? workflowSummary : null;
@@ -488,7 +591,11 @@ export function ProjectDetailView({
   const showHeaderPrimaryAction = Boolean(detailProjectId) && !tabsWithLocalPrimaryAction.has(activeTab);
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
   const currentPreviewReadiness = previewReadiness || projectPreviewReadiness || emptyPreviewReadiness;
-  const previewRunBlocked = currentPreviewReadiness.canRun !== true;
+  const currentPreviewPreflight = previewPreflight || projectPreviewPreflight || null;
+  const currentRepairActions = repairActions ?? projectRepairActions;
+  const undoRepairEntry = activeRepairHistoryEntry(repairHistoryEntry);
+  const selectedRepairActionKey = repairPreview?.repairAction ? repairActionKey(repairPreview.repairAction) : "";
+  const previewRunBlocked = currentPreviewReadiness.canRun !== true || currentPreviewPreflight?.canRun === false;
   const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
   const dummyImageAssets = collectDummyImageAssets(currentProject, currentExportPlan, previewRuntime);
   const dummyImageJobs = imageJobs.filter(isDummyGenerationJob);
@@ -508,6 +615,38 @@ export function ProjectDetailView({
     }))
   ].filter((action, index, actions) => actions.findIndex((candidate) => candidate.tab === action.tab) === index);
   const exportRunReady = Boolean(currentProject && currentExportPlan.canExport === true && exportState !== "blocked" && exportState !== "failed");
+
+  function recordUXDecisionEvent(event: Record<string, unknown>): void {
+    if (!projectDirectory) {
+      return;
+    }
+    void postAuthedJson<ProjectApiResult>("/api/events/ux/record", {
+      projectDirectory,
+      sessionId: uxSessionIdRef.current,
+      participantIdHash: "local-browser-session",
+      participantType: "local_operator",
+      taskId: "phase0-preview-repair-session",
+      projectId: detailProjectId,
+      routeId: currentRoute?.id,
+      sceneId: currentEventScene?.id,
+      projectRevision: currentPreviewPreflight?.projectRevision || undefined,
+      ...event
+    }).catch(() => {
+      // Event capture must not interrupt repair or preview actions.
+    });
+  }
+
+  function recordModeratorHintGiven(): void {
+    recordUXDecisionEvent({ eventName: "hint_given", helpChannel: "moderator_hint", outcome: "given" });
+  }
+
+  useEffect(() => {
+    function handleModeratorHint(): void {
+      recordModeratorHintGiven();
+    }
+    window.addEventListener("vn-maker:moderator-hint", handleModeratorHint);
+    return () => window.removeEventListener("vn-maker:moderator-hint", handleModeratorHint);
+  }, [projectDirectory, detailProjectId]);
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -605,9 +744,11 @@ export function ProjectDetailView({
 
   function resetPreviewAndExportState(input: {
     exportPlan?: ProjectExportPlan | null;
+    previewPreflight?: ProjectPreviewPreflight | null;
     previewReadiness?: ProjectPreviewReadiness | null;
     previewStatus?: string;
     project?: ProjectData | null;
+    repairActions?: ProjectRepairAction[];
     workflowSummary?: ProjectWorkflowSummary | null;
   } = {}): void {
     const nextState = createPreviewExportResetState({
@@ -619,6 +760,13 @@ export function ProjectDetailView({
     setPreviewSceneId("");
     setPreviewIssues([]);
     setPreviewReadiness(input.previewReadiness || null);
+    setPreviewPreflight(input.previewPreflight || null);
+    setRepairActions(input.repairActions ?? null);
+    setRepairPreview(null);
+    setRepairHistoryEntry(null);
+    setRepairHistory([]);
+    setRepairActionInputs({});
+    setRepairStatus("수리 후보를 선택해 diff를 확인하세요.");
     setPreviewState(nextState.previewState);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
@@ -640,9 +788,15 @@ export function ProjectDetailView({
     setDummyActionStatus("");
     resetPreviewAndExportState({
       exportPlan: projectExportPlan,
-      previewReadiness: projectPreviewReadiness
+      previewPreflight: projectPreviewPreflight,
+      previewReadiness: projectPreviewReadiness,
+      repairActions: projectRepairActions
     });
   }, [currentProject?.id]);
+
+  useEffect(() => {
+    setRepairActions(null);
+  }, [projectRepairActions]);
 
   useEffect(() => {
     if (activeTab !== "background" || !currentProject) {
@@ -670,9 +824,11 @@ export function ProjectDetailView({
       onProjectResult(result);
       resetPreviewAndExportState({
         exportPlan: result.exportPlan || null,
+        previewPreflight: result.previewPreflight || null,
         previewReadiness: result.previewReadiness || null,
         previewStatus: "히로인 변경으로 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
+        repairActions: result.repairActions || [],
         workflowSummary: result.workflowSummary
       });
       setHeroineStatus("히로인 스냅샷이 프로젝트에 배정되었습니다.");
@@ -716,7 +872,7 @@ export function ProjectDetailView({
   }
 
   function applyEventFailure(result: ProjectApiResult, fallbackMessage: string): void {
-    const stale = result.code === "PATCH_STALE" || result.code === "PROJECT_REVISION_CONFLICT" || result.httpStatus === 409;
+    const stale = result.code === "PATCH_STALE" || result.code === "STALE_PROJECT_REVISION" || result.code === "PROJECT_REVISION_CONFLICT" || result.httpStatus === 409;
     setEventState(stale ? "patchStale" : "patchInvalid");
     setEventStatus(result.message || result.error || fallbackMessage);
     setEventIssues(result.issues || result.validation?.issues || []);
@@ -782,6 +938,7 @@ export function ProjectDetailView({
     try {
       const result = await postAuthedJson<ProjectApiResult>("/api/events/approve", {
         projectDirectory,
+        expectedProjectRevision: pendingPatch.projectRevision,
         request: pendingPatch.request,
         plan: pendingPatch.plan,
         patchHistoryId: pendingPatch.patchHistoryEntry?.id
@@ -793,9 +950,11 @@ export function ProjectDetailView({
       onProjectResult(result);
       resetPreviewAndExportState({
         exportPlan: result.exportPlan || null,
+        previewPreflight: result.previewPreflight || null,
         previewReadiness: result.previewReadiness || null,
         previewStatus: "프로젝트 이벤트가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
+        repairActions: result.repairActions || [],
         workflowSummary: result.workflowSummary
       });
       setPendingPatch(null);
@@ -900,9 +1059,11 @@ export function ProjectDetailView({
         onProjectResult(run);
         resetPreviewAndExportState({
           exportPlan: run.exportPlan || null,
+          previewPreflight: run.previewPreflight || null,
           previewReadiness: run.previewReadiness || null,
           previewStatus: "배경 화면이 생성되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: run.project,
+          repairActions: run.repairActions || [],
           workflowSummary: run.workflowSummary
         });
       }
@@ -951,9 +1112,11 @@ export function ProjectDetailView({
         onProjectResult(result);
         resetPreviewAndExportState({
           exportPlan: result.exportPlan || null,
+          previewPreflight: result.previewPreflight || null,
           previewReadiness: result.previewReadiness || null,
           previewStatus: "배경 화면 작업이 추가되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
+          repairActions: result.repairActions || [],
           workflowSummary: result.workflowSummary
         });
       }
@@ -989,9 +1152,11 @@ export function ProjectDetailView({
         onProjectResult(result);
         resetPreviewAndExportState({
           exportPlan: result.exportPlan || null,
+          previewPreflight: result.previewPreflight || null,
           previewReadiness: result.previewReadiness || null,
           previewStatus: "이미지 결과가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
+          repairActions: result.repairActions || [],
           workflowSummary: result.workflowSummary
         });
       }
@@ -1024,6 +1189,211 @@ export function ProjectDetailView({
     return validationIssues(result).map(issueText);
   }
 
+  function repairInputValue(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput): string {
+    const name = input.name || "";
+    if (!name) {
+      return "";
+    }
+    const value = repairActionInputs[repairActionKey(action)]?.[name];
+    return typeof value === "string" ? value : repairInputDefaultValue(input);
+  }
+
+  function repairInputsFor(action: ProjectRepairAction): Record<string, string> {
+    return (action.requiredInputs || []).reduce<Record<string, string>>((inputs, input) => {
+      if (input.name) {
+        inputs[input.name] = repairInputValue(action, input);
+      }
+      return inputs;
+    }, {});
+  }
+
+  function repairRequestBody(action: ProjectRepairAction): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      projectDirectory,
+      repairAction: {
+        actionId: action.actionId,
+        issueCode: action.issueCode,
+        targetPath: action.targetPath,
+        inputs: repairInputsFor(action)
+      }
+    };
+    if (currentPreviewPreflight?.projectRevision) {
+      body.expectedProjectRevision = currentPreviewPreflight.projectRevision;
+    }
+    return body;
+  }
+
+  function updateRepairInput(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput, value: string): void {
+    if (!input.name) {
+      return;
+    }
+    setRepairActionInputs((current) => ({
+      ...current,
+      [repairActionKey(action)]: {
+        ...(current[repairActionKey(action)] || {}),
+        [input.name as string]: value
+      }
+    }));
+    setRepairPreview(null);
+    setRepairStatus("입력이 변경되었습니다. 수리 diff를 다시 확인하세요.");
+  }
+
+  function applyRepairResultState(result: ProjectApiResult, status: string): void {
+    const nextResetState = createPreviewExportResetState({
+      project: result.project || currentProject,
+      workflowSummary: result.workflowSummary || workflowSummary,
+      previewStatus: result.previewPreflight?.disabledReason || "수리 결과가 반영되었습니다. 프리뷰를 다시 생성하세요."
+    });
+    onProjectResult(result);
+    setPreviewReadiness(result.previewReadiness || null);
+    setPreviewPreflight(result.previewPreflight || null);
+    setRepairActions(result.repairActions || []);
+    setRepairHistoryEntry(result.repairHistoryEntry || null);
+    setRepairHistory(result.repairHistory || []);
+    setExportPlan(result.exportPlan || null);
+    setPreviewRuntime(null);
+    setPreviewSceneId("");
+    setPreviewIssues(validationMessages(result));
+    setPreviewState(result.previewPreflight?.canRun === false ? "blocked" : nextResetState.previewState);
+    setPreviewStatus(nextResetState.previewStatus);
+    setExportResult(null);
+    setSmokeResult(null);
+    setExportState(nextResetState.exportState);
+    setExportStatus(nextResetState.exportStatus);
+    setRepairStatus(status);
+  }
+
+  async function previewRepairAction(action: ProjectRepairAction): Promise<void> {
+    if (!projectDirectory) {
+      setRepairStatus("프로젝트 저장 위치가 필요합니다.");
+      return;
+    }
+    setRepairBusy(true);
+    setRepairStatus("수리 diff를 계산하는 중입니다.");
+    recordUXDecisionEvent({
+      eventName: "repair_action_used",
+      issueCode: action.issueCode,
+      repairActionId: action.actionId,
+      outcome: "used"
+    });
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/preview", repairRequestBody(action));
+      if (result.ok === false || !result.repairPreview) {
+        setRepairPreview(null);
+        if (result.previewReadiness) setPreviewReadiness(result.previewReadiness);
+        if (result.previewPreflight) setPreviewPreflight(result.previewPreflight);
+        if (result.repairActions) setRepairActions(result.repairActions);
+        if (result.exportPlan) setExportPlan(result.exportPlan);
+        setRepairStatus(repairResultMessage(result, "수리 diff를 계산하지 못했습니다."));
+        return;
+      }
+      setPreviewReadiness(result.previewReadiness || null);
+      setPreviewPreflight(result.previewPreflight || null);
+      setRepairActions(result.repairActions || []);
+      setExportPlan(result.exportPlan || null);
+      setRepairPreview(result.repairPreview);
+      recordUXDecisionEvent({
+        eventName: "repair_action_used",
+        correlationId: result.correlationId,
+        issueCode: result.repairPreview.issueCode,
+        repairActionId: result.repairPreview.actionId,
+        outcome: "success"
+      });
+      setRepairStatus("수리 diff를 확인한 뒤 변경 적용을 누르세요.");
+    } catch (error) {
+      setRepairPreview(null);
+      setRepairStatus(`수리 diff 계산 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
+  async function applyRepairPreview(): Promise<void> {
+    if (!repairPreview?.repairAction || !repairPreview.beforeRevision || !repairPreview.confirmToken) {
+      setRepairStatus("먼저 수리 diff를 확인해야 합니다.");
+      return;
+    }
+    const destructive = (repairPreview.destructiveWarnings || []).length > 0 || repairPreview.repairAction.destructive;
+    if (destructive && !window.confirm("표시된 diff대로 수리 적용할까요?")) {
+      setRepairStatus("수리 적용을 취소했습니다.");
+      return;
+    }
+    setRepairBusy(true);
+    setRepairStatus("수리를 적용하고 검증을 다시 계산하는 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/apply", {
+        ...repairRequestBody(repairPreview.repairAction),
+        expectedProjectRevision: repairPreview.beforeRevision,
+        confirmToken: repairPreview.confirmToken
+      });
+      if (result.ok === false) {
+        setRepairPreview(null);
+        if (result.previewReadiness) setPreviewReadiness(result.previewReadiness);
+        if (result.previewPreflight) setPreviewPreflight(result.previewPreflight);
+        if (result.repairActions) setRepairActions(result.repairActions);
+        if (result.exportPlan) setExportPlan(result.exportPlan);
+        setRepairStatus(`${repairResultMessage(result, "수리를 적용하지 못했습니다.")} 수리 diff를 다시 확인하세요.`);
+        return;
+      }
+      setRepairPreview(null);
+      recordUXDecisionEvent({
+        eventName: "repaired",
+        correlationId: result.correlationId,
+        issueCode: result.repairHistoryEntry?.issueCode || repairPreview.repairAction.issueCode,
+        issueCodesBefore: result.repairHistoryEntry?.issueCode ? [result.repairHistoryEntry.issueCode] : [],
+        issueCodesAfter: (result.previewPreflight?.blockers || []).map((blocker) => blocker.issueCode || blocker.path || "unknown"),
+        repairActionId: result.repairHistoryEntry?.actionId || repairPreview.repairAction.actionId,
+        revisionBefore: result.previousRevision || repairPreview.beforeRevision,
+        revisionAfter: result.projectRevision,
+        outcome: "success"
+      });
+      applyRepairResultState(result, "수리 적용 완료. 마지막 수리는 되돌릴 수 있습니다.");
+    } catch (error) {
+      setRepairPreview(null);
+      setRepairStatus(`수리 적용 실패: ${error instanceof Error ? error.message : String(error)} 수리 diff를 다시 확인하세요.`);
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
+  async function undoLastRepair(): Promise<void> {
+    if (!undoRepairEntry?.id) {
+      setRepairStatus("되돌릴 수리 이력이 없습니다.");
+      return;
+    }
+    if (!window.confirm("마지막 수리를 되돌리고 검증을 다시 계산할까요?")) {
+      setRepairStatus("수리 되돌리기를 취소했습니다.");
+      return;
+    }
+    setRepairBusy(true);
+    setRepairStatus("마지막 수리를 되돌리고 검증을 다시 계산하는 중입니다.");
+    try {
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/undo", {
+        projectDirectory,
+        repairHistoryId: undoRepairEntry.id
+      });
+      if (result.ok === false) {
+        setRepairStatus(repairResultMessage(result, "마지막 수리를 되돌리지 못했습니다."));
+        return;
+      }
+      setRepairPreview(null);
+      recordUXDecisionEvent({
+        eventName: "undo_used",
+        correlationId: result.correlationId,
+        issueCode: result.repairHistoryEntry?.issueCode || undoRepairEntry.issueCode,
+        repairActionId: result.repairHistoryEntry?.actionId || undoRepairEntry.actionId,
+        revisionBefore: result.previousRevision,
+        revisionAfter: result.projectRevision,
+        outcome: "undone"
+      });
+      applyRepairResultState(result, "마지막 수리를 되돌렸습니다. 검증 결과와 사전 점검을 다시 확인하세요.");
+    } catch (error) {
+      setRepairStatus(`수리 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
   async function validateBeforePreview(): Promise<boolean> {
     const result = await postAuthedJson<ProjectApiResult>("/api/project/validate", { projectDirectory });
     const issues = validationIssues(result);
@@ -1036,25 +1406,35 @@ export function ProjectDetailView({
       retryable: result.retryable ?? false,
       nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
     } : currentPreviewReadiness);
+    setPreviewPreflight(result.previewPreflight || null);
+    setRepairActions(result.repairActions || []);
+    setRepairPreview(null);
     setExportPlan(result.exportPlan || null);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
-      setPreviewState("failed");
+      const blocked = result.previewPreflight?.canRun === false || hasBlockingPreviewErrors(issues);
+      setPreviewState(blocked ? "blocked" : "failed");
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewIssues(messages);
       setPreviewReadiness(nextReadiness);
-      setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
+      setPreviewStatus(result.previewPreflight?.disabledReason || result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
+      recordUXDecisionEvent({
+        eventName: "validation_failed",
+        issueCodesBefore: issues.map((issue) => issue.code || issue.path || "unknown"),
+        outcome: "failed",
+        preflightResult: result.previewPreflight
+      });
       return false;
     }
     setPreviewIssues(messages);
     setPreviewReadiness(nextReadiness);
-    if (nextReadiness.canRun !== true) {
+    if (nextReadiness.canRun !== true || result.previewPreflight?.canRun === false) {
       setPreviewState("blocked");
-      setPreviewStatus(nextReadiness.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다.");
+      setPreviewStatus(result.previewPreflight?.disabledReason || nextReadiness.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다.");
       return false;
     }
     setPreviewState("ready");
-    setPreviewStatus(nextReadiness.nextAction || "프리뷰를 실행할 수 있습니다.");
+    setPreviewStatus(result.previewPreflight?.nextAction || nextReadiness.nextAction || "프리뷰를 실행할 수 있습니다.");
     return true;
   }
 
@@ -1073,19 +1453,21 @@ export function ProjectDetailView({
         startSceneId
       });
       if (result.ok === false) {
-        const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false;
+        const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false || result.previewPreflight?.canRun === false;
         setPreviewState(blocked ? "blocked" : "failed");
         setPreviewRuntime(null);
         setPreviewSceneId("");
         setExportPlan(result.exportPlan || null);
+        setPreviewPreflight(result.previewPreflight || null);
+        setRepairActions(result.repairActions || []);
         setPreviewReadiness(result.previewReadiness || {
           ...currentPreviewReadiness,
           state: blocked ? "blocked" : "failed",
           availableState: blocked ? "blocked" : "failed",
-          failureCause: result.message || result.error || "프리뷰 생성에 실패했습니다.",
+          failureCause: result.previewPreflight?.disabledReason || result.message || result.error || "프리뷰 생성에 실패했습니다.",
           retryable: result.retryable
         });
-        setPreviewStatus(result.message || result.error || "프리뷰 생성에 실패했습니다.");
+        setPreviewStatus(result.previewPreflight?.disabledReason || result.message || result.error || "프리뷰 생성에 실패했습니다.");
         setPreviewIssues(validationMessages(result));
         return;
       }
@@ -1094,16 +1476,27 @@ export function ProjectDetailView({
       setPreviewSceneId(startSceneId || nextRuntime?.startSceneId || "");
       setPreviewIssues(validationMessages(result));
       const nextReadiness = result.previewReadiness || null;
-      const blocked = nextReadiness?.canRun === false;
+      const nextPreflight = result.previewPreflight || null;
+      const blocked = nextReadiness?.canRun === false || nextPreflight?.canRun === false;
       setPreviewReadiness(nextReadiness);
+      setPreviewPreflight(nextPreflight);
+      setRepairActions(result.repairActions || []);
       setExportPlan(result.exportPlan || null);
       setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
-      setPreviewStatus(blocked ? nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
+      setPreviewStatus(blocked ? nextPreflight?.disabledReason || nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
+      recordUXDecisionEvent({
+        eventName: "previewed",
+        correlationId: result.correlationId,
+        outcome: blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "completed",
+        preflightResult: nextPreflight || undefined
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");
       setPreviewRuntime(null);
       setPreviewSceneId("");
+      setPreviewPreflight(null);
+      setRepairActions([]);
       setPreviewReadiness({
         ...currentPreviewReadiness,
         state: "failed",
@@ -1129,6 +1522,7 @@ export function ProjectDetailView({
       });
       setExportResult(result.export || null);
       setExportPlan(result.exportPlan || null);
+      setRepairActions(result.repairActions || []);
       setSmokeResult(result.smoke || null);
       if (result.ok === false) {
         setExportState(result.code === "EXPORT_BLOCKED" ? "blocked" : "failed");
@@ -1157,6 +1551,25 @@ export function ProjectDetailView({
     } finally {
       setExportBusy(false);
     }
+  }
+
+  const studioWorkspace = (
+    <StudioWorkspace
+      navigationLabel={studioNavigationLabel}
+      onNavigate={navigate}
+      onProjectResult={onProjectResult}
+      postJson={(path, body) => postAuthedJson<ProjectApiResult>(path, body)}
+      previewPreflight={currentPreviewPreflight}
+      project={currentProject}
+      projectDirectory={projectDirectory}
+      projectId={detailProjectId}
+      projectRevision={currentPreviewPreflight?.projectRevision || null}
+      repairActions={currentRepairActions}
+    />
+  );
+
+  if (activeTab === "studio") {
+    return studioWorkspace;
   }
 
   return (
@@ -1333,22 +1746,6 @@ export function ProjectDetailView({
                   </Button>
                 </>
               )}
-            </section>
-          </div>
-        ) : null}
-        {activeTab === "studio" ? (
-          <div className="detail-tab-grid" data-testid="studio-under-construction">
-            <section className="detail-card detail-card-wide">
-              <EmptyState
-                title="제작 탭은 준비 중입니다."
-                description="Alpha에서는 시나리오 작성, 분기 편집, 장면 구성 흐름이 이 영역에 들어올 예정입니다."
-              />
-              <ul className="compact-list">
-                <li>시나리오 작성: 프로젝트 스냅샷과 배경 에셋을 바탕으로 장면 초안을 다룹니다.</li>
-                <li>분기 편집: 선택지와 엔딩 도달 상태를 시각적으로 조정합니다.</li>
-                <li>장면 구성: 대사, 배경, 캐릭터 표시를 한 장면 단위로 편집합니다.</li>
-              </ul>
-              <div className="inline-status">제작으로 이동 상태: 준비 중. 실제 동작하지 않는 제작 버튼은 제공하지 않습니다.</div>
             </section>
           </div>
         ) : null}
@@ -1568,11 +1965,111 @@ export function ProjectDetailView({
               <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. 현재 상태: {previewReadinessStateLabel(currentPreviewReadiness.availableState || currentPreviewReadiness.state)}</p>
               <dl className="summary-list">
                 <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
+                <div><dt>사전 점검</dt><dd>{previewPreflightStatusText(currentPreviewPreflight)}</dd></div>
+                <div><dt>조건 처리</dt><dd>{previewPreflightCapabilityText(currentPreviewPreflight)}</dd></div>
+                <div><dt>actual preview evidence</dt><dd>{currentPreviewPreflight?.canRun === true ? "preflightResult canRun true" : "preflightResult 확인 필요"}</dd></div>
+                <div><dt>condition preview not_evaluated</dt><dd>{currentPreviewPreflight?.conditionRuntimeSupport?.strictPreviewStatus || "not_evaluated"}</dd></div>
+                <div><dt>fake/mock preview</dt><dd>{dummyFallbackTargets.length ? `${dummyFallbackTargets.length}개 목 이미지 포함 가능` : "0"}</dd></div>
                 <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${requiredDataNameLabel(name)}: ${requiredDataValueLabel(value)}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>
                 <div><dt>다음 작업</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
               </dl>
+              {currentPreviewPreflight?.blockers?.length ? (
+                <div>
+                  <h4>사전 점검 차단 항목</h4>
+                  <ul className="compact-list">
+                    {currentPreviewPreflight.blockers.map((blocker, index) => <li key={`${blocker.issueCode || "blocker"}-${blocker.path || index}`}>{previewPreflightIssueText(blocker)}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {currentPreviewPreflight?.warnings?.length ? (
+                <div>
+                  <h4>사전 점검 참고 항목</h4>
+                  <ul className="compact-list">
+                    {currentPreviewPreflight.warnings.map((warning, index) => <li key={`${warning.issueCode || "warning"}-${warning.path || index}`}>{previewPreflightIssueText(warning)}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              <p aria-live="polite" className="page-muted">{repairStatus}</p>
+              {currentRepairActions.length ? (
+                <div>
+                  <h4>수리 후보</h4>
+                  <ul className="repair-action-list">
+	                    {currentRepairActions.map((action, index) => (
+	                      <li aria-current={repairActionKey(action) === selectedRepairActionKey ? "true" : undefined} className={repairActionKey(action) === selectedRepairActionKey ? "selected" : ""} key={`${action.issueCode || "issue"}-${action.actionId || index}-${action.targetPath || "target"}`}>
+                        <Button disabled={repairBusy || Boolean(action.disabledReason) || !projectDirectory} icon={<GitCompareArrows size={16} />} onClick={() => void previewRepairAction(action)} variant={action.destructive ? "danger" : "ghost"}>
+                          {action.label || action.actionId || "수리 후보"} diff 확인
+                        </Button>
+                        <span>{action.description || "문제 확인 결과에 맞는 수리 후보입니다."}</span>
+                        <small>{repairActionMetaText(action)}</small>
+                        {action.disabledReason ? <small>비활성 사유 {action.disabledReason}</small> : null}
+                        {action.requiredInputs?.length ? (
+                          <div className="repair-action-inputs">
+                            {action.requiredInputs.map((input) => (
+                              <label key={`${repairActionKey(action)}-${input.name || input.label}`} className="repair-action-input">
+                                <span>{repairInputDisplayLabel(input)}</span>
+                                {input.inputType === "select" ? (
+                                  <select disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} value={repairInputValue(action, input)}>
+                                    {(input.options || []).map((option) => (
+                                      <option key={option.value || option.label} value={option.value || ""}>{option.label || option.value || "선택"}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} placeholder={repairInputDisplayLabel(input)} value={repairInputValue(action, input)} />
+                                )}
+                              </label>
+                            ))}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {repairPreview || undoRepairEntry ? (
+                <div className="repair-diff-panel">
+                  <h4>수리 diff</h4>
+                  {repairPreview ? (
+                    <>
+                      <p className="page-muted">{repairPreview.expectedAfterSummary || "표시된 변경 사항을 확인한 뒤 적용합니다."}</p>
+                      <dl className="summary-list">
+                        <div><dt>수리 액션</dt><dd>{repairPreview.repairAction?.label || repairPreview.actionId || "수리 후보"}</dd></div>
+                        <div><dt>대상</dt><dd>{repairPreview.targetPath || "대상 확인 필요"}</dd></div>
+                        <div><dt>기준 revision</dt><dd>{repairPreview.beforeRevision?.revision || "revision 확인 필요"}</dd></div>
+                        <div><dt>확인 방식</dt><dd>{repairPreview.repairAction?.requiresConfirmation || repairPreview.destructiveWarnings?.length ? "diff 확인 후 적용" : "즉시 적용 가능"}</dd></div>
+                      </dl>
+                      {repairPreview.destructiveWarnings?.length ? (
+                        <ul className="compact-list">
+                          {repairPreview.destructiveWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+                        </ul>
+                      ) : null}
+                      <ul className="repair-diff-list">
+                        {(repairPreview.diff || []).map((entry, index) => (
+                          <li key={`${entry.path || "diff"}-${entry.op || "op"}-${index}`}>
+                            <strong>{repairDiffOperationLabel(entry.op)} · {entry.path || "경로 확인 필요"}</strong>
+                            <span>{entry.humanLabel || "프로젝트 값을 변경합니다."}</span>
+                            <small>이전 {repairDiffValueText(entry.before)} → 이후 {repairDiffValueText(entry.after)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p className="page-muted">마지막 수리 적용 이력이 있습니다. 필요하면 되돌릴 수 있습니다.</p>
+                  )}
+                  <div className="button-row">
+                    {repairPreview ? (
+                      <Button disabled={repairBusy} icon={<CheckCircle2 size={16} />} onClick={() => void applyRepairPreview()} variant={repairPreview.destructiveWarnings?.length || repairPreview.repairAction?.destructive ? "danger" : "primary"}>
+                        변경 적용
+                      </Button>
+                    ) : null}
+                    <Button disabled={repairBusy || !undoRepairEntry?.id} icon={<Undo2 size={16} />} onClick={() => void undoLastRepair()} variant="ghost">
+                      마지막 수리 되돌리기
+                    </Button>
+                  </div>
+                  {repairHistoryEntry?.appliedAt ? <small>마지막 적용 시각 {repairHistoryEntry.appliedAt}</small> : null}
+                </div>
+              ) : null}
               {currentPreviewReadiness.missingItems?.length ? (
                 <div>
                   <h4>누락 항목</h4>

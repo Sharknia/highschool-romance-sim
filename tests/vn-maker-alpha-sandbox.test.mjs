@@ -272,6 +272,7 @@ try {
   assert.equal(imageFailureRun.body.assets[0].provenance.fallbackReason, "OAUTH_REQUIRED");
   assert.equal(existsSync(join(imageFailureProjectDirectory, "assets", "generated", "asset-image-failure-background.png")), true);
 
+  const cliEnv = { VN_MAKER_ALPHA_SANDBOX: "1" };
   process.env.VN_MAKER_ALPHA_SANDBOX = "1";
   const sandboxApi = webHandlers.createApiRequestHandler();
   const sandboxSession = await sandboxApi({ method: "GET", path: "/api/codex/session" });
@@ -348,6 +349,7 @@ try {
     path: "/api/project/scenes",
     body: {
       projectDirectory: staleProjectDirectory,
+      expectedProjectRevision: staleProject.body.projectRevision,
       scene: {
         ...staleAfterScene,
         text: `${staleAfterScene.text} 기준 프로젝트를 바꾼다.`
@@ -360,6 +362,7 @@ try {
     path: "/api/events/approve",
     body: {
       projectDirectory: staleProjectDirectory,
+      expectedProjectRevision: staleExpansion.body.projectRevision,
       request: staleExpansion.body.request,
       plan: staleExpansion.body.plan,
       patchHistoryId: staleExpansion.body.patchHistoryEntry.id
@@ -367,10 +370,64 @@ try {
   });
   assert.equal(staleApproval.status, 409);
   assert.equal(staleApproval.body.action, "approveEvent");
-  assert.equal(staleApproval.body.code, "PATCH_STALE");
+  assert.equal(staleApproval.body.code, "STALE_PROJECT_REVISION");
+  assert.equal(staleApproval.body.expectedRevision, staleExpansion.body.projectRevision.revision);
+  assert.equal(staleApproval.body.actualRevision.revision, staleMutation.body.projectRevision.revision);
+  assert.equal(staleApproval.body.nextAction, "최신 프로젝트를 다시 불러온 뒤 시도하세요.");
   assert.equal(staleApproval.body.retryable, false);
   assert.equal(staleApproval.body.workflowSummary.previewState, "blocked");
   assert.equal(staleApproval.body.workflowSummary.primaryAction, "goToBackground");
+  const staleCliApproval = runCliFailure("approve-event", {
+    projectDirectory: staleProjectDirectory,
+    expectedProjectRevision: staleExpansion.body.projectRevision,
+    request: staleExpansion.body.request,
+    plan: staleExpansion.body.plan,
+    patchHistoryId: staleExpansion.body.patchHistoryEntry.id
+  }, cliEnv);
+  assert.equal(staleCliApproval.code, "STALE_PROJECT_REVISION");
+  assert.equal(staleCliApproval.expectedRevision, staleApproval.body.expectedRevision);
+  assert.equal(staleCliApproval.actualRevision.revision, staleApproval.body.actualRevision.revision);
+  assert.equal(staleCliApproval.nextAction, staleApproval.body.nextAction);
+
+  const staleAfterMutationExpansion = await sandboxApi({
+    method: "POST",
+    path: "/api/events/expand",
+    body: {
+      projectDirectory: staleProjectDirectory,
+      routeId: staleRoute.id,
+      afterSceneId: staleAfterScene.id,
+      heroineId: staleRoute.heroineId,
+      userEvent: "현재 프로젝트에서 새 이벤트를 다시 제안해줘."
+    }
+  });
+  assert.equal(staleAfterMutationExpansion.status, 200);
+  const staleBaseHashApproval = await sandboxApi({
+    method: "POST",
+    path: "/api/events/approve",
+    body: {
+      projectDirectory: staleProjectDirectory,
+      expectedProjectRevision: staleAfterMutationExpansion.body.projectRevision,
+      request: staleExpansion.body.request,
+      plan: staleExpansion.body.plan,
+      patchHistoryId: staleExpansion.body.patchHistoryEntry.id
+    }
+  });
+  assert.equal(staleBaseHashApproval.status, 409);
+  assert.equal(staleBaseHashApproval.body.code, "STALE_PROJECT_REVISION");
+  assert.equal(staleBaseHashApproval.body.expectedRevision, staleAfterMutationExpansion.body.projectRevision.revision);
+  assert.equal(staleBaseHashApproval.body.actualRevision.revision, staleAfterMutationExpansion.body.projectRevision.revision);
+  assert.equal(staleBaseHashApproval.body.nextAction, "최신 프로젝트를 다시 불러온 뒤 시도하세요.");
+  const staleBaseHashCliApproval = runCliFailure("approve-event", {
+    projectDirectory: staleProjectDirectory,
+    expectedProjectRevision: staleAfterMutationExpansion.body.projectRevision,
+    request: staleExpansion.body.request,
+    plan: staleExpansion.body.plan,
+    patchHistoryId: staleExpansion.body.patchHistoryEntry.id
+  }, cliEnv);
+  assert.equal(staleBaseHashCliApproval.code, "STALE_PROJECT_REVISION");
+  assert.equal(staleBaseHashCliApproval.expectedRevision, staleBaseHashApproval.body.expectedRevision);
+  assert.equal(staleBaseHashCliApproval.actualRevision.revision, staleBaseHashApproval.body.actualRevision.revision);
+  assert.equal(staleBaseHashCliApproval.nextAction, staleBaseHashApproval.body.nextAction);
 
   const apiRoute = apiProject.body.project.routes[0];
   const apiAfterSceneId = apiProject.body.project.scenes[0].id;
@@ -394,6 +451,7 @@ try {
     path: "/api/events/approve",
     body: {
       projectDirectory: apiProjectDirectory,
+      expectedProjectRevision: apiExpansion.body.projectRevision,
       request: apiExpansion.body.request,
       plan: apiExpansion.body.plan,
       patchHistoryId: apiExpansion.body.patchHistoryEntry.id
@@ -533,7 +591,6 @@ try {
   assert.equal(apiHistory.status, 200);
   assert.equal(apiHistory.body.entries.some((entry) => entry.rawOutput?.metadata?.provenance === alphaSandbox.ALPHA_SANDBOX_PROVENANCE), true);
 
-  const cliEnv = { VN_MAKER_ALPHA_SANDBOX: "1" };
   const cliProjectDirectory = join(tempRoot, "CliSandbox.vnmaker");
   const cliInspect = runCli("inspect", {}, cliEnv);
   assert.equal(cliInspect.sandbox.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
@@ -568,6 +625,7 @@ try {
 
   const cliApproval = runCli("approve-event", {
     projectDirectory: cliProjectDirectory,
+    expectedProjectRevision: cliExpansion.projectRevision,
     request: cliExpansion.request,
     plan: cliExpansion.plan,
     patchHistoryId: cliExpansion.patchHistoryEntry.id

@@ -16,7 +16,6 @@ import {
   createImageGenerationJob,
   createStarterProject,
   parseVnMakerProject,
-  validateProject,
   type VnMakerCharacter,
   type VnMakerProject,
   type VnMakerScene
@@ -40,6 +39,7 @@ interface CliInput {
   heroineId?: string;
   sourceHeroineId?: string;
   expectedHeroineRevision?: unknown;
+  expectedProjectRevision?: unknown;
   confirmName?: string;
   confirmId?: string;
   draft?: unknown;
@@ -49,6 +49,8 @@ interface CliInput {
   request?: unknown;
   plan?: unknown;
   patchHistoryId?: string;
+  promptId?: string;
+  adapterMode?: "mock" | "actual";
   userEvent?: string;
   routeId?: string;
   afterSceneId?: string;
@@ -153,8 +155,16 @@ function printCapabilities(): void {
       "validate",
       "manifest",
       "build-html",
+      "fixed-prompts",
+      "replay-fixed-prompt",
+      "generation-result-logs",
+      "record-ux-event",
+      "list-ux-events",
+      "export-ux-event-log",
+      "phase0-decision-report",
       "expand-event",
       "approve-event",
+      "preview-preflight",
       "preview",
       "export-web",
       "smoke-export",
@@ -165,6 +175,9 @@ function printCapabilities(): void {
       "run-generation-jobs",
       "list-patch-history",
       "undo-patch",
+      "repair-preview",
+      "repair-apply",
+      "repair-undo",
       "codex-auth-status",
       "codex-login",
       "codex-logout",
@@ -190,12 +203,24 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "remove-recent-project": "removeRecentProject",
     "restore-recent-project": "restoreRecentProject",
     "delete-project": "deleteProjectWorkspace",
+    "fixed-prompts": "listFixedPrompts",
+    "replay-fixed-prompt": "replayFixedPrompt",
+    "generation-result-logs": "listGenerationResultLogs",
+    "record-ux-event": "recordUXDecisionEvent",
+    "list-ux-events": "listUXDecisionEvents",
+    "export-ux-event-log": "exportUXDecisionEventLog",
+    "phase0-decision-report": "createPhase0DecisionReport",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
+    "preview-preflight": "previewPreflightProject",
     "preview": "previewProject",
     "export-web": "exportProject",
     "list-generation-jobs": "listGenerationJobs",
-    "run-generation-jobs": "runGenerationJobs"
+    "run-generation-jobs": "runGenerationJobs",
+    "undo-patch": "undoPatch",
+    "repair-preview": "previewRepair",
+    "repair-apply": "applyRepair",
+    "repair-undo": "undoRepair"
   };
   return actions[command];
 }
@@ -350,8 +375,7 @@ async function run(): Promise<void> {
       writeJson(await useCases.validateProject(input));
       return;
     }
-    const issues = validateProject(getProject(input));
-    writeJson({ ok: issues.every((issue) => issue.severity !== "error"), issues });
+    writeJson(useCases.validateProjectSnapshot(getProject(input)));
     return;
   }
 
@@ -378,6 +402,41 @@ async function run(): Promise<void> {
     return;
   }
 
+  if (command === "fixed-prompts") {
+    writeJson(await useCases.listFixedPrompts(input));
+    return;
+  }
+
+  if (command === "replay-fixed-prompt") {
+    writeJson(await useCases.replayFixedPrompt(input));
+    return;
+  }
+
+  if (command === "generation-result-logs") {
+    writeJson(await useCases.listGenerationResultLogs(input));
+    return;
+  }
+
+  if (command === "record-ux-event") {
+    writeJson(await useCases.recordUXDecisionEvent(input));
+    return;
+  }
+
+  if (command === "list-ux-events") {
+    writeJson(await useCases.listUXDecisionEvents(input));
+    return;
+  }
+
+  if (command === "export-ux-event-log") {
+    writeJson(await useCases.exportUXDecisionEventLog(input));
+    return;
+  }
+
+  if (command === "phase0-decision-report") {
+    writeJson(await useCases.createPhase0DecisionReport(input));
+    return;
+  }
+
   if (command === "expand-event") {
     writeJson(await useCases.expandEvent(input));
     return;
@@ -385,6 +444,11 @@ async function run(): Promise<void> {
 
   if (command === "approve-event") {
     writeJson(await useCases.approveEvent(input));
+    return;
+  }
+
+  if (command === "preview-preflight") {
+    writeJson(await useCases.previewPreflightProject(input));
     return;
   }
 
@@ -442,6 +506,21 @@ async function run(): Promise<void> {
 
   if (command === "undo-patch") {
     writeJson(await useCases.undoPatch(input));
+    return;
+  }
+
+  if (command === "repair-preview") {
+    writeJson(await useCases.previewRepair(input));
+    return;
+  }
+
+  if (command === "repair-apply") {
+    writeJson(await useCases.applyRepair(input));
+    return;
+  }
+
+  if (command === "repair-undo") {
+    writeJson(await useCases.undoRepair(input));
     return;
   }
 

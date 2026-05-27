@@ -1,6 +1,6 @@
 import { FolderKanban, Heart, Settings } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { AppShell } from "./ui";
 
 export const workspaceNavigation = [
@@ -37,6 +37,8 @@ function summarizeDirectory(projectDirectory?: string): string {
 }
 
 export function WorkspaceLayout() {
+  const location = useLocation();
+  const studioShell = /^\/projects\/[^/]+\/studio(?:\/|$)/.test(location.pathname);
   const [shellState, setShellStateValue] = useState<WorkspaceShellState>(defaultShellState);
   const setShellState = useCallback((state: Partial<WorkspaceShellState>) => {
     setShellStateValue((current) => {
@@ -55,13 +57,13 @@ export function WorkspaceLayout() {
 
   return (
     <WorkspaceShellContext.Provider value={contextValue}>
-      <AppShell>
-        <div className="workspace-layout">
+      <AppShell studioShell={studioShell}>
+        <div className={`workspace-layout ${studioShell ? "studio-shell" : ""}`}>
           <nav className="workspace-nav" aria-label="앱 네비게이션">
             {workspaceNavigation.map((item) => (
               <NavLink className={({ isActive }) => isActive ? "workspace-nav-item active" : "workspace-nav-item"} key={item.path} to={item.path}>
                 <span aria-hidden="true"><item.icon size={18} /></span>
-                <span>{item.label}</span>
+                <span className="workspace-nav-label">{item.label}</span>
               </NavLink>
             ))}
           </nav>

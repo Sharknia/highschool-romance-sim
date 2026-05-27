@@ -99,6 +99,13 @@ echo '{"projectListEntry":{...}}' | node packages/cli/dist/index.js restore-proj
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","projectId":"haru","confirmTitle":"하루","deleteFiles":true}' | node packages/cli/dist/index.js delete-project
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","userEvent":"하루와 도서관 이벤트"}' | node packages/cli/dist/index.js expand-event
 echo '{"projectDirectory":"/tmp/Haru.vnmaker","request":{...},"plan":{...}}' | node packages/cli/dist/index.js approve-event
+echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js fixed-prompts
+echo '{"projectDirectory":"/tmp/Haru.vnmaker","promptId":"library-hands-overlap-normal-ending","adapterMode":"mock"}' | node packages/cli/dist/index.js replay-fixed-prompt
+echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js generation-result-logs
+echo '{"projectDirectory":"/tmp/Haru.vnmaker","eventName":"started","sessionId":"session-1","participantIdHash":"hash","taskId":"task-1"}' | node packages/cli/dist/index.js record-ux-event
+echo '{"projectDirectory":"/tmp/Haru.vnmaker","sessionId":"session-1"}' | node packages/cli/dist/index.js list-ux-events
+echo '{"projectDirectory":"/tmp/Haru.vnmaker","sessionId":"session-1"}' | node packages/cli/dist/index.js export-ux-event-log
+echo '{"projectDirectory":"/tmp/Haru.vnmaker","sessionIds":["session-1"],"participantResults":[...]}' | node packages/cli/dist/index.js phase0-decision-report
 echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js preview
 echo '{"projectDirectory":"/tmp/Haru.vnmaker"}' | node packages/cli/dist/index.js export-web
 echo '{"job": {...}}' | node packages/cli/dist/index.js create-image-job
@@ -114,6 +121,11 @@ echo '{"image":{"kind":"cg","targetId":"scene-opening","prompt":"방과 후 교�
 ```json
 {
   "ok": true,
+  "correlationId": "corr-previewProject-...",
+  "actionEvent": {
+    "eventName": "previewed",
+    "correlationId": "corr-previewProject-..."
+  },
   "issues": []
 }
 ```
@@ -154,6 +166,8 @@ echo '{"image":{"kind":"cg","targetId":"scene-opening","prompt":"방과 후 교�
 - Codex imageGeneration을 통한 실제 이미지 생성 요청
 - Codex 미연결 또는 imageGeneration 사용 불가 시 패키징 목 이미지 fallback 표시
 - 생성 결과 미리보기
+- 고정 프롬프트 replay 결과 로그와 test-session UX decision event JSON export
+- Phase 0 decision report: Ready/Partial/Missing 작업 패키지 표, Go/Iterate/Stop/Rethink 판정, fixed/free 입력 분리, eventLogId/preflightResult 증거, fake/mock preview 0 기준, condition preview not_evaluated와 actual preview evidence 분리
 
 API 라우트:
 
@@ -174,6 +188,7 @@ POST /api/project/validate
 POST /api/project/manifest
 POST /api/project/build
 POST /api/project/preview
+POST /api/project/preview/preflight
 POST /api/project/export
 POST /api/heroines/list
 POST /api/heroines/get
@@ -190,6 +205,13 @@ POST /api/project/scenes
 POST /api/project/scenes/insert
 POST /api/project/scenes/link
 POST /api/project/scenes/ending
+POST /api/events/fixed-prompts
+POST /api/events/fixed-prompts/replay
+POST /api/events/generation-result-logs
+POST /api/events/ux/record
+POST /api/events/ux/list
+POST /api/events/ux/export
+POST /api/phase0/decision-report
 POST /api/events/expand
 POST /api/events/approve
 POST /api/events/history

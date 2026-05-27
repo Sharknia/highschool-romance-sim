@@ -1,0 +1,567 @@
+{
+  "projectId": "alignment-review-mpo9af18",
+  "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio",
+  "results": [
+    {
+      "label": "1280x720",
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "rects": {
+        "workspace": {
+          "x": 56,
+          "y": 0,
+          "width": 1224,
+          "height": 720,
+          "bottom": 720,
+          "right": 1280
+        },
+        "unsupported": null,
+        "command": {
+          "x": 56,
+          "y": 0,
+          "width": 1224,
+          "height": 52,
+          "bottom": 52,
+          "right": 1280
+        },
+        "body": {
+          "x": 56,
+          "y": 60,
+          "width": 1224,
+          "height": 472,
+          "bottom": 532,
+          "right": 1280
+        },
+        "route": {
+          "x": 56,
+          "y": 60,
+          "width": 240,
+          "height": 472,
+          "bottom": 532,
+          "right": 296
+        },
+        "center": {
+          "x": 304,
+          "y": 60,
+          "width": 648,
+          "height": 472,
+          "bottom": 532,
+          "right": 952
+        },
+        "stage": {
+          "x": 304,
+          "y": 60,
+          "width": 648,
+          "height": 241,
+          "bottom": 301,
+          "right": 952
+        },
+        "script": {
+          "x": 304,
+          "y": 309,
+          "width": 648,
+          "height": 223,
+          "bottom": 532,
+          "right": 952
+        },
+        "inspector": {
+          "x": 960,
+          "y": 60,
+          "width": 320,
+          "height": 472,
+          "bottom": 532,
+          "right": 1280
+        },
+        "inspectorTabs": {
+          "x": 961,
+          "y": 118,
+          "width": 318,
+          "height": 56,
+          "bottom": 174,
+          "right": 1279
+        },
+        "inspectorFirstTab": {
+          "x": 969,
+          "y": 126,
+          "width": 57,
+          "height": 40,
+          "bottom": 166,
+          "right": 1026
+        },
+        "problems": {
+          "x": 56,
+          "y": 540,
+          "width": 1224,
+          "height": 180,
+          "bottom": 720,
+          "right": 1280
+        },
+        "stageFrame": {
+          "x": 331,
+          "y": 120,
+          "width": 594,
+          "height": 170,
+          "bottom": 290,
+          "right": 925
+        },
+        "commandStatus": {
+          "x": 371,
+          "y": 17,
+          "width": 392,
+          "height": 21,
+          "bottom": 38,
+          "right": 763
+        }
+      },
+      "horizontalOverflow": false,
+      "verticalOverflow": false,
+      "hasWorkspace": true,
+      "hasUnsupported": false,
+      "includes": {
+        "routeMap": true,
+        "stagePreview": true,
+        "scriptEditor": true,
+        "inspector": true,
+        "problems": true,
+        "unsupportedDesktop": false
+      },
+      "errors": [],
+      "screenshot": "docs/qa/screenshots/phase0-studio-1280x720.png"
+    },
+    {
+      "label": "1366x768",
+      "viewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "rects": {
+        "workspace": {
+          "x": 56,
+          "y": 0,
+          "width": 1310,
+          "height": 768,
+          "bottom": 768,
+          "right": 1366
+        },
+        "unsupported": null,
+        "command": {
+          "x": 56,
+          "y": 0,
+          "width": 1310,
+          "height": 52,
+          "bottom": 52,
+          "right": 1366
+        },
+        "body": {
+          "x": 56,
+          "y": 60,
+          "width": 1310,
+          "height": 666,
+          "bottom": 726,
+          "right": 1366
+        },
+        "route": {
+          "x": 56,
+          "y": 60,
+          "width": 260,
+          "height": 666,
+          "bottom": 726,
+          "right": 316
+        },
+        "center": {
+          "x": 324,
+          "y": 60,
+          "width": 694,
+          "height": 666,
+          "bottom": 726,
+          "right": 1018
+        },
+        "stage": {
+          "x": 324,
+          "y": 60,
+          "width": 694,
+          "height": 342,
+          "bottom": 402,
+          "right": 1018
+        },
+        "script": {
+          "x": 324,
+          "y": 410,
+          "width": 694,
+          "height": 316,
+          "bottom": 726,
+          "right": 1018
+        },
+        "inspector": {
+          "x": 1026,
+          "y": 60,
+          "width": 340,
+          "height": 666,
+          "bottom": 726,
+          "right": 1366
+        },
+        "inspectorTabs": {
+          "x": 1027,
+          "y": 118,
+          "width": 338,
+          "height": 56,
+          "bottom": 174,
+          "right": 1365
+        },
+        "inspectorFirstTab": {
+          "x": 1035,
+          "y": 126,
+          "width": 61,
+          "height": 40,
+          "bottom": 166,
+          "right": 1096
+        },
+        "problems": {
+          "x": 56,
+          "y": 734,
+          "width": 1310,
+          "height": 34,
+          "bottom": 768,
+          "right": 1366
+        },
+        "stageFrame": {
+          "x": 351,
+          "y": 120,
+          "width": 640,
+          "height": 271,
+          "bottom": 391,
+          "right": 991
+        },
+        "commandStatus": {
+          "x": 371,
+          "y": 17,
+          "width": 478,
+          "height": 21,
+          "bottom": 38,
+          "right": 849
+        }
+      },
+      "horizontalOverflow": false,
+      "verticalOverflow": false,
+      "hasWorkspace": true,
+      "hasUnsupported": false,
+      "includes": {
+        "routeMap": true,
+        "stagePreview": true,
+        "scriptEditor": true,
+        "inspector": true,
+        "problems": true,
+        "unsupportedDesktop": false
+      },
+      "errors": [],
+      "screenshot": "docs/qa/screenshots/phase0-studio-1366x768.png"
+    },
+    {
+      "label": "1440x900",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "rects": {
+        "workspace": {
+          "x": 56,
+          "y": 0,
+          "width": 1384,
+          "height": 900,
+          "bottom": 900,
+          "right": 1440
+        },
+        "unsupported": null,
+        "command": {
+          "x": 56,
+          "y": 0,
+          "width": 1384,
+          "height": 52,
+          "bottom": 52,
+          "right": 1440
+        },
+        "body": {
+          "x": 56,
+          "y": 60,
+          "width": 1384,
+          "height": 612,
+          "bottom": 672,
+          "right": 1440
+        },
+        "route": {
+          "x": 56,
+          "y": 60,
+          "width": 300,
+          "height": 612,
+          "bottom": 672,
+          "right": 356
+        },
+        "center": {
+          "x": 364,
+          "y": 60,
+          "width": 688,
+          "height": 612,
+          "bottom": 672,
+          "right": 1052
+        },
+        "stage": {
+          "x": 364,
+          "y": 60,
+          "width": 688,
+          "height": 314,
+          "bottom": 374,
+          "right": 1052
+        },
+        "script": {
+          "x": 364,
+          "y": 382,
+          "width": 688,
+          "height": 290,
+          "bottom": 672,
+          "right": 1052
+        },
+        "inspector": {
+          "x": 1060,
+          "y": 60,
+          "width": 380,
+          "height": 612,
+          "bottom": 672,
+          "right": 1440
+        },
+        "inspectorTabs": {
+          "x": 1061,
+          "y": 118,
+          "width": 378,
+          "height": 56,
+          "bottom": 174,
+          "right": 1439
+        },
+        "inspectorFirstTab": {
+          "x": 1069,
+          "y": 126,
+          "width": 69,
+          "height": 40,
+          "bottom": 166,
+          "right": 1138
+        },
+        "problems": {
+          "x": 56,
+          "y": 680,
+          "width": 1384,
+          "height": 220,
+          "bottom": 900,
+          "right": 1440
+        },
+        "stageFrame": {
+          "x": 391,
+          "y": 120,
+          "width": 634,
+          "height": 243,
+          "bottom": 363,
+          "right": 1025
+        },
+        "commandStatus": {
+          "x": 371,
+          "y": 17,
+          "width": 552,
+          "height": 21,
+          "bottom": 38,
+          "right": 923
+        }
+      },
+      "horizontalOverflow": false,
+      "verticalOverflow": false,
+      "hasWorkspace": true,
+      "hasUnsupported": false,
+      "includes": {
+        "routeMap": true,
+        "stagePreview": true,
+        "scriptEditor": true,
+        "inspector": true,
+        "problems": true,
+        "unsupportedDesktop": false
+      },
+      "errors": [],
+      "screenshot": "docs/qa/screenshots/phase0-studio-1440x900.png"
+    },
+    {
+      "label": "1920x1080",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "rects": {
+        "workspace": {
+          "x": 56,
+          "y": 0,
+          "width": 1864,
+          "height": 1080,
+          "bottom": 1080,
+          "right": 1920
+        },
+        "unsupported": null,
+        "command": {
+          "x": 56,
+          "y": 0,
+          "width": 1864,
+          "height": 52,
+          "bottom": 52,
+          "right": 1920
+        },
+        "body": {
+          "x": 56,
+          "y": 60,
+          "width": 1864,
+          "height": 792,
+          "bottom": 852,
+          "right": 1920
+        },
+        "route": {
+          "x": 56,
+          "y": 60,
+          "width": 340,
+          "height": 792,
+          "bottom": 852,
+          "right": 396
+        },
+        "center": {
+          "x": 404,
+          "y": 60,
+          "width": 1088,
+          "height": 792,
+          "bottom": 852,
+          "right": 1492
+        },
+        "stage": {
+          "x": 404,
+          "y": 60,
+          "width": 1088,
+          "height": 407,
+          "bottom": 467,
+          "right": 1492
+        },
+        "script": {
+          "x": 404,
+          "y": 475,
+          "width": 1088,
+          "height": 377,
+          "bottom": 852,
+          "right": 1492
+        },
+        "inspector": {
+          "x": 1500,
+          "y": 60,
+          "width": 420,
+          "height": 792,
+          "bottom": 852,
+          "right": 1920
+        },
+        "inspectorTabs": {
+          "x": 1501,
+          "y": 118,
+          "width": 418,
+          "height": 56,
+          "bottom": 174,
+          "right": 1919
+        },
+        "inspectorFirstTab": {
+          "x": 1509,
+          "y": 126,
+          "width": 77,
+          "height": 40,
+          "bottom": 166,
+          "right": 1586
+        },
+        "problems": {
+          "x": 56,
+          "y": 860,
+          "width": 1864,
+          "height": 220,
+          "bottom": 1080,
+          "right": 1920
+        },
+        "stageFrame": {
+          "x": 448,
+          "y": 120,
+          "width": 1000,
+          "height": 336,
+          "bottom": 456,
+          "right": 1448
+        },
+        "commandStatus": {
+          "x": 371,
+          "y": 17,
+          "width": 1032,
+          "height": 21,
+          "bottom": 38,
+          "right": 1403
+        }
+      },
+      "horizontalOverflow": false,
+      "verticalOverflow": false,
+      "hasWorkspace": true,
+      "hasUnsupported": false,
+      "includes": {
+        "routeMap": true,
+        "stagePreview": true,
+        "scriptEditor": true,
+        "inspector": true,
+        "problems": true,
+        "unsupportedDesktop": false
+      },
+      "errors": [],
+      "screenshot": "docs/qa/screenshots/phase0-studio-1920x1080.png"
+    },
+    {
+      "label": "mobile-unsupported",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:5174/projects/alignment-review-mpo9af18/studio?panel=scene&scene=scene-haru-alignment-opening",
+      "rects": {
+        "workspace": null,
+        "unsupported": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "bottom": 844,
+          "right": 390
+        },
+        "command": null,
+        "body": null,
+        "route": null,
+        "center": null,
+        "stage": null,
+        "script": null,
+        "inspector": null,
+        "inspectorTabs": null,
+        "inspectorFirstTab": null,
+        "problems": null,
+        "stageFrame": null,
+        "commandStatus": null
+      },
+      "horizontalOverflow": false,
+      "verticalOverflow": false,
+      "hasWorkspace": false,
+      "hasUnsupported": true,
+      "includes": {
+        "routeMap": false,
+        "stagePreview": false,
+        "scriptEditor": false,
+        "inspector": false,
+        "problems": false,
+        "unsupportedDesktop": true
+      },
+      "errors": [],
+      "screenshot": "docs/qa/screenshots/phase0-studio-mobile-unsupported.png"
+    }
+  ]
+}

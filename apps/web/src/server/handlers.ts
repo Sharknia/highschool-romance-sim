@@ -118,7 +118,7 @@ function statusForError(error: unknown): number {
   if (errorRecord.code === "RECENT_PROJECT_INDEX_MISS" || errorRecord.code === "PROJECT_DIRECTORY_MISSING" || errorRecord.code === "PROJECT_NOT_FOUND") {
     return 404;
   }
-  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "PREVIEW_BLOCKED" || errorRecord.code === "EXPORT_BLOCKED" || errorRecord.code === "JOB_ALREADY_RUNNING") {
+  if (errorRecord.code === "PROJECT_ID_MISMATCH" || errorRecord.code === "PROJECT_ID_CONFLICT" || errorRecord.code === "PATCH_STALE" || errorRecord.code === "STALE_PROJECT_REVISION" || errorRecord.code === "PROJECT_REVISION_CONFLICT" || errorRecord.code === "PREVIEW_BLOCKED" || errorRecord.code === "EXPORT_BLOCKED" || errorRecord.code === "JOB_ALREADY_RUNNING") {
     return 409;
   }
   if (errorRecord.code === "OAUTH_REQUIRED") {
@@ -177,7 +177,7 @@ function statusForBody(body: unknown): number {
   if (record.ok !== false || typeof record.code !== "string") {
     return 200;
   }
-  if (record.code.startsWith("PROJECT_") || record.code === "PREVIEW_BLOCKED" || record.code === "EXPORT_BLOCKED" || record.code === "PATCH_STALE" || record.code === "JOB_ALREADY_RUNNING") {
+  if (record.code.startsWith("PROJECT_") || record.code === "PREVIEW_BLOCKED" || record.code === "EXPORT_BLOCKED" || record.code === "PATCH_STALE" || record.code === "STALE_PROJECT_REVISION" || record.code === "JOB_ALREADY_RUNNING") {
     return statusForError({ code: record.code, message: record.message });
   }
   if (isHeroineActionFailure(body)) {
@@ -358,6 +358,34 @@ class ApiServices {
     return this.useCases.buildProject(body);
   }
 
+  listFixedPrompts(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listFixedPrompts(body);
+  }
+
+  replayFixedPrompt(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.replayFixedPrompt(body);
+  }
+
+  listGenerationResultLogs(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listGenerationResultLogs(body);
+  }
+
+  recordUXDecisionEvent(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.recordUXDecisionEvent(body);
+  }
+
+  listUXDecisionEvents(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listUXDecisionEvents(body);
+  }
+
+  exportUXDecisionEventLog(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.exportUXDecisionEventLog(body);
+  }
+
+  createPhase0DecisionReport(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.createPhase0DecisionReport(body);
+  }
+
   expandEvent(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.expandEvent(body);
   }
@@ -368,6 +396,10 @@ class ApiServices {
 
   previewProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.previewProject(body);
+  }
+
+  previewPreflightProject(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.previewPreflightProject(body);
   }
 
   exportProject(body: unknown): Promise<Record<string, unknown>> {
@@ -404,6 +436,18 @@ class ApiServices {
 
   undoPatch(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.undoPatch(body);
+  }
+
+  previewRepair(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.previewRepair(body);
+  }
+
+  applyRepair(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.applyRepair(body);
+  }
+
+  undoRepair(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.undoRepair(body);
   }
 }
 
@@ -448,12 +492,23 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body), "validateProject"));
   app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
   app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));
+  app.post("/api/project/preview/preflight", (context) => jsonBodyRoute(context, (body) => services.previewPreflightProject(body), "previewPreflightProject"));
   app.post("/api/project/preview", (context) => jsonBodyRoute(context, (body) => services.previewProject(body), "previewProject"));
   app.post("/api/project/export", (context) => jsonBodyRoute(context, (body) => services.exportProject(body), "exportProject"));
+  app.post("/api/events/fixed-prompts", (context) => jsonBodyRoute(context, (body) => services.listFixedPrompts(body), "listFixedPrompts"));
+  app.post("/api/events/fixed-prompts/replay", (context) => jsonBodyRoute(context, (body) => services.replayFixedPrompt(body), "replayFixedPrompt"));
+  app.post("/api/events/generation-result-logs", (context) => jsonBodyRoute(context, (body) => services.listGenerationResultLogs(body), "listGenerationResultLogs"));
+  app.post("/api/events/ux/record", (context) => jsonBodyRoute(context, (body) => services.recordUXDecisionEvent(body), "recordUXDecisionEvent"));
+  app.post("/api/events/ux/list", (context) => jsonBodyRoute(context, (body) => services.listUXDecisionEvents(body), "listUXDecisionEvents"));
+  app.post("/api/events/ux/export", (context) => jsonBodyRoute(context, (body) => services.exportUXDecisionEventLog(body), "exportUXDecisionEventLog"));
+  app.post("/api/phase0/decision-report", (context) => jsonBodyRoute(context, (body) => services.createPhase0DecisionReport(body), "createPhase0DecisionReport"));
   app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body), "expandEvent"));
   app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body), "approveEvent"));
   app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));
   app.post("/api/events/undo", (context) => jsonBodyRoute(context, (body) => services.undoPatch(body)));
+  app.post("/api/project/repair/preview", (context) => jsonBodyRoute(context, (body) => services.previewRepair(body), "previewRepair"));
+  app.post("/api/project/repair/apply", (context) => jsonBodyRoute(context, (body) => services.applyRepair(body), "applyRepair"));
+  app.post("/api/project/repair/undo", (context) => jsonBodyRoute(context, (body) => services.undoRepair(body), "undoRepair"));
 
   app.post("/api/generation/jobs", (context) => jsonBodyRoute(context, (body) => services.createGenerationJob(body)));
   app.post("/api/generation/jobs/list", (context) => jsonBodyRoute(context, (body) => services.listGenerationJobs(body), "listGenerationJobs"));

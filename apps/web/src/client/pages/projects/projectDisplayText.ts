@@ -1,4 +1,4 @@
-import type { ProjectAsset, ProjectData, ProjectGenerationJob, ProjectWorkflowSummary } from "./projectPageTypes";
+import type { ProjectAsset, ProjectData, ProjectGenerationJob, ProjectRepairDiffEntry, ProjectWorkflowSummary } from "./projectPageTypes";
 
 type WorkflowStep = NonNullable<ProjectWorkflowSummary["steps"]>[number];
 type DummyFallbackItem = ProjectAsset | ProjectGenerationJob | null | undefined;
@@ -200,4 +200,25 @@ export function backgroundAssetDisplayLabel(asset: ProjectAsset): string {
     return label;
   }
   return "생성된 배경";
+}
+
+export function repairDiffOperationLabel(op?: ProjectRepairDiffEntry["op"]): string {
+  if (op === "add") return "추가";
+  if (op === "remove") return "삭제";
+  if (op === "replace") return "교체";
+  return op || "변경";
+}
+
+export function repairDiffValueText(value: unknown): string {
+  if (value === null || typeof value === "undefined" || value === "") {
+    return "없음";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "복합 값";
+  }
 }

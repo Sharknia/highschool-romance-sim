@@ -31,6 +31,352 @@ export interface VnMakerProject {
   settings: VnMakerProjectSettings;
 }
 
+export const PROJECT_REVISION_HASH_ALGORITHM = "vn-maker-project-snapshot-fnv1a/v1";
+
+export interface ProjectRevisionDto {
+  revision: string;
+  hashAlgorithm: typeof PROJECT_REVISION_HASH_ALGORITHM;
+  createdAt: string;
+}
+
+export type GenerationFailureClassification =
+  | "generation_quality"
+  | "validation_model"
+  | "repair_ux"
+  | "preview_runtime"
+  | "participant_understanding";
+export type GenerationResultClassification = "passed" | GenerationFailureClassification;
+export type GenerationResultSourceType = "mock" | "actual" | "unavailable";
+
+export interface TestPromptFixtureDto {
+  promptSetId: string;
+  promptId: string;
+  promptText: string;
+  expectedElements: string[];
+  allowedVariation: string[];
+}
+
+export interface TestPromptSetDto {
+  id: string;
+  version: string;
+  label: string;
+  fixtures: TestPromptFixtureDto[];
+}
+
+export interface GenerationResultLogDto {
+  resultId: string;
+  promptSetId: string;
+  promptId: string;
+  promptText: string;
+  expectedElements: string[];
+  allowedVariation: string[];
+  adapter: string;
+  sourceType: GenerationResultSourceType;
+  generatedAt: string;
+  projectRevision: ProjectRevisionDto;
+  outputSummary: string;
+  validationIssues: ValidationIssue[];
+  classification: GenerationResultClassification;
+  failureClassification?: GenerationFailureClassification;
+  patchHistoryId?: string;
+  skippedReason?: string;
+}
+
+export const UX_DECISION_EVENT_NAMES = [
+  "started",
+  "generated",
+  "added_choices",
+  "added_condition",
+  "validation_failed",
+  "repaired",
+  "previewed",
+  "abandoned",
+  "help_opened",
+  "hint_given",
+  "recipe_used",
+  "repair_action_used",
+  "undo_used",
+  "revert_used"
+] as const;
+
+export type UXDecisionEventName = typeof UX_DECISION_EVENT_NAMES[number];
+
+export const UX_DECISION_HELP_CHANNELS = [
+  "static_tutorial",
+  "external_help",
+  "inline_guide",
+  "automatic_repair_suggestion",
+  "moderator_hint"
+] as const;
+
+export type UXDecisionHelpChannel = typeof UX_DECISION_HELP_CHANNELS[number];
+export type UXDecisionInputMode = "fixed_prompt" | "free_input" | "manual" | "generated" | string;
+export type UXDecisionOutcome = "started" | "used" | "opened" | "given" | "success" | "failed" | "completed" | "blocked" | "abandoned" | "undone" | "reverted" | string;
+
+export interface UXDecisionPreflightResultDto {
+  canRun?: boolean;
+  disabledReason?: string | null;
+  blockers?: unknown[];
+  warnings?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ProjectActionEventDto {
+  eventName: UXDecisionEventName;
+  timestamp: string;
+  correlationId: string;
+  requestId: string;
+  action: string;
+  eventLogId?: string;
+  projectId?: string;
+  routeId?: string;
+  sceneId?: string;
+  promptId?: string;
+  issueCode?: string;
+  repairActionId?: string;
+  outcome?: UXDecisionOutcome;
+  projectRevision?: ProjectRevisionDto;
+}
+
+export interface UXDecisionEventDto {
+  eventLogId: string;
+  eventId: string;
+  eventName: UXDecisionEventName;
+  timestamp: string;
+  sessionId: string;
+  participantIdHash?: string;
+  participantType?: string;
+  taskId?: string;
+  promptId?: string;
+  inputMode?: UXDecisionInputMode;
+  projectId: string;
+  routeId?: string;
+  sceneId?: string;
+  issueCode?: string;
+  issueCodesBefore?: string[];
+  issueCodesAfter?: string[];
+  repairActionId?: string;
+  helpChannel?: UXDecisionHelpChannel;
+  hintLevel?: number;
+  elapsedMs?: number;
+  stallDurationMs?: number;
+  outcome?: UXDecisionOutcome;
+  projectRevision: ProjectRevisionDto;
+  revisionBefore?: ProjectRevisionDto;
+  revisionAfter?: ProjectRevisionDto;
+  preflightResult?: UXDecisionPreflightResultDto;
+  correlationId?: string;
+  action?: string;
+  resultId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UXDecisionEventLogExportDto {
+  eventLogId: string;
+  sessionId: string;
+  projectId: string;
+  projectRevision: ProjectRevisionDto;
+  exportedAt: string;
+  events: UXDecisionEventDto[];
+}
+
+export type Phase0WorkPackageStatus = "Ready" | "Partial" | "Missing";
+export type Phase0Decision = "Go" | "Iterate" | "Stop/Rethink";
+export type Phase0TaskInputMode = "fixed_prompt" | "free_input" | "manual" | "generated" | string;
+
+export interface Phase0WorkPackageStatusDto {
+  id: string;
+  label: string;
+  status: Phase0WorkPackageStatus;
+  evidence: string[];
+  missing: string[];
+}
+
+export interface Phase0ParticipantResultDto {
+  participantIdHash: string;
+  sessionId: string;
+  inputMode: Phase0TaskInputMode;
+  taskId?: string;
+  promptId?: string;
+  vnToolCompletedCount?: number;
+  professionalDeveloper?: boolean;
+  regularScriptingWork?: boolean;
+  storyCreatorLastYear?: boolean;
+  noviceNonDevStoryCreator?: boolean;
+  completed?: boolean;
+  reachedValidPreview?: boolean;
+  usedModeratorHint?: boolean;
+  usedStaticTutorial?: boolean;
+  abandoned?: boolean;
+  blockingErrorCount?: number;
+  completionMs?: number;
+  wrongMentalModel?: boolean;
+  dataLossAnxiety?: boolean;
+  criticalIncidentCause?: string;
+  actualPreview?: boolean;
+  mockPreview?: boolean;
+  notes?: string;
+}
+
+export interface Phase0GuidedRepairEvidenceDto {
+  ready: boolean;
+  issueCode?: string;
+  repairActionId?: string;
+  revisionBefore?: ProjectRevisionDto;
+  revisionAfter?: ProjectRevisionDto;
+  preflightResult?: UXDecisionPreflightResultDto;
+  eventLogId?: string;
+}
+
+export interface Phase0SessionEvidenceDto {
+  sessionId: string;
+  eventLogId?: string;
+  participantIdHash?: string;
+  noviceNonDevStoryCreator: boolean;
+  inputMode: Phase0TaskInputMode;
+  taskId?: string;
+  promptId?: string;
+  eventNames: UXDecisionEventName[];
+  completed: boolean;
+  reachedValidPreview: boolean;
+  usedModeratorHint: boolean;
+  usedStaticTutorial: boolean;
+  abandoned: boolean;
+  stall90s: boolean;
+  blockingErrorCount: number;
+  completionMs?: number;
+  wrongMentalModel: boolean;
+  dataLossAnxiety: boolean;
+  criticalIncidentCause?: string;
+  actualPreview: boolean;
+  mockPreview: boolean;
+  previewPreflightCanRun: boolean;
+  conditionPreviewStatus: ConditionRuntimePreviewStatus;
+  guidedRepairEvidence?: Phase0GuidedRepairEvidenceDto;
+}
+
+export interface Phase0MetricDto {
+  inputMode: Phase0TaskInputMode;
+  sessionCount: number;
+  completedCount: number;
+  completionRate: number;
+  guidedRepairCompletionRate: number;
+  noviceNonDevStoryCreatorCount: number;
+  majorityValidPreviewWithoutHint: boolean;
+  medianCompletionMinutes: number | null;
+  averageBlockingErrors: number;
+  helpRecoveryRate: number;
+  sameCauseCriticalIncidentCount: number;
+  fakeOrMockPreviewCount: number;
+}
+
+export interface Phase0DenominatorDto {
+  totalSessions: number;
+  failedSessions: number;
+  abandonedSessions: number;
+  stall90sSessions: number;
+  staticTutorialRecoverySessions: number;
+  moderatorHintSessions: number;
+  includedFailedAbandonedAndHelpRecovery: boolean;
+}
+
+export interface Phase0ConditionRuntimeDecisionDto {
+  supportFlag: ConditionRuntimeSupportFlag;
+  supported: boolean;
+  strictPreviewStatus: ConditionRuntimePreviewStatus;
+  conditionPreviewCountsAsStrictSuccess: boolean;
+  actualPreviewCanRun: boolean;
+  message: string;
+}
+
+export interface Phase0MockActualSeparationDto {
+  combinedTotalsUsed: false;
+  actualPreviewCount: number;
+  fakeOrMockPreviewCount: number;
+  mockGenerationResultCount: number;
+  unavailableGenerationResultCount: number;
+}
+
+export interface Phase0DecisionReportDto {
+  reportId: string;
+  projectId: string;
+  projectRevision: ProjectRevisionDto;
+  generatedAt: string;
+  decision: Phase0Decision;
+  maximumDecisionDueToMissing?: Phase0Decision;
+  decisionReasons: string[];
+  workPackages: Phase0WorkPackageStatusDto[];
+  sessions: Phase0SessionEvidenceDto[];
+  denominator: Phase0DenominatorDto;
+  fixedInputMetrics: Phase0MetricDto;
+  freeInputFindings: Phase0MetricDto;
+  conditionRuntime: Phase0ConditionRuntimeDecisionDto;
+  mockActualSeparation: Phase0MockActualSeparationDto;
+}
+
+export type ConditionRuntimeSupportFlag = "support_false";
+export type ConditionRuntimePreviewStatus = "not_evaluated";
+export type ConditionRuntimeEditorMode = "candidate_review_only";
+
+export interface ConditionRuntimeSupportDto {
+  supportFlag: ConditionRuntimeSupportFlag;
+  supported: boolean;
+  choiceConditionFiltering: boolean;
+  choiceEffects: boolean;
+  conditionSemanticsVersion: string;
+  strictPreviewStatus: ConditionRuntimePreviewStatus;
+  strictPreviewSuccess: boolean;
+  previewPreflightSuccess: boolean;
+  editorMode: ConditionRuntimeEditorMode;
+  reasonCode: "conditional-choice-runtime-unsupported";
+  message: string;
+}
+
+export interface ConditionEvaluationTraceDto {
+  status: ConditionRuntimePreviewStatus;
+  reasonCode: "conditional-choice-runtime-unsupported";
+  message: string;
+  sceneIds: string[];
+  choiceIds: string[];
+  visibleChoiceIds: string[];
+  hiddenChoiceIds: string[];
+  appliedEffects: Array<{
+    choiceId: string;
+    flags: string[];
+    affinity: Record<string, number>;
+    memoryTags: Record<string, string[]>;
+  }>;
+}
+
+export interface RuntimeCapabilitiesDto {
+  choiceConditionFiltering: boolean;
+  choiceEffects: boolean;
+  conditionSemanticsVersion: string;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+}
+
+export interface PreflightBlockerDto {
+  issueCode: string;
+  path: string;
+  message: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+  repairActionIds: string[];
+}
+
+export interface PreviewPreflightDto {
+  canRun: boolean;
+  blockers: PreflightBlockerDto[];
+  warnings: PreflightBlockerDto[];
+  disabledReason: string | null;
+  nextAction: string;
+  projectRevision: ProjectRevisionDto;
+  runtimeCapabilities: RuntimeCapabilitiesDto;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
+}
+
 export interface VnMakerProjectSettings {
   defaultRouteId: string;
   outputFileName: string;
@@ -193,10 +539,18 @@ export interface VnMakerGenerationJob {
   sourceGeneratedBy?: string;
 }
 
+export type ValidationIssueDomain = "schema" | "route" | "asset" | "character" | "project" | "generation";
+export type ValidationIssueCode = RouteGraphIssueCode;
+
 export interface ValidationIssue {
   severity: ValidationSeverity;
   path: string;
   message: string;
+  code?: ValidationIssueCode;
+  domain?: ValidationIssueDomain;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
 }
 
 export type RouteGraphIssueCode =
@@ -404,6 +758,14 @@ export interface PlayerRuntimeData {
     ok: boolean;
     issues: ValidationIssue[];
   };
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
+}
+
+export interface PlayerRuntimeChoice {
+  id: string;
+  text: string;
+  next: string;
 }
 
 export interface PlayerRuntimeScene {
@@ -412,7 +774,7 @@ export interface PlayerRuntimeScene {
   speaker: string;
   text: string;
   characters: Array<VnMakerSceneCharacter & { asset?: VnMakerAsset }>;
-  choices: VnMakerChoice[];
+  choices: PlayerRuntimeChoice[];
   next?: string;
   ending?: VnMakerSceneEnding;
   backgroundAsset?: VnMakerAsset;
@@ -422,6 +784,7 @@ export interface PlayerRuntimeScene {
 export interface PlayerRuntimeOptions {
   startSceneId?: string;
   assetPathRewrites?: Record<string, string>;
+  conditionPreviewPreflightSuccess?: boolean;
 }
 
 export interface BuildProjectHtmlOptions extends PlayerRuntimeOptions {
@@ -1036,6 +1399,255 @@ export function hashProjectSnapshot(project: VnMakerProject): string {
   return hashString(JSON.stringify(project));
 }
 
+export function createProjectRevision(project: VnMakerProject, createdAt: string): ProjectRevisionDto {
+  return {
+    revision: hashProjectSnapshot(project),
+    hashAlgorithm: PROJECT_REVISION_HASH_ALGORITHM,
+    createdAt
+  };
+}
+
+const PREVIEW_REPAIR_ACTION_IDS: Record<string, string[]> = {
+  "heroine-required": ["assign-heroine-snapshot"],
+  "background-required": ["generate-background"],
+  "route-required": ["open-studio"],
+  "event-scenes-required": ["open-studio"],
+  "image-generation-incomplete": ["run-generation-jobs"],
+  "missing-target": ["create-target-scene", "connect-existing-scene"],
+  "ending-has-outgoing": ["remove-next"],
+  "mixed-outgoing": ["remove-next"],
+  "uncovered-terminal": ["set-scene-ending"]
+};
+
+function previewRepairActionIds(issueCode: string | undefined): string[] {
+  return issueCode ? [...(PREVIEW_REPAIR_ACTION_IDS[issueCode] || [])] : [];
+}
+
+function preflightIssueFromValidationIssue(issue: ValidationIssue): PreflightBlockerDto {
+  return {
+    issueCode: issue.code || "validation-issue",
+    path: issue.path,
+    message: issue.message,
+    sceneIds: issue.sceneIds ? [...issue.sceneIds] : undefined,
+    choiceIds: issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: issue.targetSceneId,
+    repairActionIds: previewRepairActionIds(issue.code)
+  };
+}
+
+function previewRequiredDataBlockers(project: VnMakerProject): PreflightBlockerDto[] {
+  const blockers: PreflightBlockerDto[] = [];
+  const hasHeroine = project.characters.length > 0;
+  const backgroundJobs = project.generationJobs.filter((job) => job.kind === "background" && job.status !== "completed");
+  const incompletePreviewImageJobs = project.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed");
+  const incompleteNonBackgroundJobs = incompletePreviewImageJobs.filter((job) => job.kind !== "background");
+  const hasBackgroundAsset = project.assets.some((asset) => asset.kind === "background");
+  const scenesMissingBackground = project.scenes.filter((scene) => !scene.backgroundAssetId);
+  const hasRoute = project.routes.length > 0;
+  const hasEventScenes = project.scenes.length > 1;
+
+  if (!hasHeroine) {
+    blockers.push({
+      issueCode: "heroine-required",
+      path: "characters",
+      message: "히로인 1명을 먼저 선택해야 프리뷰를 실행할 수 있습니다.",
+      repairActionIds: previewRepairActionIds("heroine-required")
+    });
+  }
+  if (!hasBackgroundAsset || scenesMissingBackground.length > 0 || backgroundJobs.length > 0) {
+    blockers.push({
+      issueCode: "background-required",
+      path: !hasBackgroundAsset ? "assets" : scenesMissingBackground.length > 0 ? "scenes" : "generationJobs",
+      message: backgroundJobs.length > 0
+        ? `완료되지 않은 배경 화면 작업이 있습니다: ${backgroundJobs.map((job) => job.id).join(", ")}`
+        : hasBackgroundAsset && scenesMissingBackground.length > 0
+          ? "모든 제작 씬에 배경 화면 연결이 필요합니다."
+          : "배경 화면 생성이 필요합니다.",
+      sceneIds: scenesMissingBackground.length > 0 ? scenesMissingBackground.map((scene) => scene.id) : undefined,
+      repairActionIds: previewRepairActionIds("background-required")
+    });
+  }
+  if (!hasRoute) {
+    blockers.push({
+      issueCode: "route-required",
+      path: "routes",
+      message: "프리뷰 시작 루트가 필요합니다.",
+      repairActionIds: previewRepairActionIds("route-required")
+    });
+  }
+  if (!hasEventScenes) {
+    blockers.push({
+      issueCode: "event-scenes-required",
+      path: "scenes",
+      message: "제작 탭에서 이벤트와 씬을 준비해야 합니다.",
+      repairActionIds: previewRepairActionIds("event-scenes-required")
+    });
+  }
+  if (incompleteNonBackgroundJobs.length > 0) {
+    blockers.push({
+      issueCode: "image-generation-incomplete",
+      path: "generationJobs",
+      message: `완료되지 않은 이미지 작업이 있습니다: ${incompleteNonBackgroundJobs.map((job) => job.id).join(", ")}`,
+      repairActionIds: previewRepairActionIds("image-generation-incomplete")
+    });
+  }
+
+  return blockers;
+}
+
+const CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE = "conditional-choice-runtime-unsupported" as const;
+const CONDITION_RUNTIME_UNSUPPORTED_MESSAGE = "condition preview not evaluated: 조건/효과 runtime semantics는 아직 strict preview 성공으로 계산하지 않습니다.";
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function conditionalChoiceRuntimeRefs(project: VnMakerProject): { sceneIds: string[]; choiceIds: string[] } {
+  const sceneIds: string[] = [];
+  const choiceIds: string[] = [];
+  project.scenes.forEach((scene) => {
+    scene.choices.forEach((choice) => {
+      if (choice.condition || choice.effects) {
+        sceneIds.push(scene.id);
+        choiceIds.push(choice.id);
+      }
+    });
+  });
+  return {
+    sceneIds: uniqueValues(sceneIds),
+    choiceIds: uniqueValues(choiceIds)
+  };
+}
+
+function conditionalChoiceRuntimeWarning(project: VnMakerProject): PreflightBlockerDto | null {
+  const refs = conditionalChoiceRuntimeRefs(project);
+  if (refs.choiceIds.length === 0) {
+    return null;
+  }
+  return {
+    issueCode: CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE,
+    path: "runtimeCapabilities",
+    message: CONDITION_RUNTIME_UNSUPPORTED_MESSAGE,
+    sceneIds: refs.sceneIds,
+    choiceIds: refs.choiceIds,
+    repairActionIds: []
+  };
+}
+
+export function conditionRuntimeSupportForProject(
+  project: VnMakerProject,
+  options: { previewPreflightSuccess?: boolean } = {}
+): ConditionRuntimeSupportDto {
+  return {
+    supportFlag: "support_false",
+    supported: false,
+    choiceConditionFiltering: false,
+    choiceEffects: false,
+    conditionSemanticsVersion: "unsupported",
+    strictPreviewStatus: "not_evaluated",
+    strictPreviewSuccess: false,
+    previewPreflightSuccess: options.previewPreflightSuccess ?? false,
+    editorMode: "candidate_review_only",
+    reasonCode: CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE,
+    message: conditionalChoiceRuntimeRefs(project).choiceIds.length > 0
+      ? CONDITION_RUNTIME_UNSUPPORTED_MESSAGE
+      : "condition preview not evaluated: Phase 0 condition runtime support is disabled, so strict preview success excludes condition evaluation."
+  };
+}
+
+export function conditionEvaluationTraceForProject(project: VnMakerProject): ConditionEvaluationTraceDto {
+  const refs = conditionalChoiceRuntimeRefs(project);
+  return {
+    status: "not_evaluated",
+    reasonCode: CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE,
+    message: conditionRuntimeSupportForProject(project).message,
+    sceneIds: refs.sceneIds,
+    choiceIds: refs.choiceIds,
+    visibleChoiceIds: [],
+    hiddenChoiceIds: [],
+    appliedEffects: []
+  };
+}
+
+export function runtimeCapabilitiesForProject(
+  project: VnMakerProject,
+  options: { previewPreflightSuccess?: boolean } = {}
+): RuntimeCapabilitiesDto {
+  const conditionRuntimeSupport = conditionRuntimeSupportForProject(project, options);
+  return {
+    choiceConditionFiltering: conditionRuntimeSupport.choiceConditionFiltering,
+    choiceEffects: conditionRuntimeSupport.choiceEffects,
+    conditionSemanticsVersion: conditionRuntimeSupport.conditionSemanticsVersion,
+    conditionRuntimeSupport
+  };
+}
+
+function previewDisabledReason(blocker: PreflightBlockerDto | undefined): string | null {
+  if (!blocker) {
+    return null;
+  }
+  if (blocker.issueCode.endsWith("-required") || blocker.issueCode === "image-generation-incomplete") {
+    return blocker.message;
+  }
+  return `문제 확인 결과를 먼저 해결해야 합니다. ${blocker.message}`;
+}
+
+function previewNextAction(blocker: PreflightBlockerDto | undefined): string {
+  if (!blocker) {
+    return "프리뷰를 실행할 수 있습니다.";
+  }
+  if (blocker.issueCode === "heroine-required") {
+    return "히로인 탭에서 히로인 스냅샷을 배정하세요.";
+  }
+  if (blocker.issueCode === "background-required") {
+    return "배경 화면 생성 탭에서 배경을 준비하세요.";
+  }
+  if (blocker.issueCode === "route-required") {
+    return "제작 탭에서 프리뷰 시작 루트를 준비하세요.";
+  }
+  if (blocker.issueCode === "event-scenes-required") {
+    return "제작 탭에서 이벤트와 씬을 준비하세요.";
+  }
+  if (blocker.issueCode === "image-generation-incomplete") {
+    return "배경 화면 생성 탭에서 남은 이미지 작업을 완료하세요.";
+  }
+  return blocker.repairActionIds.length > 0
+    ? `문제 패널에서 ${blocker.repairActionIds[0]} repair path를 선택하세요.`
+    : "문제 패널에서 blocker를 확인하세요.";
+}
+
+export function createPreviewPreflight(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  projectRevision: ProjectRevisionDto
+): PreviewPreflightDto {
+  const validationBlockers = (validation.issues || [])
+    .filter((issue) => issue.severity === "error")
+    .map(preflightIssueFromValidationIssue);
+  const blockers = [
+    ...previewRequiredDataBlockers(project),
+    ...validationBlockers
+  ];
+  const validationWarnings = (validation.issues || [])
+    .filter((issue) => issue.severity !== "error")
+    .map(preflightIssueFromValidationIssue);
+  const conditionWarning = conditionalChoiceRuntimeWarning(project);
+  const warnings = conditionWarning ? [...validationWarnings, conditionWarning] : validationWarnings;
+  const canRun = blockers.length === 0;
+  const conditionRuntimeSupport = conditionRuntimeSupportForProject(project, { previewPreflightSuccess: canRun });
+  return {
+    canRun,
+    blockers,
+    warnings,
+    disabledReason: previewDisabledReason(blockers[0]),
+    nextAction: previewNextAction(blockers[0]),
+    projectRevision,
+    runtimeCapabilities: runtimeCapabilitiesForProject(project, { previewPreflightSuccess: canRun }),
+    conditionRuntimeSupport,
+    conditionEvaluationTrace: conditionEvaluationTraceForProject(project)
+  };
+}
+
 function uniqueById<T extends { id: string }>(items: T[], path: string, issues: ValidationIssue[]): Set<string> {
   const ids = new Set<string>();
 
@@ -1646,9 +2258,14 @@ function routeGraphIssuePath(project: VnMakerProject, issue: RouteGraphIssue): s
 
 function routeGraphIssueToValidationIssue(project: VnMakerProject, issue: RouteGraphIssue): ValidationIssue {
   return {
+    code: issue.code,
+    domain: "route",
     severity: issue.severity,
     path: routeGraphIssuePath(project, issue),
-    message: issue.message
+    message: issue.message,
+    sceneIds: [...issue.sceneIds],
+    choiceIds: issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: issue.targetSceneId
   };
 }
 
@@ -2188,6 +2805,14 @@ function rewriteAsset(asset: VnMakerAsset | undefined, rewrites: Record<string, 
   };
 }
 
+function playerRuntimeChoice(choice: VnMakerChoice): PlayerRuntimeChoice {
+  return {
+    id: choice.id,
+    text: choice.text,
+    next: choice.next
+  };
+}
+
 export function createPlayerRuntimeData(project: VnMakerProject, options: PlayerRuntimeOptions = {}): PlayerRuntimeData {
   const route = project.routes.find((item) => item.id === project.settings.defaultRouteId) || project.routes[0];
   const assets = project.assets
@@ -2220,7 +2845,7 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
           asset: assetId ? assetMap.get(assetId) : undefined
         };
       }),
-      choices: scene.choices,
+      choices: scene.choices.map(playerRuntimeChoice),
       next: scene.next,
       ending: scene.ending,
       backgroundAsset: scene.backgroundAssetId ? assetMap.get(scene.backgroundAssetId) : undefined,
@@ -2230,7 +2855,11 @@ export function createPlayerRuntimeData(project: VnMakerProject, options: Player
     validation: {
       ok: issues.every((issue) => issue.severity !== "error"),
       issues
-    }
+    },
+    conditionRuntimeSupport: conditionRuntimeSupportForProject(project, {
+      previewPreflightSuccess: options.conditionPreviewPreflightSuccess ?? false
+    }),
+    conditionEvaluationTrace: conditionEvaluationTraceForProject(project)
   };
 }
 

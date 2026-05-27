@@ -9,6 +9,7 @@ import {
   buildPlayerRuntimeScript,
   buildProjectHtml,
   applyGenerationResultToProject,
+  createProjectRevision,
   createPlayerRuntimeData,
   createStarterProject,
   hashProjectSnapshot,
@@ -20,12 +21,16 @@ import {
   validateProject,
   type EventExpansionPlan,
   type EventExpansionRequest,
+  type GenerationResultLogDto,
   type HeroineProfile,
   type PlayerRuntimeData,
   type ProjectPatchDescription,
   type CreateStarterProjectInput,
   type EventExpansionValidationResult,
   type HeroineReuseRecord,
+  type ProjectRevisionDto,
+  type UXDecisionEventDto,
+  type UXDecisionEventLogExportDto,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -123,6 +128,15 @@ export interface ProjectValidationResult {
   issues: ValidationIssue[];
 }
 
+export type ProjectRevisionInput = ProjectRevisionDto | string;
+
+export interface TransactionalProjectMutationResult {
+  project: VnMakerProject;
+  validation: ProjectValidationResult;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+}
+
 export class PatchStaleError extends Error {
   readonly code = "PATCH_STALE";
   readonly issues: ValidationIssue[];
@@ -134,11 +148,50 @@ export class PatchStaleError extends Error {
   }
 }
 
+export class StaleProjectRevisionError extends Error {
+  readonly code = "STALE_PROJECT_REVISION";
+  readonly expectedRevision: string;
+  readonly actualRevision: ProjectRevisionDto;
+  readonly nextAction = "최신 프로젝트를 다시 불러온 뒤 시도하세요.";
+
+  constructor(input: { expectedRevision: string; actualRevision: ProjectRevisionDto }) {
+    super("프로젝트가 다른 곳에서 변경되었습니다.");
+    this.name = "StaleProjectRevisionError";
+    this.expectedRevision = input.expectedRevision;
+    this.actualRevision = input.actualRevision;
+  }
+}
+
 export interface ApplyEventExpansionResult {
   project: VnMakerProject;
   validation: ProjectValidationResult;
   diff: ProjectPatchDescription;
   patchHistoryEntry: PatchHistoryEntry;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+}
+
+export interface ApplyEventExpansionInput {
+  request: EventExpansionRequest;
+  plan: EventExpansionPlan;
+  expectedProjectRevision: ProjectRevisionInput;
+  sourcePatchHistoryId?: string;
+}
+
+export interface ApplyRepairMutationInput {
+  expectedProjectRevision: ProjectRevisionInput;
+  summary: string;
+  rawOutput?: (projectRevision: ProjectRevisionDto) => unknown;
+  diff?: ProjectPatchDescription;
+  mutate: (project: VnMakerProject) => VnMakerProject;
+}
+
+export interface ApplyRepairMutationResult {
+  project: VnMakerProject;
+  validation: ProjectValidationResult;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+  repairHistoryEntry: PatchHistoryEntry;
 }
 
 export type PatchHistoryStatus = "proposed" | "applied" | "failed";
@@ -212,6 +265,7 @@ interface ProjectRow {
   version: string;
   title: string;
   premise: string;
+  updated_at: string;
 }
 
 interface SettingsRow {
@@ -327,6 +381,17 @@ interface GenerationJobRow {
   position: number;
 }
 
+interface ValidationIssueRow {
+  severity: ValidationIssue["severity"];
+  path: string;
+  message: string;
+  code: string | null;
+  domain: string | null;
+  scene_ids_json: string | null;
+  choice_ids_json: string | null;
+  target_scene_id: string | null;
+}
+
 interface PatchHistoryRow {
   id: string;
   status: PatchHistoryStatus;
@@ -341,6 +406,25 @@ interface PatchHistoryRow {
   after_project_json: string | null;
   created_at: string;
   reverted_at: string | null;
+}
+
+interface GenerationResultLogRow {
+  id: string;
+  project_id: string;
+  prompt_set_id: string;
+  prompt_id: string;
+  log_json: string;
+  created_at: string;
+}
+
+interface UXDecisionEventRow {
+  id: string;
+  project_id: string;
+  event_log_id: string;
+  session_id: string;
+  event_name: string;
+  event_json: string;
+  created_at: string;
 }
 
 const migrations = [
@@ -552,6 +636,51 @@ ALTER TABLE generation_jobs ADD COLUMN fallback_reason TEXT;
 ALTER TABLE generation_jobs ADD COLUMN pack_version TEXT;
 ALTER TABLE generation_jobs ADD COLUMN source_generated_by TEXT;
 `
+  },
+  {
+    id: 7,
+    name: "validation_issue_metadata",
+    sql: `
+ALTER TABLE validation_issues ADD COLUMN code TEXT;
+ALTER TABLE validation_issues ADD COLUMN domain TEXT;
+ALTER TABLE validation_issues ADD COLUMN scene_ids_json TEXT;
+ALTER TABLE validation_issues ADD COLUMN choice_ids_json TEXT;
+ALTER TABLE validation_issues ADD COLUMN target_scene_id TEXT;
+`
+  },
+  {
+    id: 8,
+    name: "generation_result_logs",
+    sql: `
+CREATE TABLE IF NOT EXISTS generation_result_logs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  prompt_set_id TEXT NOT NULL,
+  prompt_id TEXT NOT NULL,
+  log_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_generation_result_logs_project_created ON generation_result_logs(project_id, created_at);
+`
+  },
+  {
+    id: 9,
+    name: "ux_decision_events",
+    sql: `
+CREATE TABLE IF NOT EXISTS ux_decision_events (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  event_log_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  event_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ux_decision_events_project_session_created ON ux_decision_events(project_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ux_decision_events_project_log_created ON ux_decision_events(project_id, event_log_id, created_at);
+`
   }
 ] as const;
 
@@ -576,6 +705,23 @@ function hashText(value: string): string {
 
 function normalizeNullable(value: string | undefined): string | null {
   return value && value.length > 0 ? value : null;
+}
+
+function revisionValue(input: ProjectRevisionInput): string {
+  return typeof input === "string" ? input : input.revision;
+}
+
+function validationIssueFromRow(row: ValidationIssueRow): ValidationIssue {
+  return {
+    severity: row.severity,
+    path: row.path,
+    message: row.message,
+    code: row.code ? row.code as ValidationIssue["code"] : undefined,
+    domain: row.domain ? row.domain as ValidationIssue["domain"] : undefined,
+    sceneIds: parseJson<string[] | undefined>(row.scene_ids_json, undefined),
+    choiceIds: parseJson<string[] | undefined>(row.choice_ids_json, undefined),
+    targetSceneId: row.target_scene_id || undefined
+  };
 }
 
 function assertProjectSnapshot(project: VnMakerProject): void {
@@ -678,6 +824,38 @@ function patchHistoryEntryFromRow(row: PatchHistoryRow): PatchHistoryEntry {
     createdAt: row.created_at,
     revertedAt: row.reverted_at || undefined
   };
+}
+
+function generationResultLogFromRow(row: GenerationResultLogRow): GenerationResultLogDto {
+  return parseJson<GenerationResultLogDto>(row.log_json, {
+    resultId: row.id,
+    promptSetId: row.prompt_set_id,
+    promptId: row.prompt_id,
+    promptText: "",
+    expectedElements: [],
+    allowedVariation: [],
+    adapter: "unknown",
+    sourceType: "unavailable",
+    generatedAt: row.created_at,
+    projectRevision: createProjectRevision(createStarterProject({ id: row.project_id }), row.created_at),
+    outputSummary: "",
+    validationIssues: [],
+    classification: "generation_quality",
+    skippedReason: "generation result log payload missing"
+  });
+}
+
+function uxDecisionEventFromRow(row: UXDecisionEventRow): UXDecisionEventDto {
+  return parseJson<UXDecisionEventDto>(row.event_json, {
+    eventLogId: row.event_log_id,
+    eventId: row.id,
+    eventName: row.event_name as UXDecisionEventDto["eventName"],
+    timestamp: row.created_at,
+    sessionId: row.session_id,
+    projectId: row.project_id,
+    projectRevision: createProjectRevision(createStarterProject({ id: row.project_id }), row.created_at),
+    outcome: "failed"
+  });
 }
 
 function statementList(sql: string): string[] {
@@ -1028,7 +1206,7 @@ export class ProjectStore {
   }
 
   getProject(): VnMakerProject | null {
-    const project = this.db.prepare("SELECT id, version, title, premise FROM projects ORDER BY updated_at DESC LIMIT 1").get() as ProjectRow | undefined;
+    const project = this.db.prepare("SELECT id, version, title, premise, updated_at FROM projects ORDER BY updated_at DESC LIMIT 1").get() as ProjectRow | undefined;
     if (!project) {
       return null;
     }
@@ -1158,6 +1336,12 @@ ORDER BY position ASC, id ASC
       throw new Error("프로젝트 저장소가 비어 있습니다. 먼저 프로젝트를 생성하거나 가져와야 합니다.");
     }
     return project;
+  }
+
+  getProjectRevision(): ProjectRevisionDto {
+    const project = this.requireProject();
+    const row = this.db.prepare("SELECT updated_at FROM projects WHERE id = ?").get(project.id) as { updated_at: string } | undefined;
+    return createProjectRevision(project, row?.updated_at || nowIso());
   }
 
   listHeroines(): HeroineProfile[] {
@@ -1316,20 +1500,23 @@ WHERE project_id = @projectId AND id = @id AND consumed_at IS NULL
   }
 
   saveProject(project: VnMakerProject): VnMakerProject {
+    return this.runInTransaction(() => this.writeProject(project));
+  }
+
+  private writeProject(project: VnMakerProject): VnMakerProject {
     project = applySingleBackgroundScenePolicy(project);
     assertProjectSnapshot(project);
 
-    this.runInTransaction(() => {
-      const now = nowIso();
-      const previousProject = this.db.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
-      const preservedAssets = this.readAssetMetadata(project.id);
-      const preservedJobs = this.readGenerationJobMetadata(project.id);
+    const now = nowIso();
+    const previousProject = this.db.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
+    const preservedAssets = this.readAssetMetadata(project.id);
+    const preservedJobs = this.readGenerationJobMetadata(project.id);
 
-      if (previousProject && previousProject.id !== project.id) {
-        this.db.prepare("DELETE FROM projects WHERE id = ?").run(previousProject.id);
-      }
+    if (previousProject && previousProject.id !== project.id) {
+      this.db.prepare("DELETE FROM projects WHERE id = ?").run(previousProject.id);
+    }
 
-      this.db.prepare(`
+    this.db.prepare(`
 INSERT INTO projects (id, version, title, premise, created_at, updated_at)
 VALUES (@id, @version, @title, @premise, @now, @now)
 ON CONFLICT(id) DO UPDATE SET
@@ -1339,7 +1526,7 @@ ON CONFLICT(id) DO UPDATE SET
   updated_at = excluded.updated_at
 `).run({ ...project, now });
 
-      this.db.prepare(`
+    this.db.prepare(`
 INSERT INTO project_settings (project_id, default_route_id, output_file_name, language)
 VALUES (@projectId, @defaultRouteId, @outputFileName, @language)
 ON CONFLICT(project_id) DO UPDATE SET
@@ -1500,7 +1687,6 @@ VALUES (
           now
         });
       });
-    });
 
     return this.requireProject();
   }
@@ -1511,6 +1697,65 @@ VALUES (
 
   upsertScene(scene: VnMakerScene): VnMakerProject {
     return this.saveProject(upsertProjectScene(this.requireProject(), scene));
+  }
+
+  private assertExpectedProjectRevision(expectedProjectRevision: ProjectRevisionInput): ProjectRevisionDto {
+    const previousRevision = this.getProjectRevision();
+    const expectedRevision = revisionValue(expectedProjectRevision);
+    if (expectedRevision !== previousRevision.revision) {
+      throw new StaleProjectRevisionError({
+        expectedRevision,
+        actualRevision: previousRevision
+      });
+    }
+    return previousRevision;
+  }
+
+  applyProjectMutation(input: {
+    expectedProjectRevision: ProjectRevisionInput;
+    mutate: (project: VnMakerProject) => VnMakerProject;
+  }): TransactionalProjectMutationResult {
+    return this.runInTransaction(() => {
+      const currentProject = this.requireProject();
+      const previousRevision = this.assertExpectedProjectRevision(input.expectedProjectRevision);
+
+      const nextProject = input.mutate(JSON.parse(JSON.stringify(currentProject)) as VnMakerProject);
+      const savedProject = this.writeProject(nextProject);
+      const validation = this.validateAndStoreCurrentProject();
+      return {
+        project: savedProject,
+        validation,
+        previousRevision,
+        projectRevision: this.getProjectRevision()
+      };
+    });
+  }
+
+  applyRepairMutation(input: ApplyRepairMutationInput): ApplyRepairMutationResult {
+    return this.runInTransaction(() => {
+      const currentProject = this.requireProject();
+      const previousRevision = this.assertExpectedProjectRevision(input.expectedProjectRevision);
+      const nextProject = input.mutate(JSON.parse(JSON.stringify(currentProject)) as VnMakerProject);
+      const savedProject = this.writeProject(nextProject);
+      const validation = this.validateAndStoreCurrentProject();
+      const projectRevision = this.getProjectRevision();
+      const repairHistoryEntry = this.recordPatchHistory({
+        status: "applied",
+        summary: input.summary,
+        rawOutput: input.rawOutput ? input.rawOutput(projectRevision) : undefined,
+        validation,
+        diff: input.diff,
+        beforeProject: currentProject,
+        afterProject: savedProject
+      });
+      return {
+        project: savedProject,
+        validation,
+        previousRevision,
+        projectRevision,
+        repairHistoryEntry
+      };
+    });
   }
 
   async storeGenerationResult(input: StoreGenerationResultInput): Promise<VnMakerProject> {
@@ -1527,69 +1772,85 @@ VALUES (
   }
 
   validateAndStore(): ProjectValidationResult {
+    return this.runInTransaction(() => this.validateAndStoreCurrentProject());
+  }
+
+  private validateAndStoreCurrentProject(): ProjectValidationResult {
     const project = this.requireProject();
     const issues = validateProject(project);
-    this.saveValidationIssues(project.id, issues);
+    this.writeValidationIssues(project.id, issues);
     return {
       ok: issues.every((issue) => issue.severity !== "error"),
       issues
     };
   }
 
-  applyEventExpansionPlan(
-    request: EventExpansionRequest,
-    plan: EventExpansionPlan,
-    sourcePatchHistoryId?: string
-  ): ApplyEventExpansionResult {
-    const project = this.requireProject();
-    const sourcePatchHistoryEntry = sourcePatchHistoryId ? this.getPatchHistoryEntry(sourcePatchHistoryId) : null;
-    if (sourcePatchHistoryId && !sourcePatchHistoryEntry) {
-      throw new Error(`패치 제안 이력을 찾을 수 없습니다: ${sourcePatchHistoryId}`);
-    }
-    const patchValidation = validateEventExpansionPlan(project, request, plan);
-    if (!patchValidation.ok || !patchValidation.appliedProject) {
-      this.saveValidationIssues(project.id, patchValidation.issues);
-      this.recordPatchHistory({
-        status: "failed",
-        summary: plan.summary || "패치 검증 실패",
-        request,
-        plan,
+  applyEventExpansionPlan(input: ApplyEventExpansionInput): ApplyEventExpansionResult {
+    const outcome = this.runInTransaction<ApplyEventExpansionResult | { error: Error }>(() => {
+      const project = this.requireProject();
+      const previousRevision = this.assertExpectedProjectRevision(input.expectedProjectRevision);
+      const sourcePatchHistoryEntry = input.sourcePatchHistoryId ? this.getPatchHistoryEntry(input.sourcePatchHistoryId) : null;
+      if (input.sourcePatchHistoryId && !sourcePatchHistoryEntry) {
+        throw new Error(`패치 제안 이력을 찾을 수 없습니다: ${input.sourcePatchHistoryId}`);
+      }
+      const patchValidation = validateEventExpansionPlan(project, input.request, input.plan);
+      if (!patchValidation.ok || !patchValidation.appliedProject) {
+        this.writeValidationIssues(project.id, patchValidation.issues);
+        this.recordPatchHistory({
+          status: "failed",
+          summary: input.plan.summary || "패치 검증 실패",
+          request: input.request,
+          plan: input.plan,
+          rawOutput: sourcePatchHistoryEntry?.rawOutput,
+          attempts: sourcePatchHistoryEntry?.attempts,
+          validation: patchValidation,
+          diff: patchValidation.diff,
+          beforeProject: project
+        });
+        return {
+          error: patchValidation.issues.some((issue) => issue.path === "request.baseProjectHash")
+            ? new StaleProjectRevisionError({
+                expectedRevision: previousRevision.revision,
+                actualRevision: previousRevision
+              })
+            : new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`)
+        };
+      }
+
+      const savedProject = this.writeProject(patchValidation.appliedProject);
+      const validation = this.validateAndStoreCurrentProject();
+      const patchHistoryEntry = this.recordPatchHistory({
+        status: "applied",
+        summary: input.plan.summary,
+        request: input.request,
+        plan: input.plan,
         rawOutput: sourcePatchHistoryEntry?.rawOutput,
         attempts: sourcePatchHistoryEntry?.attempts,
-        validation: patchValidation,
+        validation,
         diff: patchValidation.diff,
-        beforeProject: project
+        beforeProject: project,
+        afterProject: savedProject
       });
-      if (patchValidation.issues.some((issue) => issue.path === "request.baseProjectHash")) {
-        throw new PatchStaleError(patchValidation.issues);
-      }
-      throw new Error(`패치 검증 실패: ${patchValidation.issues.map((issue) => issue.message).join(", ")}`);
-    }
-
-    const savedProject = this.saveProject(patchValidation.appliedProject);
-    const validation = this.validateAndStore();
-    const patchHistoryEntry = this.recordPatchHistory({
-      status: "applied",
-      summary: plan.summary,
-      request,
-      plan,
-      rawOutput: sourcePatchHistoryEntry?.rawOutput,
-      attempts: sourcePatchHistoryEntry?.attempts,
-      validation,
-      diff: patchValidation.diff,
-      beforeProject: project,
-      afterProject: savedProject
+      return {
+        project: savedProject,
+        validation,
+        diff: patchValidation.diff,
+        patchHistoryEntry,
+        previousRevision,
+        projectRevision: this.getProjectRevision()
+      };
     });
-    return {
-      project: savedProject,
-      validation,
-      diff: patchValidation.diff,
-      patchHistoryEntry
-    };
+    if ("error" in outcome) {
+      throw outcome.error;
+    }
+    return outcome;
   }
 
-  previewProject(startSceneId?: string): PlayerRuntimeData {
-    return createPlayerRuntimeData(this.requireProject(), { startSceneId });
+  previewProject(startSceneId?: string, options: { conditionPreviewPreflightSuccess?: boolean } = {}): PlayerRuntimeData {
+    return createPlayerRuntimeData(this.requireProject(), {
+      conditionPreviewPreflightSuccess: options.conditionPreviewPreflightSuccess,
+      startSceneId
+    });
   }
 
   async exportWebPlayer(outputDirectory?: string): Promise<{ export: WebExportResult; smoke: WebExportSmokeTestResult }> {
@@ -1603,7 +1864,10 @@ VALUES (
       ? resolve(outputDirectory)
       : join(this.paths.exportsDirectory, `${project.id}-web`);
     const assetPathRewrites = await this.copyExportAssets(exportDirectory);
-    const runtime = createPlayerRuntimeData(project, { assetPathRewrites });
+    const runtime = createPlayerRuntimeData(project, {
+      assetPathRewrites,
+      conditionPreviewPreflightSuccess: true
+    });
     const artifact = buildProjectHtml(project, {
       projectDataPath: "./project-data.json",
       runtimeScriptPath: "./runtime/player.js",
@@ -1634,12 +1898,12 @@ VALUES (
   readValidationIssues(): ValidationIssue[] {
     const project = this.requireProject();
     const rows = this.db.prepare(`
-SELECT severity, path, message
+SELECT severity, path, message, code, domain, scene_ids_json, choice_ids_json, target_scene_id
 FROM validation_issues
 WHERE project_id = ?
 ORDER BY id ASC
-`).all(project.id) as ValidationIssue[];
-    return rows;
+`).all(project.id) as ValidationIssueRow[];
+    return rows.map(validationIssueFromRow);
   }
 
   listPatchHistory(): PatchHistoryEntry[] {
@@ -1699,6 +1963,95 @@ VALUES (
       createdAt
     });
     return this.listPatchHistory().find((entry) => entry.id === id)!;
+  }
+
+  recordGenerationResultLog(log: GenerationResultLogDto): GenerationResultLogDto {
+    const project = this.requireProject();
+    this.db.prepare(`
+INSERT INTO generation_result_logs (
+  id, project_id, prompt_set_id, prompt_id, log_json, created_at
+)
+VALUES (
+  @id, @projectId, @promptSetId, @promptId, @logJson, @createdAt
+)
+`).run({
+      id: log.resultId,
+      projectId: project.id,
+      promptSetId: log.promptSetId,
+      promptId: log.promptId,
+      logJson: json(log),
+      createdAt: log.generatedAt
+    });
+    return log;
+  }
+
+  listGenerationResultLogs(): GenerationResultLogDto[] {
+    const project = this.requireProject();
+    const rows = this.db.prepare(`
+SELECT id, project_id, prompt_set_id, prompt_id, log_json, created_at
+FROM generation_result_logs
+WHERE project_id = ?
+ORDER BY created_at DESC, id DESC
+`).all(project.id) as GenerationResultLogRow[];
+    return rows.map(generationResultLogFromRow);
+  }
+
+  recordUXDecisionEvent(event: UXDecisionEventDto): UXDecisionEventDto {
+    const project = this.requireProject();
+    this.db.prepare(`
+INSERT INTO ux_decision_events (
+  id, project_id, event_log_id, session_id, event_name, event_json, created_at
+)
+VALUES (
+  @id, @projectId, @eventLogId, @sessionId, @eventName, @eventJson, @createdAt
+)
+`).run({
+      id: event.eventId,
+      projectId: project.id,
+      eventLogId: event.eventLogId,
+      sessionId: event.sessionId,
+      eventName: event.eventName,
+      eventJson: json(event),
+      createdAt: event.timestamp
+    });
+    return event;
+  }
+
+  listUXDecisionEvents(input: { sessionId?: string; eventLogId?: string } = {}): UXDecisionEventDto[] {
+    const project = this.requireProject();
+    const filters: string[] = ["project_id = @projectId"];
+    const params: Record<string, string> = { projectId: project.id };
+    if (input.sessionId) {
+      filters.push("session_id = @sessionId");
+      params.sessionId = input.sessionId;
+    }
+    if (input.eventLogId) {
+      filters.push("event_log_id = @eventLogId");
+      params.eventLogId = input.eventLogId;
+    }
+    const rows = this.db.prepare(`
+SELECT id, project_id, event_log_id, session_id, event_name, event_json, created_at
+FROM ux_decision_events
+WHERE ${filters.join(" AND ")}
+ORDER BY created_at ASC, id ASC
+`).all(params) as UXDecisionEventRow[];
+    return rows.map(uxDecisionEventFromRow);
+  }
+
+  exportUXDecisionEventLog(input: { sessionId?: string; eventLogId?: string; exportedAt?: string } = {}): UXDecisionEventLogExportDto {
+    const project = this.requireProject();
+    const events = this.listUXDecisionEvents(input);
+    const firstEvent = events[0];
+    const sessionId = input.sessionId || firstEvent?.sessionId || "";
+    const eventLogId = input.eventLogId || firstEvent?.eventLogId || `uxlog-${project.id}-${sessionId || "default"}`;
+    return {
+      eventLogId,
+      sessionId,
+      projectId: project.id,
+      projectRevision: this.getProjectRevision(),
+      exportedAt: input.exportedAt || nowIso(),
+      events
+    };
   }
 
   undoPatchHistory(patchHistoryId: string): VnMakerProject {
@@ -1775,16 +2128,31 @@ WHERE project_id = ? AND id = ?
     return rewrites;
   }
 
-  private saveValidationIssues(projectId: string, issues: ValidationIssue[]): void {
-    this.runInTransaction(() => {
-      const createdAt = nowIso();
-      this.db.prepare("DELETE FROM validation_issues WHERE project_id = ?").run(projectId);
-      const insertIssue = this.db.prepare(`
-INSERT INTO validation_issues (project_id, severity, path, message, created_at)
-VALUES (@projectId, @severity, @path, @message, @createdAt)
+  private writeValidationIssues(projectId: string, issues: ValidationIssue[]): void {
+    const createdAt = nowIso();
+    this.db.prepare("DELETE FROM validation_issues WHERE project_id = ?").run(projectId);
+    const insertIssue = this.db.prepare(`
+INSERT INTO validation_issues (
+  project_id, severity, path, message, code, domain, scene_ids_json,
+  choice_ids_json, target_scene_id, created_at
+)
+VALUES (
+  @projectId, @severity, @path, @message, @code, @domain, @sceneIdsJson,
+  @choiceIdsJson, @targetSceneId, @createdAt
+)
 `);
-      issues.forEach((issue) => insertIssue.run({ projectId, ...issue, createdAt }));
-    });
+    issues.forEach((issue) => insertIssue.run({
+      projectId,
+      severity: issue.severity,
+      path: issue.path,
+      message: issue.message,
+      code: issue.code || null,
+      domain: issue.domain || null,
+      sceneIdsJson: issue.sceneIds ? json(issue.sceneIds) : null,
+      choiceIdsJson: issue.choiceIds ? json(issue.choiceIds) : null,
+      targetSceneId: issue.targetSceneId || null,
+      createdAt
+    }));
   }
 
   private readAssetMetadata(projectId: string): Map<string, AssetRow> {

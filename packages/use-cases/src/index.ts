@@ -5,6 +5,8 @@ import {
   DEFAULT_HEROINE_PORTRAIT_STYLE,
   analyzeRouteGraph,
   buildProjectHtml,
+  conditionEvaluationTraceForProject,
+  conditionRuntimeSupportForProject,
   createAssetManifest,
   createBlankProject,
   createDeterministicEventExpansionPlan,
@@ -12,6 +14,8 @@ import {
   createHeroineProfile,
   createHeroinePortraitPrompt,
   createImageGenerationJob,
+  createPreviewPreflight,
+  createProjectRevision,
   planExpressionAssetsForHeroine,
   createProjectFromHeroine,
   createStarterProject,
@@ -23,15 +27,43 @@ import {
   parseVnMakerCharacter,
   parseVnMakerProject,
   parseVnMakerScene,
+  upsertProjectScene,
   validateEventExpansionPlan,
   validateProject as validateProjectSnapshot,
+  UX_DECISION_HELP_CHANNELS,
+  UX_DECISION_EVENT_NAMES,
   type CreateImageGenerationJobInput,
   type CreateStarterProjectInput,
+  type ConditionEvaluationTraceDto,
+  type ConditionRuntimeSupportDto,
   type DtoParseResult,
   type EventExpansionPlan,
   type EventExpansionRequest,
   type EventExpansionValidationResult,
+  type Phase0Decision,
+  type Phase0DecisionReportDto,
+  type Phase0DenominatorDto,
+  type Phase0MetricDto,
+  type Phase0ParticipantResultDto,
+  type Phase0SessionEvidenceDto,
+  type Phase0TaskInputMode,
+  type Phase0WorkPackageStatus,
+  type Phase0WorkPackageStatusDto,
+  type GenerationFailureClassification,
+  type GenerationResultClassification,
+  type GenerationResultLogDto,
+  type GenerationResultSourceType,
   type HeroineProfile,
+  type PreviewPreflightDto,
+  type ProjectPatchDescription,
+  type ProjectActionEventDto,
+  type ProjectRevisionDto,
+  type TestPromptFixtureDto,
+  type TestPromptSetDto,
+  type UXDecisionEventDto,
+  type UXDecisionEventLogExportDto,
+  type UXDecisionEventName,
+  type UXDecisionHelpChannel,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -49,9 +81,12 @@ import {
   RecentProjectIndexStore,
   resolveProjectWorkspacePaths,
   smokeTestWebExport,
+  StaleProjectRevisionError,
+  type PatchHistoryEntry,
   type RecentProjectIndexEntry,
   type RecentProjectValidationState,
   type ProjectStore,
+  type ProjectRevisionInput,
   type StoredHeroineProfile
 } from "@vn-maker/project-store";
 
@@ -150,6 +185,52 @@ export interface ProjectImageGenerationAdapter {
   generateImageAsset(input: ProjectImageGenerationInput): Promise<ProjectImageGenerationResult>;
 }
 
+export const FIXED_PROMPT_SET_ID = "phase0-studio-fixed-prompts-v1";
+
+const FIXED_PROMPT_SET_VERSION = "1.0.0";
+export const GENERATION_FAILURE_CLASSIFICATIONS: GenerationFailureClassification[] = [
+  "generation_quality",
+  "validation_model",
+  "repair_ux",
+  "preview_runtime",
+  "participant_understanding"
+];
+const FIXED_PROMPT_FIXTURES: TestPromptFixtureDto[] = [
+  {
+    promptSetId: FIXED_PROMPT_SET_ID,
+    promptId: "library-hands-overlap-normal-ending",
+    promptText: "도서관에서 책을 줍다가 손이 겹치고 둘 다 당황하지만, 마지막에는 서로 웃으며 노멀 엔딩으로 끝나는 짧은 이벤트를 만들어줘. 씬은 3개, 선택지는 1개, CG는 1개만 사용해줘.",
+    expectedElements: ["도서관", "손이 겹침", "당황", "노멀 엔딩", "CG 1개"],
+    allowedVariation: ["장면 라벨", "대사 표현", "선택지 문구", "CG 프롬프트 세부 묘사"]
+  },
+  {
+    promptSetId: FIXED_PROMPT_SET_ID,
+    promptId: "rainy-classroom-shared-umbrella",
+    promptText: "비 오는 방과 후 교실에서 우산을 같이 쓰기로 약속하고, 짧은 선택 뒤 노멀 엔딩으로 끝나는 설레는 이벤트를 만들어줘. 씬은 3개, 선택지는 1개, CG는 1개만 사용해줘.",
+    expectedElements: ["비 오는 방과 후", "교실", "우산 약속", "선택지 1개", "노멀 엔딩"],
+    allowedVariation: ["날씨 묘사", "교실 소품", "선택지 문구", "엔딩 제목"]
+  },
+  {
+    promptSetId: FIXED_PROMPT_SET_ID,
+    promptId: "festival-cleanup-confession",
+    promptText: "문화제 정리 시간에 둘만 남아 고마움을 전하고, 가벼운 고백 직전의 여운으로 노멀 엔딩에 도달하는 이벤트를 만들어줘. 씬은 3개, 선택지는 1개, CG는 1개만 사용해줘.",
+    expectedElements: ["문화제 정리", "둘만 남음", "고마움", "고백 직전의 여운", "노멀 엔딩"],
+    allowedVariation: ["문화제 부스 종류", "대사 톤", "감정선 속도", "CG 연출"]
+  }
+];
+
+export const PHASE0_WORK_PACKAGES: Array<{ id: string; label: string }> = [
+  { id: "alpha-input", label: "Alpha input" },
+  { id: "generation-summary", label: "generation summary" },
+  { id: "studio-guided-recipe", label: "Studio guided recipe" },
+  { id: "problems-repair", label: "Problems repair" },
+  { id: "preview-preflight", label: "Preview preflight" },
+  { id: "event-log-export", label: "Event log export" },
+  { id: "participant-protocol", label: "participant screening protocol" },
+  { id: "fixed-free-separation", label: "fixed/free input separation" },
+  { id: "decision-thresholds", label: "Go/Iterate/Stop threshold report" }
+];
+
 export type MakerActionId =
   | "createProject"
   | "createProjectFromHeroine"
@@ -166,9 +247,21 @@ export type MakerActionId =
   | "validateProject"
   | "expandEvent"
   | "approveEvent"
+  | "listFixedPrompts"
+  | "replayFixedPrompt"
+  | "listGenerationResultLogs"
+  | "recordUXDecisionEvent"
+  | "listUXDecisionEvents"
+  | "exportUXDecisionEventLog"
+  | "createPhase0DecisionReport"
   | "listGenerationJobs"
   | "runGenerationJobs"
+  | "previewPreflightProject"
   | "previewProject"
+  | "previewRepair"
+  | "applyRepair"
+  | "undoRepair"
+  | "undoPatch"
   | "exportProject";
 
 export type MakerValidationState = "unknown" | "valid" | "warning" | "error";
@@ -236,6 +329,8 @@ export interface ProjectExportPlanDto {
   canExport: boolean;
   target: "localDesktopWebApp";
   githubPagesTarget: false;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
   validationSummary: {
     ok: boolean;
     issueCount: number;
@@ -257,6 +352,78 @@ export interface ProjectExportPlanDto {
   nextAction: string;
 }
 
+export interface RepairActionRequiredInputDto {
+  name: string;
+  label: string;
+  inputType: "text" | "select";
+  options?: Array<{ value: string; label: string }>;
+}
+
+export interface RepairActionExpectedTargetDto {
+  targetPath: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+}
+
+export interface RepairActionPreflightBlockerDto {
+  issueCode: string;
+  path: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+  repairActionIds: string[];
+}
+
+export interface RepairActionDto {
+  actionId: "create-target-scene" | "connect-existing-scene" | "set-scene-ending" | "remove-next";
+  issueCode: string;
+  targetPath: string;
+  label: string;
+  description: string;
+  destructive: boolean;
+  requiresConfirmation: boolean;
+  requiredInputs: RepairActionRequiredInputDto[];
+  disabledReason: string | null;
+  expectedTarget: RepairActionExpectedTargetDto;
+  preflightBlocker: RepairActionPreflightBlockerDto;
+}
+
+export interface RepairDiffEntryDto {
+  op: "add" | "remove" | "replace";
+  path: string;
+  before: unknown;
+  after: unknown;
+  humanLabel: string;
+}
+
+export interface RepairPreviewDto {
+  actionId: RepairActionDto["actionId"];
+  issueCode: string;
+  targetPath: string;
+  beforeRevision: ProjectRevisionDto;
+  expectedAfterSummary: string;
+  diff: RepairDiffEntryDto[];
+  destructiveWarnings: string[];
+  confirmToken: string;
+  repairAction: RepairActionDto;
+}
+
+export interface RepairHistoryEntryDto {
+  id: string;
+  actionId: string;
+  issueCode: string;
+  beforeRevision: ProjectRevisionDto;
+  afterRevision: ProjectRevisionDto;
+  appliedAt: string;
+  revertedAt?: string;
+}
+
+export interface UndoRepairInput {
+  repairHistoryId?: string;
+  undoToken?: string;
+}
+
 export type ProjectActionFailureCode =
   | "PROJECT_INPUT_INVALID"
   | "PROJECT_ID_RESERVED"
@@ -265,6 +432,7 @@ export type ProjectActionFailureCode =
   | "RECENT_PROJECT_INDEX_MISS"
   | "PROJECT_DIRECTORY_MISSING"
   | "PROJECT_ID_MISMATCH"
+  | "STALE_PROJECT_REVISION"
   | "PROJECT_REVISION_CONFLICT"
   | "HEROINE_REQUIRED"
   | "HEROINE_REPLACE_BLOCKED"
@@ -284,13 +452,19 @@ export interface ProjectActionFailureDto {
   error: string;
   nextAction: string;
   requestId: string;
+  correlationId?: string;
   projectId?: string;
   projectDirectory?: string;
   expectedProjectId?: string;
   actualProjectId?: string;
+  expectedRevision?: string;
+  actualRevision?: ProjectRevisionDto;
   workflowSummary?: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
+  previewPreflight?: PreviewPreflightDto;
+  repairActions?: RepairActionDto[];
   exportPlan?: ProjectExportPlanDto;
+  actionEvent?: ProjectActionEventDto;
   issues?: ValidationIssue[];
   retryable: boolean;
 }
@@ -339,6 +513,11 @@ const projectFailureContracts: Record<ProjectActionFailureCode, Omit<ProjectFail
     retryable: false
   },
   PROJECT_REVISION_CONFLICT: {
+    message: "프로젝트가 다른 곳에서 변경되었습니다.",
+    nextAction: "최신 프로젝트를 다시 불러온 뒤 시도하세요.",
+    retryable: false
+  },
+  STALE_PROJECT_REVISION: {
     message: "프로젝트가 다른 곳에서 변경되었습니다.",
     nextAction: "최신 프로젝트를 다시 불러온 뒤 시도하세요.",
     retryable: false
@@ -535,6 +714,59 @@ const reservedProjectIds = new Set(["new", "open", "settings", "delete", "create
 
 function createRequestId(): string {
   return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createCorrelationId(action: MakerActionId): string {
+  return `corr-${action}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+}
+
+function createUXDecisionEventId(): string {
+  return `uxevent-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+}
+
+function createUXDecisionEventLogId(projectId: string, sessionId: string): string {
+  return `uxlog-${projectId}-${sessionId}`.replace(/[^A-Za-z0-9._:-]/g, "-");
+}
+
+function cloneFixedPromptFixture(fixture: TestPromptFixtureDto): TestPromptFixtureDto {
+  return {
+    ...fixture,
+    expectedElements: [...fixture.expectedElements],
+    allowedVariation: [...fixture.allowedVariation]
+  };
+}
+
+function fixedPromptSetDto(): TestPromptSetDto {
+  return {
+    id: FIXED_PROMPT_SET_ID,
+    version: FIXED_PROMPT_SET_VERSION,
+    label: "Studio Phase 0 fixed prompt set",
+    fixtures: FIXED_PROMPT_FIXTURES.map(cloneFixedPromptFixture)
+  };
+}
+
+function fixedPromptById(promptId: unknown): TestPromptFixtureDto {
+  const id = typeof promptId === "string" && promptId.trim()
+    ? promptId.trim()
+    : FIXED_PROMPT_FIXTURES[0].promptId;
+  const fixture = FIXED_PROMPT_FIXTURES.find((item) => item.promptId === id);
+  if (!fixture) {
+    throw new InputValidationError("fixed prompt를 찾을 수 없습니다.", [{
+      severity: "error",
+      path: "promptId",
+      message: `지원하지 않는 fixed prompt입니다: ${id}`
+    }]);
+  }
+  return cloneFixedPromptFixture(fixture);
+}
+
+function fixedPromptAdapterMode(input: unknown): "mock" | "actual" {
+  const mode = asRecord(input).adapterMode;
+  return mode === "actual" ? "actual" : "mock";
+}
+
+function createGenerationResultId(): string {
+  return `generation-result-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 }
 
 function explicitProjectId(input: unknown): string | undefined {
@@ -841,6 +1073,9 @@ function exportPlanFor(
   const defaultState = blockers.length > 0 ? "blocked" : "ready";
   const state = options.state || defaultState;
   const canExport = blockers.length === 0 && state !== "failed" && state !== "blocked";
+  const conditionRuntimeSupport = conditionRuntimeSupportForProject(project, {
+    previewPreflightSuccess: blockers.length === 0
+  });
   const failureCause = options.failureCause
     || blockers.map((blocker) => blocker.message).join(" ")
     || (state === "complete" ? "내보내기 실행 결과가 준비되었습니다." : "내보내기 전 검증을 통과했습니다.");
@@ -865,6 +1100,8 @@ function exportPlanFor(
     canExport,
     target: "localDesktopWebApp",
     githubPagesTarget: false,
+    conditionRuntimeSupport,
+    conditionEvaluationTrace: conditionEvaluationTraceForProject(project),
     validationSummary,
     includedData: ["project", "runtime", "assetManifest"],
     includedAssets: project.assets.map((asset) => ({
@@ -914,6 +1151,491 @@ function validationForProjectState(project: VnMakerProject, validation?: { ok?: 
   };
 }
 
+function sceneLabelForRepair(project: VnMakerProject, sceneId: string): string {
+  const scene = project.scenes.find((item) => item.id === sceneId);
+  return scene?.label || scene?.id || sceneId;
+}
+
+function sceneForIssue(project: VnMakerProject, issue: ValidationIssue): VnMakerScene | undefined {
+  const sceneId = issue.sceneIds?.[0];
+  return sceneId ? project.scenes.find((scene) => scene.id === sceneId) : undefined;
+}
+
+function repairExpectedTarget(issue: ValidationIssue): RepairActionExpectedTargetDto {
+  return {
+    targetPath: issue.path,
+    sceneIds: issue.sceneIds ? [...issue.sceneIds] : undefined,
+    choiceIds: issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: issue.targetSceneId
+  };
+}
+
+function repairPreflightBlockerFor(issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionPreflightBlockerDto {
+  const matchedBlocker = preflight?.blockers.find((blocker) => blocker.issueCode === issue.code && blocker.path === issue.path);
+  return {
+    issueCode: matchedBlocker?.issueCode || issue.code || "validation-issue",
+    path: matchedBlocker?.path || issue.path,
+    sceneIds: matchedBlocker?.sceneIds ? [...matchedBlocker.sceneIds] : issue.sceneIds ? [...issue.sceneIds] : undefined,
+    choiceIds: matchedBlocker?.choiceIds ? [...matchedBlocker.choiceIds] : issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: matchedBlocker?.targetSceneId || issue.targetSceneId,
+    repairActionIds: matchedBlocker?.repairActionIds ? [...matchedBlocker.repairActionIds] : []
+  };
+}
+
+function createTargetSceneRepairAction(issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  return {
+    actionId: "create-target-scene",
+    issueCode: issue.code || "missing-target",
+    targetPath: issue.path,
+    label: "타깃 씬 만들기",
+    description: `${issue.targetSceneId || "누락된 타깃"}으로 연결할 새 씬을 만듭니다.`,
+    destructive: false,
+    requiresConfirmation: false,
+    requiredInputs: [{ name: "sceneLabel", label: "새 씬 이름", inputType: "text" }],
+    disabledReason: null,
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function connectExistingSceneRepairAction(project: VnMakerProject, issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  const sourceSceneIds = new Set(issue.sceneIds || []);
+  const options = project.scenes
+    .filter((scene) => !sourceSceneIds.has(scene.id))
+    .map((scene) => ({ value: scene.id, label: sceneLabelForRepair(project, scene.id) }));
+  return {
+    actionId: "connect-existing-scene",
+    issueCode: issue.code || "missing-target",
+    targetPath: issue.path,
+    label: "기존 씬에 연결",
+    description: "없는 타깃 대신 프로젝트의 기존 씬을 선택지 또는 다음 장면에 연결합니다.",
+    destructive: false,
+    requiresConfirmation: false,
+    requiredInputs: [{ name: "existingSceneId", label: "연결할 기존 씬", inputType: "select", options }],
+    disabledReason: options.length > 0 ? null : "연결할 기존 씬이 없습니다.",
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function setSceneEndingRepairAction(issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  return {
+    actionId: "set-scene-ending",
+    issueCode: issue.code || "uncovered-terminal",
+    targetPath: issue.path,
+    label: "엔딩 지정",
+    description: "엔딩 없이 끝나는 씬에 엔딩 정보를 추가합니다.",
+    destructive: false,
+    requiresConfirmation: false,
+    requiredInputs: [
+      { name: "endingTitle", label: "엔딩 제목", inputType: "text" },
+      {
+        name: "endingKind",
+        label: "엔딩 종류",
+        inputType: "select",
+        options: [
+          { value: "normal", label: "일반 엔딩" },
+          { value: "good", label: "굿 엔딩" },
+          { value: "bad", label: "배드 엔딩" }
+        ]
+      }
+    ],
+    disabledReason: null,
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function removeNextRepairAction(project: VnMakerProject, issue: ValidationIssue, preflight?: PreviewPreflightDto): RepairActionDto {
+  const scene = sceneForIssue(project, issue);
+  return {
+    actionId: "remove-next",
+    issueCode: issue.code || "validation-issue",
+    targetPath: issue.path,
+    label: "next 연결 제거",
+    description: "충돌을 만드는 다음 장면 연결을 제거합니다.",
+    destructive: true,
+    requiresConfirmation: true,
+    requiredInputs: [],
+    disabledReason: scene?.next ? null : "제거할 next 연결이 없습니다.",
+    expectedTarget: repairExpectedTarget(issue),
+    preflightBlocker: repairPreflightBlockerFor(issue, preflight)
+  };
+}
+
+function repairActionsForValidation(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  preflight?: PreviewPreflightDto
+): RepairActionDto[] {
+  const actions: RepairActionDto[] = [];
+  (validation.issues || []).forEach((issue) => {
+    if (issue.severity !== "error") {
+      return;
+    }
+    if (issue.code === "missing-target") {
+      actions.push(createTargetSceneRepairAction(issue, preflight));
+      actions.push(connectExistingSceneRepairAction(project, issue, preflight));
+      return;
+    }
+    if (issue.code === "uncovered-terminal") {
+      actions.push(setSceneEndingRepairAction(issue, preflight));
+      return;
+    }
+    if (issue.code === "mixed-outgoing" || issue.code === "ending-has-outgoing") {
+      actions.push(removeNextRepairAction(project, issue, preflight));
+    }
+  });
+  return actions;
+}
+
+interface RepairActionRequest {
+  actionId: RepairActionDto["actionId"];
+  issueCode: string;
+  targetPath: string;
+  inputs: JsonRecord;
+}
+
+interface RepairMutationPreview {
+  project: VnMakerProject;
+  diff: RepairDiffEntryDto[];
+  expectedAfterSummary: string;
+  destructiveWarnings: string[];
+}
+
+function cloneProject(project: VnMakerProject): VnMakerProject {
+  return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+}
+
+function validationSnapshotForProject(project: VnMakerProject): { ok: boolean; issues: ValidationIssue[] } {
+  const issues = validateProjectSnapshot(project);
+  return {
+    ok: issues.every((issue) => issue.severity !== "error"),
+    issues
+  };
+}
+
+function repairActionRequestFrom(input: unknown): RepairActionRequest {
+  const record = asRecord(input);
+  const actionRecord = asRecord(record.repairAction);
+  const actionId = String(actionRecord.actionId || record.actionId || "");
+  const issueCode = String(actionRecord.issueCode || record.issueCode || "");
+  const targetPath = String(actionRecord.targetPath || record.targetPath || "");
+  const inputs = asRecord(actionRecord.inputs || record.inputs);
+  if (!["create-target-scene", "connect-existing-scene", "set-scene-ending", "remove-next"].includes(actionId)) {
+    throw new InputValidationError("지원하지 않는 repair action입니다.", [{ severity: "error", path: "repairAction.actionId", message: "지원하지 않는 repair action입니다." }]);
+  }
+  if (!issueCode) {
+    throw new InputValidationError("repair action issueCode 입력이 필요합니다.", [{ severity: "error", path: "repairAction.issueCode", message: "비어 있을 수 없습니다." }]);
+  }
+  if (!targetPath) {
+    throw new InputValidationError("repair action targetPath 입력이 필요합니다.", [{ severity: "error", path: "repairAction.targetPath", message: "비어 있을 수 없습니다." }]);
+  }
+  return {
+    actionId: actionId as RepairActionDto["actionId"],
+    issueCode,
+    targetPath,
+    inputs
+  };
+}
+
+function repairIssueForRequest(validation: { issues?: ValidationIssue[] }, request: RepairActionRequest): ValidationIssue {
+  const issue = (validation.issues || []).find((candidate) =>
+    candidate.code === request.issueCode && candidate.path === request.targetPath && candidate.severity === "error"
+  );
+  if (!issue) {
+    throw new InputValidationError("repair action에 연결된 validation issue를 찾을 수 없습니다.", [{
+      severity: "error",
+      path: "repairAction",
+      message: "현재 검증 결과와 repair action이 일치하지 않습니다."
+    }]);
+  }
+  return issue;
+}
+
+function repairActionCandidateForRequest(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  preflight: PreviewPreflightDto,
+  request: RepairActionRequest
+): RepairActionDto {
+  const action = repairActionsForValidation(project, validation, preflight).find((candidate) =>
+    candidate.actionId === request.actionId && candidate.issueCode === request.issueCode && candidate.targetPath === request.targetPath
+  );
+  if (!action) {
+    throw new InputValidationError("현재 issue에는 적용 가능한 repair action 후보가 없습니다.", [{
+      severity: "error",
+      path: "repairAction",
+      message: "지원하지 않는 issue이거나 최신 검증 결과와 다릅니다."
+    }]);
+  }
+  if (action.disabledReason) {
+    throw new InputValidationError(action.disabledReason, [{
+      severity: "error",
+      path: "repairAction.disabledReason",
+      message: action.disabledReason
+    }]);
+  }
+  return action;
+}
+
+function sceneForRepairRequest(project: VnMakerProject, issue: ValidationIssue): VnMakerScene {
+  const scene = sceneForIssue(project, issue);
+  if (!scene) {
+    throw new InputValidationError("repair 대상 scene을 찾을 수 없습니다.", [{
+      severity: "error",
+      path: issue.path,
+      message: "repair 대상 scene을 찾을 수 없습니다.",
+      sceneIds: issue.sceneIds
+    }]);
+  }
+  return scene;
+}
+
+function repairInputString(inputs: JsonRecord, name: string): string {
+  const value = inputs[name];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function assertExpectedProjectRevision(store: ProjectStore, expectedProjectRevision: ProjectRevisionInput): ProjectRevisionDto {
+  const actualRevision = store.getProjectRevision();
+  const expectedRevision = typeof expectedProjectRevision === "string" ? expectedProjectRevision : expectedProjectRevision.revision;
+  if (expectedRevision !== actualRevision.revision) {
+    throw new StaleProjectRevisionError({ expectedRevision, actualRevision });
+  }
+  return actualRevision;
+}
+
+function routeEntryForMissingTarget(project: VnMakerProject, issue: ValidationIssue): { route: VnMakerProject["routes"][number]; routeIndex: number } | null {
+  const routeIndex = project.routes.findIndex((route) => route.entrySceneId === issue.targetSceneId);
+  if (routeIndex < 0) {
+    return null;
+  }
+  return { route: project.routes[routeIndex], routeIndex };
+}
+
+function applyRepairMutationToProject(project: VnMakerProject, request: RepairActionRequest, issue: ValidationIssue): RepairMutationPreview {
+  const nextProject = cloneProject(project);
+
+  if (request.actionId === "remove-next") {
+    const scene = sceneForRepairRequest(nextProject, issue);
+    const before = scene.next || null;
+    scene.next = undefined;
+    return {
+      project: nextProject,
+      diff: [{
+        op: "remove",
+        path: `${issue.path}.next`,
+        before,
+        after: null,
+        humanLabel: `${sceneLabelForRepair(project, scene.id)}의 next 연결 제거`
+      }],
+      expectedAfterSummary: "충돌을 만드는 next 연결을 제거하고 검증을 다시 계산합니다.",
+      destructiveWarnings: ["다음 장면 자동 연결이 제거됩니다."]
+    };
+  }
+
+  if (request.actionId === "set-scene-ending") {
+    const scene = sceneForRepairRequest(nextProject, issue);
+    const endingTitle = repairInputString(request.inputs, "endingTitle") || "새 엔딩";
+    const endingKind = repairInputString(request.inputs, "endingKind") || "normal";
+    const before = scene.ending || null;
+    const ending = endingFromInput(nextProject, scene.id, {
+      title: endingTitle,
+      kind: endingKind
+    });
+    scene.ending = ending;
+    return {
+      project: nextProject,
+      diff: [{
+        op: before ? "replace" : "add",
+        path: `${issue.path}.ending`,
+        before,
+        after: ending || null,
+        humanLabel: `${sceneLabelForRepair(project, scene.id)}에 엔딩 지정`
+      }],
+      expectedAfterSummary: "엔딩 없이 끝나는 씬에 엔딩 정보를 추가하고 검증을 다시 계산합니다.",
+      destructiveWarnings: []
+    };
+  }
+
+  if (request.actionId === "connect-existing-scene") {
+    const existingSceneId = repairInputString(request.inputs, "existingSceneId");
+    const targetScene = nextProject.scenes.find((candidate) => candidate.id === existingSceneId);
+    if (!targetScene) {
+      throw new InputValidationError("연결할 기존 씬을 찾을 수 없습니다.", [{
+        severity: "error",
+        path: "inputs.existingSceneId",
+        message: "연결할 기존 씬을 찾을 수 없습니다."
+      }]);
+    }
+    const scene = sceneForIssue(nextProject, issue);
+    if (!scene) {
+      const routeEntry = routeEntryForMissingTarget(nextProject, issue);
+      if (!routeEntry) {
+        throw new InputValidationError("repair 대상 route entry를 찾을 수 없습니다.", [{
+          severity: "error",
+          path: issue.path,
+          message: "repair 대상 route entry를 찾을 수 없습니다.",
+          targetSceneId: issue.targetSceneId
+        }]);
+      }
+      const before = routeEntry.route.entrySceneId || null;
+      routeEntry.route.entrySceneId = targetScene.id;
+      return {
+        project: nextProject,
+        diff: [{
+          op: "replace",
+          path: `routes.${routeEntry.routeIndex}.entrySceneId`,
+          before,
+          after: targetScene.id,
+          humanLabel: `${routeEntry.route.title || routeEntry.route.id} 시작 씬을 기존 씬에 연결`
+        }],
+        expectedAfterSummary: "없는 route entry target 대신 기존 씬을 연결하고 검증을 다시 계산합니다.",
+        destructiveWarnings: []
+      };
+    }
+    const choiceId = issue.choiceIds?.[0];
+    const choice = choiceId ? scene.choices.find((candidate) => candidate.id === choiceId) : undefined;
+    if (choice) {
+      const before = choice.next || null;
+      choice.next = targetScene.id;
+      return {
+        project: nextProject,
+        diff: [{
+          op: "replace",
+          path: `${issue.path}.next`,
+          before,
+          after: targetScene.id,
+          humanLabel: `${choice.text || choice.id} 선택지를 기존 씬에 연결`
+        }],
+        expectedAfterSummary: "없는 target 대신 기존 씬을 연결하고 검증을 다시 계산합니다.",
+        destructiveWarnings: []
+      };
+    }
+    const before = scene.next || null;
+    scene.next = targetScene.id;
+    return {
+      project: nextProject,
+      diff: [{
+        op: "replace",
+        path: `${issue.path}.next`,
+        before,
+        after: targetScene.id,
+        humanLabel: `${sceneLabelForRepair(project, scene.id)}의 next를 기존 씬에 연결`
+      }],
+      expectedAfterSummary: "없는 target 대신 기존 씬을 연결하고 검증을 다시 계산합니다.",
+      destructiveWarnings: []
+    };
+  }
+
+  const targetSceneId = issue.targetSceneId || repairInputString(request.inputs, "sceneId");
+  if (!targetSceneId) {
+    throw new InputValidationError("생성할 target scene id를 결정할 수 없습니다.", [{
+      severity: "error",
+      path: "repairAction.targetSceneId",
+      message: "생성할 target scene id를 결정할 수 없습니다."
+    }]);
+  }
+  const sceneLabel = repairInputString(request.inputs, "sceneLabel") || targetSceneId;
+  const newScene = requireParsed(parseVnMakerScene({
+    id: targetSceneId,
+    label: sceneLabel,
+    speaker: "",
+    text: "",
+    characters: [],
+    choices: []
+  }), "scene");
+  nextProject.scenes.push(newScene);
+  return {
+    project: nextProject,
+    diff: [{
+      op: "add",
+      path: `scenes.${nextProject.scenes.length - 1}`,
+      before: null,
+      after: newScene,
+      humanLabel: `${sceneLabel} 씬 생성`
+    }],
+    expectedAfterSummary: "누락된 target 씬을 생성하고 검증을 다시 계산합니다.",
+    destructiveWarnings: []
+  };
+}
+
+function repairConfirmToken(input: {
+  actionId: string;
+  issueCode: string;
+  targetPath: string;
+  beforeRevision: ProjectRevisionDto;
+  diff: RepairDiffEntryDto[];
+}): string {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex").slice(0, 32);
+}
+
+function repairPreviewFor(
+  project: VnMakerProject,
+  projectRevision: ProjectRevisionDto,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  request: RepairActionRequest
+): RepairPreviewDto {
+  const preflight = createPreviewPreflight(project, validation, projectRevision);
+  const issue = repairIssueForRequest(validation, request);
+  const repairAction = repairActionCandidateForRequest(project, validation, preflight, request);
+  const mutation = applyRepairMutationToProject(project, request, issue);
+  const previewBase = {
+    actionId: repairAction.actionId,
+    issueCode: repairAction.issueCode,
+    targetPath: repairAction.targetPath,
+    beforeRevision: projectRevision,
+    expectedAfterSummary: mutation.expectedAfterSummary,
+    diff: mutation.diff,
+    destructiveWarnings: mutation.destructiveWarnings,
+    repairAction
+  };
+  return {
+    ...previewBase,
+    confirmToken: repairConfirmToken(previewBase)
+  };
+}
+
+function patchHistoryRepairMetadata(entry: PatchHistoryEntry): { preview?: RepairPreviewDto; afterRevision?: ProjectRevisionDto } {
+  const repair = asRecord(asRecord(entry.rawOutput).repair);
+  return {
+    preview: repair.preview as RepairPreviewDto | undefined,
+    afterRevision: repair.afterRevision as ProjectRevisionDto | undefined
+  };
+}
+
+function repairHistoryEntryFromPatch(entry: PatchHistoryEntry): RepairHistoryEntryDto | null {
+  const metadata = patchHistoryRepairMetadata(entry);
+  if (!metadata.preview || !metadata.afterRevision) {
+    return null;
+  }
+  return {
+    id: entry.id,
+    actionId: metadata.preview.actionId,
+    issueCode: metadata.preview.issueCode,
+    beforeRevision: metadata.preview.beforeRevision,
+    afterRevision: metadata.afterRevision,
+    appliedAt: entry.createdAt,
+    ...(entry.revertedAt ? { revertedAt: entry.revertedAt } : {})
+  };
+}
+
+function latestUnrevertedRepairPatchEntry(store: ProjectStore): PatchHistoryEntry | null {
+  return store.listPatchHistory().find((entry) => Boolean(repairHistoryEntryFromPatch(entry)) && !entry.revertedAt) || null;
+}
+
+function patchDescriptionForRepair(preview: RepairPreviewDto): ProjectPatchDescription {
+  return {
+    text: preview.expectedAfterSummary,
+    sceneCount: preview.actionId === "create-target-scene" ? 1 : 0,
+    choiceCount: 0,
+    assetCount: 0,
+    generationJobCount: 0,
+    operations: preview.diff.map((entry) => `${entry.op} ${entry.path}: ${entry.humanLabel}`)
+  };
+}
+
 function attachProjectFailureContext(
   error: unknown,
   input: {
@@ -942,16 +1664,588 @@ function attachProjectFailureContext(
   return error;
 }
 
+function stringField(record: JsonRecord, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberField(record: JsonRecord, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringArrayField(record: JsonRecord, key: string): string[] | undefined {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
+  return items.length ? items : [];
+}
+
+function projectRevisionField(record: JsonRecord, key: string): ProjectRevisionDto | undefined {
+  const value = asRecord(record[key]);
+  return typeof value.revision === "string" && typeof value.hashAlgorithm === "string" && typeof value.createdAt === "string"
+    ? value as unknown as ProjectRevisionDto
+    : undefined;
+}
+
+function isUXDecisionEventName(value: unknown): value is UXDecisionEventName {
+  return typeof value === "string" && (UX_DECISION_EVENT_NAMES as readonly string[]).includes(value);
+}
+
+function actionEventNameFor(action: MakerActionId, body: JsonRecord): UXDecisionEventName | null {
+  if (action === "recordUXDecisionEvent") {
+    const event = asRecord(body.event || body.uxDecisionEvent);
+    return isUXDecisionEventName(event.eventName) ? event.eventName : null;
+  }
+  if (action === "replayFixedPrompt" || action === "expandEvent" || action === "approveEvent") {
+    return "generated";
+  }
+  if (action === "previewRepair") {
+    return "repair_action_used";
+  }
+  if (action === "applyRepair") {
+    return "repaired";
+  }
+  if (action === "undoRepair" || action === "undoPatch") {
+    return "undo_used";
+  }
+  if (action === "previewProject") {
+    return "previewed";
+  }
+  if (action === "validateProject" && asRecord(body.validation).ok === false) {
+    return "validation_failed";
+  }
+  return null;
+}
+
+function actionEventContextRecord(body: JsonRecord): JsonRecord {
+  return {
+    ...asRecord(body.request),
+    ...asRecord(body.fixedPrompt),
+    ...asRecord(body.repairPreview),
+    ...asRecord(body.repairHistoryEntry),
+    ...asRecord(body.event),
+    ...asRecord(body.uxDecisionEvent),
+    ...body
+  };
+}
+
+function createProjectActionEvent(
+  action: MakerActionId,
+  body: JsonRecord,
+  input: {
+    correlationId: string;
+    requestId: string;
+    project?: VnMakerProject;
+    projectRevision?: ProjectRevisionDto;
+  }
+): ProjectActionEventDto | undefined {
+  const eventName = actionEventNameFor(action, body);
+  if (!eventName) {
+    return undefined;
+  }
+  const record = actionEventContextRecord(body);
+  return {
+    eventName,
+    timestamp: new Date().toISOString(),
+    correlationId: input.correlationId,
+    requestId: input.requestId,
+    action,
+    ...(stringField(record, "eventLogId") ? { eventLogId: stringField(record, "eventLogId") } : {}),
+    ...(input.project?.id || stringField(record, "projectId") ? { projectId: input.project?.id || stringField(record, "projectId") } : {}),
+    ...(stringField(record, "routeId") ? { routeId: stringField(record, "routeId") } : {}),
+    ...(stringField(record, "sceneId") ? { sceneId: stringField(record, "sceneId") } : {}),
+    ...(stringField(record, "promptId") ? { promptId: stringField(record, "promptId") } : {}),
+    ...(stringField(record, "issueCode") ? { issueCode: stringField(record, "issueCode") } : {}),
+    ...(stringField(record, "repairActionId") || stringField(record, "actionId") ? { repairActionId: stringField(record, "repairActionId") || stringField(record, "actionId") } : {}),
+    outcome: body.ok === false ? "failed" : stringField(record, "outcome") || "success",
+    ...(input.projectRevision ? { projectRevision: input.projectRevision } : {})
+  };
+}
+
+function uxDecisionHelpChannel(value: unknown): UXDecisionHelpChannel | undefined {
+  return typeof value === "string" && (UX_DECISION_HELP_CHANNELS as readonly string[]).includes(value)
+    ? value as UXDecisionHelpChannel
+    : undefined;
+}
+
+function uxDecisionEventNameFrom(input: JsonRecord): UXDecisionEventName {
+  const value = input.eventName;
+  if (!isUXDecisionEventName(value)) {
+    throw new InputValidationError("지원하지 않는 UX decision eventName입니다.", [{
+      severity: "error",
+      path: "eventName",
+      message: `필수 eventName 중 하나여야 합니다: ${UX_DECISION_EVENT_NAMES.join(", ")}`
+    }]);
+  }
+  return value;
+}
+
+function uxDecisionRecordFrom(input: unknown): JsonRecord {
+  const record = asRecord(input);
+  return {
+    ...asRecord(record.event),
+    ...record
+  };
+}
+
+function createUXDecisionEvent(
+  input: unknown,
+  project: VnMakerProject,
+  projectRevision: ProjectRevisionDto
+): UXDecisionEventDto {
+  const record = uxDecisionRecordFrom(input);
+  const sessionId = stringField(record, "sessionId");
+  if (!sessionId) {
+    throw new InputValidationError("UX decision event sessionId 입력이 필요합니다.", [{
+      severity: "error",
+      path: "sessionId",
+      message: "비어 있을 수 없습니다."
+    }]);
+  }
+  const timestamp = stringField(record, "timestamp") || new Date().toISOString();
+  const eventLogId = stringField(record, "eventLogId") || createUXDecisionEventLogId(project.id, sessionId);
+  return {
+    eventLogId,
+    eventId: stringField(record, "eventId") || createUXDecisionEventId(),
+    eventName: uxDecisionEventNameFrom(record),
+    timestamp,
+    sessionId,
+    ...(stringField(record, "participantIdHash") ? { participantIdHash: stringField(record, "participantIdHash") } : {}),
+    ...(stringField(record, "participantType") ? { participantType: stringField(record, "participantType") } : {}),
+    ...(stringField(record, "taskId") ? { taskId: stringField(record, "taskId") } : {}),
+    ...(stringField(record, "promptId") ? { promptId: stringField(record, "promptId") } : {}),
+    ...(stringField(record, "inputMode") ? { inputMode: stringField(record, "inputMode") } : {}),
+    projectId: stringField(record, "projectId") || project.id,
+    ...(stringField(record, "routeId") ? { routeId: stringField(record, "routeId") } : {}),
+    ...(stringField(record, "sceneId") ? { sceneId: stringField(record, "sceneId") } : {}),
+    ...(stringField(record, "issueCode") ? { issueCode: stringField(record, "issueCode") } : {}),
+    ...(stringArrayField(record, "issueCodesBefore") ? { issueCodesBefore: stringArrayField(record, "issueCodesBefore") } : {}),
+    ...(stringArrayField(record, "issueCodesAfter") ? { issueCodesAfter: stringArrayField(record, "issueCodesAfter") } : {}),
+    ...(stringField(record, "repairActionId") ? { repairActionId: stringField(record, "repairActionId") } : {}),
+    ...(uxDecisionHelpChannel(record.helpChannel) ? { helpChannel: uxDecisionHelpChannel(record.helpChannel) } : {}),
+    ...(numberField(record, "hintLevel") !== undefined ? { hintLevel: numberField(record, "hintLevel") } : {}),
+    ...(numberField(record, "elapsedMs") !== undefined ? { elapsedMs: numberField(record, "elapsedMs") } : {}),
+    ...(numberField(record, "stallDurationMs") !== undefined ? { stallDurationMs: numberField(record, "stallDurationMs") } : {}),
+    ...(stringField(record, "outcome") ? { outcome: stringField(record, "outcome") } : {}),
+    projectRevision,
+    ...(projectRevisionField(record, "revisionBefore") ? { revisionBefore: projectRevisionField(record, "revisionBefore") } : {}),
+    ...(projectRevisionField(record, "revisionAfter") ? { revisionAfter: projectRevisionField(record, "revisionAfter") } : {}),
+    ...(asRecord(record.preflightResult) === record.preflightResult ? { preflightResult: record.preflightResult as UXDecisionEventDto["preflightResult"] } : {}),
+    ...(stringField(record, "correlationId") ? { correlationId: stringField(record, "correlationId") } : {}),
+    ...(stringField(record, "action") ? { action: stringField(record, "action") } : {}),
+    ...(stringField(record, "resultId") ? { resultId: stringField(record, "resultId") } : {}),
+    ...(asRecord(record.metadata) === record.metadata ? { metadata: record.metadata as Record<string, unknown> } : {})
+  };
+}
+
+function booleanField(record: JsonRecord, key: string): boolean | undefined {
+  return typeof record[key] === "boolean" ? record[key] as boolean : undefined;
+}
+
+function phase0StringList(input: unknown): string[] {
+  if (typeof input === "string" && input.trim()) {
+    return [input.trim()];
+  }
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
+}
+
+function phase0InputMode(value: unknown): Phase0TaskInputMode {
+  return typeof value === "string" && value.trim() ? value.trim() : "manual";
+}
+
+function phase0ParticipantResultFrom(value: unknown): Phase0ParticipantResultDto | null {
+  const record = asRecord(value);
+  const sessionId = stringField(record, "sessionId");
+  const participantIdHash = stringField(record, "participantIdHash");
+  if (!sessionId || !participantIdHash) {
+    return null;
+  }
+  return {
+    participantIdHash,
+    sessionId,
+    inputMode: phase0InputMode(record.inputMode),
+    ...(stringField(record, "taskId") ? { taskId: stringField(record, "taskId") } : {}),
+    ...(stringField(record, "promptId") ? { promptId: stringField(record, "promptId") } : {}),
+    ...(numberField(record, "vnToolCompletedCount") !== undefined ? { vnToolCompletedCount: numberField(record, "vnToolCompletedCount") } : {}),
+    ...(booleanField(record, "professionalDeveloper") !== undefined ? { professionalDeveloper: booleanField(record, "professionalDeveloper") } : {}),
+    ...(booleanField(record, "regularScriptingWork") !== undefined ? { regularScriptingWork: booleanField(record, "regularScriptingWork") } : {}),
+    ...(booleanField(record, "storyCreatorLastYear") !== undefined ? { storyCreatorLastYear: booleanField(record, "storyCreatorLastYear") } : {}),
+    ...(booleanField(record, "noviceNonDevStoryCreator") !== undefined ? { noviceNonDevStoryCreator: booleanField(record, "noviceNonDevStoryCreator") } : {}),
+    ...(booleanField(record, "completed") !== undefined ? { completed: booleanField(record, "completed") } : {}),
+    ...(booleanField(record, "reachedValidPreview") !== undefined ? { reachedValidPreview: booleanField(record, "reachedValidPreview") } : {}),
+    ...(booleanField(record, "usedModeratorHint") !== undefined ? { usedModeratorHint: booleanField(record, "usedModeratorHint") } : {}),
+    ...(booleanField(record, "usedStaticTutorial") !== undefined ? { usedStaticTutorial: booleanField(record, "usedStaticTutorial") } : {}),
+    ...(booleanField(record, "abandoned") !== undefined ? { abandoned: booleanField(record, "abandoned") } : {}),
+    ...(numberField(record, "blockingErrorCount") !== undefined ? { blockingErrorCount: numberField(record, "blockingErrorCount") } : {}),
+    ...(numberField(record, "completionMs") !== undefined ? { completionMs: numberField(record, "completionMs") } : {}),
+    ...(booleanField(record, "wrongMentalModel") !== undefined ? { wrongMentalModel: booleanField(record, "wrongMentalModel") } : {}),
+    ...(booleanField(record, "dataLossAnxiety") !== undefined ? { dataLossAnxiety: booleanField(record, "dataLossAnxiety") } : {}),
+    ...(stringField(record, "criticalIncidentCause") ? { criticalIncidentCause: stringField(record, "criticalIncidentCause") } : {}),
+    ...(booleanField(record, "actualPreview") !== undefined ? { actualPreview: booleanField(record, "actualPreview") } : {}),
+    ...(booleanField(record, "mockPreview") !== undefined ? { mockPreview: booleanField(record, "mockPreview") } : {}),
+    ...(stringField(record, "notes") ? { notes: stringField(record, "notes") } : {})
+  };
+}
+
+function phase0ParticipantResultsFrom(input: unknown): Phase0ParticipantResultDto[] {
+  const value = asRecord(input).participantResults;
+  return Array.isArray(value)
+    ? value.map(phase0ParticipantResultFrom).filter((item): item is Phase0ParticipantResultDto => Boolean(item))
+    : [];
+}
+
+function phase0ParticipantIsNoviceNonDevStoryCreator(participant?: Phase0ParticipantResultDto, events: UXDecisionEventDto[] = []): boolean {
+  if (participant?.noviceNonDevStoryCreator !== undefined) {
+    return participant.noviceNonDevStoryCreator;
+  }
+  if (participant) {
+    return (participant.vnToolCompletedCount ?? Number.POSITIVE_INFINITY) <= 1
+      && participant.professionalDeveloper !== true
+      && participant.regularScriptingWork !== true
+      && participant.storyCreatorLastYear === true;
+  }
+  return events.some((event) => event.participantType === "novice_non_dev_story_creator");
+}
+
+function latestPhase0Preflight(events: UXDecisionEventDto[]): UXDecisionEventDto["preflightResult"] | undefined {
+  return [...events].reverse().find((event) => event.preflightResult)?.preflightResult;
+}
+
+function phase0EventNames(events: UXDecisionEventDto[]): UXDecisionEventName[] {
+  return [...new Set(events.map((event) => event.eventName))];
+}
+
+function phase0MaxElapsedMs(events: UXDecisionEventDto[]): number | undefined {
+  const elapsedValues = events.map((event) => event.elapsedMs).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return elapsedValues.length ? Math.max(...elapsedValues) : undefined;
+}
+
+function phase0GuidedRepairEvidence(events: UXDecisionEventDto[]): Phase0SessionEvidenceDto["guidedRepairEvidence"] {
+  const repairUsed = events.find((event) => event.eventName === "repair_action_used");
+  const repaired = [...events].reverse().find((event) => event.eventName === "repaired");
+  const preflightResult = latestPhase0Preflight(events);
+  const issueCode = repaired?.issueCode || repairUsed?.issueCode;
+  const repairActionId = repaired?.repairActionId || repairUsed?.repairActionId;
+  const revisionBefore = repaired?.revisionBefore;
+  const revisionAfter = repaired?.revisionAfter;
+  const eventLogId = repaired?.eventLogId || repairUsed?.eventLogId || events[0]?.eventLogId;
+  const ready = Boolean(issueCode && repairActionId && revisionBefore && revisionAfter && preflightResult && eventLogId);
+  return {
+    ready,
+    ...(issueCode ? { issueCode } : {}),
+    ...(repairActionId ? { repairActionId } : {}),
+    ...(revisionBefore ? { revisionBefore } : {}),
+    ...(revisionAfter ? { revisionAfter } : {}),
+    ...(preflightResult ? { preflightResult } : {}),
+    ...(eventLogId ? { eventLogId } : {})
+  };
+}
+
+function phase0SessionEvidence(
+  sessionId: string,
+  events: UXDecisionEventDto[],
+  participant?: Phase0ParticipantResultDto
+): Phase0SessionEvidenceDto {
+  const orderedEvents = [...events].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  const eventNames = phase0EventNames(orderedEvents);
+  const latestPreflight = latestPhase0Preflight(orderedEvents);
+  const previewPreflightCanRun = latestPreflight?.canRun === true;
+  const abandoned = participant?.abandoned ?? eventNames.includes("abandoned");
+  const reachedValidPreview = participant?.reachedValidPreview ?? orderedEvents.some((event) =>
+    event.eventName === "previewed" && event.outcome === "completed" && event.preflightResult?.canRun === true
+  );
+  const completed = participant?.completed ?? (reachedValidPreview && !abandoned);
+  const usedModeratorHint = participant?.usedModeratorHint ?? orderedEvents.some((event) => event.eventName === "hint_given" || event.helpChannel === "moderator_hint");
+  const usedStaticTutorial = participant?.usedStaticTutorial ?? orderedEvents.some((event) => event.helpChannel === "static_tutorial");
+  const stall90s = orderedEvents.some((event) => typeof event.stallDurationMs === "number" && event.stallDurationMs >= 90000);
+  const blockingErrorCount = participant?.blockingErrorCount
+    ?? orderedEvents.filter((event) => event.eventName === "validation_failed" || event.outcome === "blocked").length;
+  const completionMs = participant?.completionMs ?? phase0MaxElapsedMs(orderedEvents);
+  const inputMode = phase0InputMode(participant?.inputMode || orderedEvents.find((event) => event.inputMode)?.inputMode);
+  const mockPreview = participant?.mockPreview === true
+    || orderedEvents.some((event) => ["mock", "fake"].includes(String(asRecord(event.metadata).previewKind || "")));
+  const actualPreview = participant?.actualPreview ?? (previewPreflightCanRun && !mockPreview);
+  const guidedRepairEvidence = phase0GuidedRepairEvidence(orderedEvents);
+  return {
+    sessionId,
+    ...(orderedEvents[0]?.eventLogId ? { eventLogId: orderedEvents[0].eventLogId } : {}),
+    ...(participant?.participantIdHash || orderedEvents[0]?.participantIdHash ? { participantIdHash: participant?.participantIdHash || orderedEvents[0]?.participantIdHash } : {}),
+    noviceNonDevStoryCreator: phase0ParticipantIsNoviceNonDevStoryCreator(participant, orderedEvents),
+    inputMode,
+    ...(participant?.taskId || orderedEvents.find((event) => event.taskId)?.taskId ? { taskId: participant?.taskId || orderedEvents.find((event) => event.taskId)?.taskId } : {}),
+    ...(participant?.promptId || orderedEvents.find((event) => event.promptId)?.promptId ? { promptId: participant?.promptId || orderedEvents.find((event) => event.promptId)?.promptId } : {}),
+    eventNames,
+    completed,
+    reachedValidPreview,
+    usedModeratorHint,
+    usedStaticTutorial,
+    abandoned,
+    stall90s,
+    blockingErrorCount,
+    ...(completionMs !== undefined ? { completionMs } : {}),
+    wrongMentalModel: participant?.wrongMentalModel === true,
+    dataLossAnxiety: participant?.dataLossAnxiety === true,
+    ...(participant?.criticalIncidentCause ? { criticalIncidentCause: participant.criticalIncidentCause } : {}),
+    actualPreview,
+    mockPreview,
+    previewPreflightCanRun,
+    conditionPreviewStatus: "not_evaluated",
+    guidedRepairEvidence
+  };
+}
+
+function phase0MedianMinutes(values: number[]): number | null {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const ms = sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+  return Math.round((ms / 60000) * 10) / 10;
+}
+
+function phase0Rate(numerator: number, denominator: number): number {
+  return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 1000 : 0;
+}
+
+function phase0SameCauseCriticalIncidentCount(sessions: Phase0SessionEvidenceDto[]): number {
+  const counts = new Map<string, number>();
+  sessions.forEach((session) => {
+    if (session.criticalIncidentCause) {
+      counts.set(session.criticalIncidentCause, (counts.get(session.criticalIncidentCause) || 0) + 1);
+    }
+  });
+  return Math.max(0, ...counts.values());
+}
+
+function phase0Metrics(inputMode: Phase0TaskInputMode, sessions: Phase0SessionEvidenceDto[]): Phase0MetricDto {
+  const completedCount = sessions.filter((session) => session.completed).length;
+  const guidedRepairSessions = sessions.filter((session) => session.eventNames.includes("repair_action_used") || session.eventNames.includes("repaired"));
+  const guidedRepairReadyCount = guidedRepairSessions.filter((session) => session.guidedRepairEvidence?.ready).length;
+  const noviceSessions = sessions.filter((session) => session.noviceNonDevStoryCreator);
+  const validPreviewWithoutHintCount = noviceSessions.filter((session) => session.reachedValidPreview && !session.usedModeratorHint).length;
+  const completionValues = sessions.map((session) => session.completionMs).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const blockingErrorTotal = sessions.reduce((sum, session) => sum + session.blockingErrorCount, 0);
+  const helpSessions = sessions.filter((session) => session.usedStaticTutorial || session.usedModeratorHint);
+  const helpRecoveredCount = helpSessions.filter((session) => session.completed || session.reachedValidPreview).length;
+  return {
+    inputMode,
+    sessionCount: sessions.length,
+    completedCount,
+    completionRate: phase0Rate(completedCount, sessions.length),
+    guidedRepairCompletionRate: phase0Rate(guidedRepairReadyCount, guidedRepairSessions.length || sessions.length),
+    noviceNonDevStoryCreatorCount: noviceSessions.length,
+    majorityValidPreviewWithoutHint: noviceSessions.length > 0 && validPreviewWithoutHintCount > noviceSessions.length / 2,
+    medianCompletionMinutes: phase0MedianMinutes(completionValues),
+    averageBlockingErrors: sessions.length ? Math.round((blockingErrorTotal / sessions.length) * 10) / 10 : 0,
+    helpRecoveryRate: helpSessions.length ? phase0Rate(helpRecoveredCount, helpSessions.length) : 1,
+    sameCauseCriticalIncidentCount: phase0SameCauseCriticalIncidentCount(sessions),
+    fakeOrMockPreviewCount: sessions.filter((session) => session.mockPreview).length
+  };
+}
+
+function phase0Denominator(sessions: Phase0SessionEvidenceDto[]): Phase0DenominatorDto {
+  return {
+    totalSessions: sessions.length,
+    failedSessions: sessions.filter((session) => !session.completed).length,
+    abandonedSessions: sessions.filter((session) => session.abandoned).length,
+    stall90sSessions: sessions.filter((session) => session.stall90s).length,
+    staticTutorialRecoverySessions: sessions.filter((session) => session.usedStaticTutorial && (session.completed || session.reachedValidPreview)).length,
+    moderatorHintSessions: sessions.filter((session) => session.usedModeratorHint).length,
+    includedFailedAbandonedAndHelpRecovery: true
+  };
+}
+
+function phase0Package(
+  id: string,
+  label: string,
+  status: Phase0WorkPackageStatus,
+  evidence: string[],
+  missing: string[]
+): Phase0WorkPackageStatusDto {
+  return {
+    id,
+    label,
+    status,
+    evidence,
+    missing
+  };
+}
+
+function phase0WorkPackageStatus(input: {
+  sessions: Phase0SessionEvidenceDto[];
+  events: UXDecisionEventDto[];
+  generationLogs: GenerationResultLogDto[];
+  participantResults: Phase0ParticipantResultDto[];
+  previewPreflight: PreviewPreflightDto;
+}): Phase0WorkPackageStatusDto[] {
+  const eventNames = new Set(input.events.map((event) => event.eventName));
+  const fixedSessions = input.sessions.filter((session) => session.inputMode === "fixed_prompt");
+  const freeSessions = input.sessions.filter((session) => session.inputMode === "free_input");
+  const guidedRepairReady = input.sessions.some((session) => session.guidedRepairEvidence?.ready);
+  const previewCanRun = input.sessions.some((session) => session.previewPreflightCanRun) || input.previewPreflight.canRun === true;
+  const noviceCount = input.sessions.filter((session) => session.noviceNonDevStoryCreator).length;
+  const packagesById: Record<string, Phase0WorkPackageStatusDto> = {
+    "alpha-input": phase0Package("alpha-input", "Alpha input", input.sessions.length ? "Ready" : "Missing", input.sessions.length ? ["started event or participant session present"] : [], input.sessions.length ? [] : ["started event"]),
+    "generation-summary": phase0Package("generation-summary", "generation summary", input.generationLogs.length || eventNames.has("generated") ? "Ready" : eventNames.has("recipe_used") ? "Partial" : "Missing", input.generationLogs.length ? [`generationResultLogs ${input.generationLogs.length}`] : eventNames.has("generated") ? ["generated event"] : [], input.generationLogs.length || eventNames.has("generated") ? [] : ["generation result log"]),
+    "studio-guided-recipe": phase0Package("studio-guided-recipe", "Studio guided recipe", eventNames.has("recipe_used") && fixedSessions.length ? "Ready" : eventNames.has("recipe_used") ? "Partial" : "Missing", eventNames.has("recipe_used") ? ["recipe_used fixed prompt event"] : [], eventNames.has("recipe_used") && fixedSessions.length ? [] : ["fixed prompt recipe event"]),
+    "problems-repair": phase0Package("problems-repair", "Problems repair", guidedRepairReady ? "Ready" : eventNames.has("repair_action_used") ? "Partial" : "Missing", guidedRepairReady ? ["issueCode, repairActionId, before/after revision, preflightResult, eventLogId"] : eventNames.has("repair_action_used") ? ["repair_action_used event"] : [], guidedRepairReady ? [] : ["complete guided repair evidence"]),
+    "preview-preflight": phase0Package("preview-preflight", "Preview preflight", previewCanRun ? "Ready" : eventNames.has("previewed") ? "Partial" : "Missing", previewCanRun ? ["preflightResult.canRun actual preview evidence"] : eventNames.has("previewed") ? ["previewed event"] : [], previewCanRun ? [] : ["actual preview preflight canRun"]),
+    "event-log-export": phase0Package("event-log-export", "Event log export", input.events.some((event) => event.eventLogId) ? "Ready" : input.events.length ? "Partial" : "Missing", input.events.some((event) => event.eventLogId) ? ["eventLogId present in exported UX events"] : [], input.events.some((event) => event.eventLogId) ? [] : ["eventLogId"]),
+    "participant-protocol": phase0Package("participant-protocol", "participant screening protocol", noviceCount >= 6 ? "Ready" : input.participantResults.length ? "Partial" : "Missing", input.participantResults.length ? [`novice non-dev story creators ${noviceCount}`] : [], noviceCount >= 6 ? [] : ["validation sample novice non-dev story creators >= 6"]),
+    "fixed-free-separation": phase0Package("fixed-free-separation", "fixed/free input separation", fixedSessions.length && freeSessions.length ? "Ready" : fixedSessions.length || freeSessions.length ? "Partial" : "Missing", [`fixed ${fixedSessions.length}`, `free ${freeSessions.length}`, "combined totals disabled"], fixedSessions.length && freeSessions.length ? [] : ["fixed and free input evidence"]),
+    "decision-thresholds": phase0Package("decision-thresholds", "Go/Iterate/Stop threshold report", "Ready", ["Go, Iterate, Stop/Rethink criteria calculated"], [])
+  };
+  return PHASE0_WORK_PACKAGES.map((item) => packagesById[item.id]);
+}
+
+export function phase0DecisionForMetrics(input: {
+  workPackages: Phase0WorkPackageStatusDto[];
+  fixedInputMetrics: Phase0MetricDto;
+  sessions: Phase0SessionEvidenceDto[];
+  mockActualSeparation: Phase0DecisionReportDto["mockActualSeparation"];
+}): { decision: Phase0Decision; maximumDecisionDueToMissing?: Phase0Decision; decisionReasons: string[] } {
+  const reasons: string[] = [];
+  const missingOrMockReplacement = input.workPackages.some((item) => item.status === "Missing")
+    || input.mockActualSeparation.fakeOrMockPreviewCount > 0
+    || input.mockActualSeparation.mockGenerationResultCount > 0
+    || input.mockActualSeparation.unavailableGenerationResultCount > 0;
+  const fixed = input.fixedInputMetrics;
+  const repeatedCriticalIncident = Math.max(fixed.sameCauseCriticalIncidentCount, phase0SameCauseCriticalIncidentCount(input.sessions)) >= 2;
+  const repeatedDataLossAnxiety = input.sessions.filter((session) => session.dataLossAnxiety).length >= 2;
+  const completionRate = fixed.sessionCount ? fixed.completionRate : phase0Metrics("all", input.sessions).completionRate;
+  if (completionRate < 0.5 && input.sessions.length > 0) {
+    reasons.push("completion rate below 50%");
+    return { decision: "Stop/Rethink", decisionReasons: reasons };
+  }
+  if (repeatedCriticalIncident || repeatedDataLossAnxiety) {
+    reasons.push(repeatedDataLossAnxiety ? "repeated data-loss anxiety" : "same-cause critical incident repeated");
+    return { decision: "Stop/Rethink", decisionReasons: reasons };
+  }
+  if (missingOrMockReplacement) {
+    reasons.push("Missing work package or fake/mock replacement caps Phase 0 at Iterate");
+  }
+  const goCriteria = [
+    fixed.guidedRepairCompletionRate >= 0.7,
+    fixed.noviceNonDevStoryCreatorCount >= 6,
+    fixed.majorityValidPreviewWithoutHint,
+    fixed.medianCompletionMinutes !== null && fixed.medianCompletionMinutes <= 20,
+    fixed.averageBlockingErrors <= 2,
+    fixed.helpRecoveryRate >= 0.8,
+    input.mockActualSeparation.fakeOrMockPreviewCount === 0,
+    fixed.sameCauseCriticalIncidentCount < 2
+  ];
+  if (!missingOrMockReplacement && goCriteria.every(Boolean)) {
+    reasons.push("all Go criteria passed");
+    return { decision: "Go", decisionReasons: reasons };
+  }
+  if (completionRate >= 0.5 && completionRate < 0.7) {
+    reasons.push("completion rate between 50% and 69%");
+  }
+  if (!goCriteria.every(Boolean)) {
+    reasons.push("one or more Go criteria require iteration");
+  }
+  return {
+    decision: "Iterate",
+    ...(missingOrMockReplacement ? { maximumDecisionDueToMissing: "Iterate" as const } : {}),
+    decisionReasons: reasons
+  };
+}
+
+function createPhase0DecisionReportDto(input: {
+  project: VnMakerProject;
+  projectRevision: ProjectRevisionDto;
+  previewPreflight: PreviewPreflightDto;
+  events: UXDecisionEventDto[];
+  generationLogs: GenerationResultLogDto[];
+  participantResults: Phase0ParticipantResultDto[];
+  generatedAt: string;
+}): Phase0DecisionReportDto {
+  const eventsBySession = new Map<string, UXDecisionEventDto[]>();
+  input.events.forEach((event) => {
+    const list = eventsBySession.get(event.sessionId) || [];
+    list.push(event);
+    eventsBySession.set(event.sessionId, list);
+  });
+  const participantsBySession = new Map(input.participantResults.map((participant) => [participant.sessionId, participant]));
+  const sessionIds = new Set<string>([
+    ...eventsBySession.keys(),
+    ...participantsBySession.keys()
+  ]);
+  const sessions = [...sessionIds]
+    .map((sessionId) => phase0SessionEvidence(sessionId, eventsBySession.get(sessionId) || [], participantsBySession.get(sessionId)))
+    .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+  const fixedSessions = sessions.filter((session) => session.inputMode === "fixed_prompt");
+  const freeSessions = sessions.filter((session) => session.inputMode === "free_input");
+  const workPackages = phase0WorkPackageStatus({
+    sessions,
+    events: input.events,
+    generationLogs: input.generationLogs,
+    participantResults: input.participantResults,
+    previewPreflight: input.previewPreflight
+  });
+  const fixedInputMetrics = phase0Metrics("fixed_prompt", fixedSessions);
+  const freeInputFindings = phase0Metrics("free_input", freeSessions);
+  const mockActualSeparation: Phase0DecisionReportDto["mockActualSeparation"] = {
+    combinedTotalsUsed: false,
+    actualPreviewCount: sessions.filter((session) => session.actualPreview).length,
+    fakeOrMockPreviewCount: sessions.filter((session) => session.mockPreview).length,
+    mockGenerationResultCount: input.generationLogs.filter((log) => log.sourceType === "mock").length,
+    unavailableGenerationResultCount: input.generationLogs.filter((log) => log.sourceType === "unavailable").length
+  };
+  const decision = phase0DecisionForMetrics({
+    workPackages,
+    fixedInputMetrics,
+    sessions,
+    mockActualSeparation
+  });
+  return {
+    reportId: `phase0-report-${input.project.id}-${input.generatedAt}`.replace(/[^A-Za-z0-9._:-]/g, "-"),
+    projectId: input.project.id,
+    projectRevision: input.projectRevision,
+    generatedAt: input.generatedAt,
+    decision: decision.decision,
+    ...(decision.maximumDecisionDueToMissing ? { maximumDecisionDueToMissing: decision.maximumDecisionDueToMissing } : {}),
+    decisionReasons: decision.decisionReasons,
+    workPackages,
+    sessions,
+    denominator: phase0Denominator(sessions),
+    fixedInputMetrics,
+    freeInputFindings,
+    conditionRuntime: {
+      supportFlag: input.previewPreflight.conditionRuntimeSupport.supportFlag,
+      supported: input.previewPreflight.conditionRuntimeSupport.supported,
+      strictPreviewStatus: input.previewPreflight.conditionRuntimeSupport.strictPreviewStatus,
+      conditionPreviewCountsAsStrictSuccess: false,
+      actualPreviewCanRun: input.previewPreflight.canRun === true || sessions.some((session) => session.previewPreflightCanRun),
+      message: input.previewPreflight.conditionRuntimeSupport.message
+    },
+    mockActualSeparation
+  };
+}
+
 function withActionState<T extends JsonRecord>(
   action: MakerActionId,
   body: T,
-  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] } } = {}
+  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] }; projectRevision?: ProjectRevisionDto } = {}
 ): T & {
   ok: boolean;
   requestId: string;
+  correlationId: string;
   action: MakerActionId;
+  actionEvent?: ProjectActionEventDto;
   baseProjectHash?: string;
-  projectRevision?: string;
+  projectRevision?: ProjectRevisionDto;
+  previewPreflight?: PreviewPreflightDto;
+  repairActions?: RepairActionDto[];
   workflowSummary: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
   exportPlan?: ProjectExportPlanDto;
@@ -959,26 +2253,64 @@ function withActionState<T extends JsonRecord>(
   const project = options.project || (asRecord(body).project as VnMakerProject | undefined);
   const validation = options.validation || (asRecord(body).validation as { ok?: boolean; issues?: ValidationIssue[] } | undefined);
   const explicitPreviewReadiness = asRecord(body).previewReadiness as ProjectPreviewReadinessDto | undefined;
+  const explicitPreviewPreflight = asRecord(body).previewPreflight as PreviewPreflightDto | undefined;
+  const explicitRepairActions = asRecord(body).repairActions as RepairActionDto[] | undefined;
   const explicitExportPlan = asRecord(body).exportPlan as ProjectExportPlanDto | undefined;
+  const explicitProjectRevision = options.projectRevision || (asRecord(body).projectRevision as ProjectRevisionDto | undefined);
   const stateValidation = project ? validationForProjectState(project, validation) : validation;
   const projectHash = project ? hashProjectSnapshot(project) : undefined;
+  const projectRevision = explicitProjectRevision || (project ? createProjectRevision(project, new Date().toISOString()) : undefined);
   const previewReadiness = project
     ? explicitPreviewReadiness || previewReadinessFor(project, stateValidation || { ok: true, issues: [] })
     : explicitPreviewReadiness;
+  const previewPreflight = project && projectRevision
+    ? explicitPreviewPreflight || createPreviewPreflight(project, stateValidation || { ok: true, issues: [] }, projectRevision)
+    : explicitPreviewPreflight;
+  const repairActions = project
+    ? explicitRepairActions || repairActionsForValidation(project, stateValidation || { ok: true, issues: [] }, previewPreflight)
+    : explicitRepairActions;
   const exportPlan = project
     ? explicitExportPlan || exportPlanFor(project, stateValidation || { ok: true, issues: [] })
     : explicitExportPlan;
+  const requestId = createRequestId();
+  const correlationId = createCorrelationId(action);
+  const actionEvent = createProjectActionEvent(action, body, {
+    correlationId,
+    requestId,
+    project,
+    projectRevision
+  });
   return {
     ...body,
     ok: body.ok !== false,
-    requestId: createRequestId(),
+    requestId,
+    correlationId,
     action,
+    ...(actionEvent ? { actionEvent } : {}),
     baseProjectHash: projectHash,
-    projectRevision: projectHash,
+    projectRevision,
     workflowSummary: createWorkflowSummary(project, stateValidation),
     ...(previewReadiness ? { previewReadiness } : {}),
+    ...(previewPreflight ? { previewPreflight } : {}),
+    ...(repairActions ? { repairActions } : {}),
     ...(exportPlan ? { exportPlan } : {})
   };
+}
+
+function withStoreActionState<T extends JsonRecord>(
+  action: MakerActionId,
+  store: ProjectStore,
+  body: T,
+  options: { project?: VnMakerProject; validation?: { ok?: boolean; issues?: ValidationIssue[] }; projectRevision?: ProjectRevisionDto } = {}
+) {
+  const projectRevision = store.getProjectRevision();
+  return withActionState(action, {
+    ...body,
+    projectRevision
+  }, {
+    ...options,
+    projectRevision
+  });
 }
 
 function backgroundPolicy(project: VnMakerProject): BackgroundPolicyDto {
@@ -1013,6 +2345,7 @@ function failureCodeFromError(error: unknown): ProjectActionFailureCode {
     || code === "RECENT_PROJECT_INDEX_MISS"
     || code === "PROJECT_DIRECTORY_MISSING"
     || code === "PROJECT_ID_MISMATCH"
+    || code === "STALE_PROJECT_REVISION"
     || code === "PROJECT_REVISION_CONFLICT"
     || code === "HEROINE_REQUIRED"
     || code === "HEROINE_REPLACE_BLOCKED"
@@ -1072,6 +2405,8 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
   const code = failureCodeFromError(error);
   const contract = projectFailureContractForCode(code);
   const message = projectFailureMessageFromError(error, contract);
+  const requestId = createRequestId();
+  const correlationId = action ? createCorrelationId(action) : undefined;
   const expectedProjectId = typeof errorRecord.expectedProjectId === "string" ? errorRecord.expectedProjectId : undefined;
   const issues = error instanceof InputValidationError
     ? error.issues
@@ -1087,6 +2422,14 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
   const exportPlan = errorRecord.exportPlan && typeof errorRecord.exportPlan === "object"
     ? errorRecord.exportPlan as ProjectExportPlanDto
     : undefined;
+  const actualRevision = errorRecord.actualRevision && typeof errorRecord.actualRevision === "object" ? errorRecord.actualRevision as ProjectRevisionDto : undefined;
+  const actionEvent = action && correlationId
+    ? createProjectActionEvent(action, {
+        ok: false,
+        ...errorRecord,
+        validation: errorRecord.validation || (issues ? { ok: false, issues } : undefined)
+      }, { correlationId, requestId, projectRevision: actualRevision })
+    : undefined;
   return {
     ok: false,
     action,
@@ -1094,14 +2437,18 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     message,
     error: message,
     nextAction: typeof errorRecord.nextAction === "string" && errorRecord.nextAction.trim() ? errorRecord.nextAction.trim() : contract.nextAction,
-    requestId: createRequestId(),
+    requestId,
+    ...(correlationId ? { correlationId } : {}),
     projectId: typeof errorRecord.projectId === "string" ? errorRecord.projectId : expectedProjectId,
     projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
     expectedProjectId,
     actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
+    expectedRevision: typeof errorRecord.expectedRevision === "string" ? errorRecord.expectedRevision : undefined,
+    actualRevision,
     workflowSummary,
     previewReadiness,
     exportPlan,
+    ...(actionEvent ? { actionEvent } : {}),
     issues,
     retryable: contract.retryable
   };
@@ -1306,8 +2653,22 @@ function uniqueEndingId(project: VnMakerProject, sceneId: string): string {
   throw new Error(`ending id를 생성할 수 없습니다: ${base}`);
 }
 
-function projectClone(project: VnMakerProject): VnMakerProject {
-  return JSON.parse(JSON.stringify(project)) as VnMakerProject;
+function expectedProjectRevisionFrom(input: unknown): ProjectRevisionInput {
+  const value = asRecord(input).expectedProjectRevision;
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (value && typeof value === "object") {
+    const revision = asRecord(value).revision;
+    if (typeof revision === "string" && revision.trim()) {
+      return value as ProjectRevisionDto;
+    }
+  }
+  throw new InputValidationError("expectedProjectRevision 입력이 필요합니다.", [{
+    severity: "error",
+    path: "expectedProjectRevision",
+    message: "최신 projectRevision 기준으로만 변경할 수 있습니다."
+  }]);
 }
 
 function manualInputError(message: string, path: string, sceneIds?: string[], choiceIds?: string[]): InputValidationError {
@@ -1365,15 +2726,31 @@ function endingFromInput(project: VnMakerProject, sceneId: string, inputEnding: 
   return candidate as VnMakerSceneEnding;
 }
 
-function manualMutationResult(store: ProjectStore, project: VnMakerProject, selectedSceneId: string) {
-  const savedProject = store.saveProject(project);
-  const validation = store.validateAndStore();
-  const routeGraphAnalysis = analyzeRouteGraph(savedProject);
+function manualTransactionalMutationResult(
+  store: ProjectStore,
+  input: unknown,
+  mutate: (project: VnMakerProject) => { project: VnMakerProject; selectedSceneId: string }
+) {
+  let selectedSceneId = "";
+  const result = store.applyProjectMutation({
+    expectedProjectRevision: expectedProjectRevisionFrom(input),
+    mutate: (project) => {
+      const outcome = mutate(project);
+      if (!outcome.selectedSceneId) {
+        throw new Error("selectedSceneId를 결정할 수 없습니다.");
+      }
+      selectedSceneId = outcome.selectedSceneId;
+      return outcome.project;
+    }
+  });
+  const routeGraphAnalysis = analyzeRouteGraph(result.project);
   return {
     ok: true,
     projectDirectory: store.paths.projectDirectory,
-    project: savedProject,
-    validation,
+    project: result.project,
+    previousRevision: result.previousRevision,
+    projectRevision: result.projectRevision,
+    validation: result.validation,
     routeGraphAnalysis,
     selectedSceneId
   };
@@ -1954,6 +3331,108 @@ function eventTextErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function eventTextFailureClassification(attempts: EventTextGenerationAttempt[]): GenerationFailureClassification {
+  if (attempts.some((attempt) => attempt.failureKind === "quality_rule_failed")) {
+    return "generation_quality";
+  }
+  if (attempts.some((attempt) => attempt.failureKind === "schema_invalid" || attempt.failureKind === "engine_validation_failed")) {
+    return "validation_model";
+  }
+  return "generation_quality";
+}
+
+function eventTextResultClassification(result: ExpandNaturalLanguageEventResult): GenerationResultClassification {
+  return result.ok ? "passed" : eventTextFailureClassification(result.attempts);
+}
+
+function rawOutputMetadata(rawOutput: unknown): JsonRecord {
+  return asRecord(asRecord(rawOutput).metadata);
+}
+
+function generationSourceFromRawOutput(
+  rawOutput: unknown,
+  fallbackSourceType: GenerationResultSourceType,
+  fallbackAdapter: string
+): { adapter: string; sourceType: GenerationResultSourceType } {
+  const metadata = rawOutputMetadata(rawOutput);
+  const adapter = typeof metadata.adapter === "string" && metadata.adapter.trim()
+    ? metadata.adapter.trim()
+    : fallbackAdapter;
+  const provenance = typeof metadata.provenance === "string" ? metadata.provenance : "";
+  const sourceType = adapter.includes("mock") || provenance.includes("alpha-sandbox")
+    ? "mock"
+    : fallbackSourceType;
+  return { adapter, sourceType };
+}
+
+function fixedPromptEventRequest(project: VnMakerProject, store: ProjectStore, input: unknown, fixture: TestPromptFixtureDto): EventExpansionRequest {
+  const record = asRecord(input);
+  const route = project.routes.find((item) => item.id === record.routeId) || project.routes[0];
+  if (!route) {
+    throw new Error("fixed prompt replay를 실행할 루트가 없습니다.");
+  }
+  const afterSceneId = typeof record.afterSceneId === "string" && record.afterSceneId ? record.afterSceneId : route.entrySceneId;
+  const heroineId = typeof record.heroineId === "string" && record.heroineId ? record.heroineId : route.heroineId;
+  return createEventExpansionRequest(project, {
+    projectDirectory: store.paths.projectDirectory,
+    routeId: route.id,
+    afterSceneId,
+    heroineId,
+    userEvent: fixture.promptText,
+    constraints: record.constraints && typeof record.constraints === "object"
+      ? record.constraints as Partial<EventExpansionRequest["constraints"]>
+      : undefined
+  });
+}
+
+function validationIssuesForGenerationResult(result: ExpandNaturalLanguageEventResult): ValidationIssue[] {
+  if (result.validation) {
+    return result.validation.issues;
+  }
+  if (!result.ok) {
+    return [{ severity: "error", path: "eventText", message: result.error }];
+  }
+  return [];
+}
+
+function generationOutputSummary(result: ExpandNaturalLanguageEventResult): string {
+  return result.ok ? result.plan.summary : result.error;
+}
+
+function createGenerationResultLog(input: {
+  resultId: string;
+  fixture: TestPromptFixtureDto;
+  adapter: string;
+  sourceType: GenerationResultSourceType;
+  generatedAt: string;
+  projectRevision: ProjectRevisionDto;
+  outputSummary: string;
+  validationIssues: ValidationIssue[];
+  classification: GenerationResultClassification;
+  patchHistoryId?: string;
+  skippedReason?: string;
+}): GenerationResultLogDto {
+  const failureClassification = input.classification === "passed" ? undefined : input.classification;
+  return {
+    resultId: input.resultId,
+    promptSetId: input.fixture.promptSetId,
+    promptId: input.fixture.promptId,
+    promptText: input.fixture.promptText,
+    expectedElements: [...input.fixture.expectedElements],
+    allowedVariation: [...input.fixture.allowedVariation],
+    adapter: input.adapter,
+    sourceType: input.sourceType,
+    generatedAt: input.generatedAt,
+    projectRevision: input.projectRevision,
+    outputSummary: input.outputSummary,
+    validationIssues: input.validationIssues,
+    classification: input.classification,
+    ...(failureClassification ? { failureClassification } : {}),
+    ...(input.patchHistoryId ? { patchHistoryId: input.patchHistoryId } : {}),
+    ...(input.skippedReason ? { skippedReason: input.skippedReason } : {})
+  };
+}
+
 export async function expandNaturalLanguageEvent(
   input: ExpandNaturalLanguageEventInput
 ): Promise<ExpandNaturalLanguageEventResult> {
@@ -2144,7 +3623,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return withActionState("createProject", {
+        return withStoreActionState("createProject", store, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           project: savedProject,
@@ -2190,7 +3669,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return withActionState("createProjectFromHeroine", {
+        return withStoreActionState("createProjectFromHeroine", store, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           heroine,
@@ -2224,7 +3703,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const savedProject = store.saveProject(nextProject);
         store.recordHeroineReuse(heroine.id, savedProject);
         const validation = store.validateAndStore();
-        return withActionState("assignHeroineSnapshot", {
+        return withStoreActionState("assignHeroineSnapshot", store, {
           projectDirectory: store.paths.projectDirectory,
           heroine,
           project: savedProject,
@@ -2246,7 +3725,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           validation
         });
-        return withActionState(action, {
+        return withStoreActionState(action, store, {
           projectDirectory: store.paths.projectDirectory,
           paths: store.paths,
           project,
@@ -2610,9 +4089,19 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async saveScene(input: unknown) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = store.upsertScene(requiredScene(input));
-        const validation = store.validateAndStore();
-        return { ok: true, projectDirectory: store.paths.projectDirectory, project, validation };
+        const scene = requiredScene(input);
+        const result = store.applyProjectMutation({
+          expectedProjectRevision: expectedProjectRevisionFrom(input),
+          mutate: (project) => upsertProjectScene(project, scene)
+        });
+        return {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project: result.project,
+          previousRevision: result.previousRevision,
+          projectRevision: result.projectRevision,
+          validation: result.validation
+        };
       } finally {
         store.close();
       }
@@ -2622,58 +4111,74 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = projectClone(store.requireProject());
-        const route = project.routes[0];
-        if (!route) {
-          throw manualInputError("프로젝트에 route가 없습니다.", "routes");
-        }
-
-        const link = asRecord(record.link);
-        const linkType = typeof link.type === "string" ? link.type : "none";
-        if (!["none", "next", "choice"].includes(linkType)) {
-          throw manualInputError("link.type은 none, next, choice 중 하나여야 합니다.", "link.type");
-        }
-        if (linkType !== "none" && typeof record.sourceSceneId !== "string") {
-          throw manualInputError("sourceSceneId 입력이 필요합니다.", "sourceSceneId");
-        }
-
-        const sourceScene = typeof record.sourceSceneId === "string"
-          ? project.scenes.find((scene) => scene.id === record.sourceSceneId)
-          : undefined;
-        if (linkType !== "none" && !sourceScene) {
-          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [String(record.sourceSceneId || "")]);
-        }
-        if (sourceScene?.ending) {
-          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
-        }
-
-        const scene = sceneFromInput(project, record.scene);
-        if (linkType === "next" && sourceScene) {
-          if (sourceScene.choices.length > 0) {
-            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+        return manualTransactionalMutationResult(store, input, (project) => {
+          const link = asRecord(record.link);
+          const linkType = typeof link.type === "string" ? link.type : "none";
+          if (!["none", "next", "choice"].includes(linkType)) {
+            throw manualInputError("link.type은 none, next, choice 중 하나여야 합니다.", "link.type");
           }
-          if (sourceScene.next && link.preservePreviousNext === true && !scene.ending && !scene.next) {
-            scene.next = sourceScene.next;
+          if (linkType !== "none" && typeof record.sourceSceneId !== "string") {
+            throw manualInputError("sourceSceneId 입력이 필요합니다.", "sourceSceneId");
           }
-          sourceScene.next = scene.id;
-        }
-        if (linkType === "choice" && sourceScene) {
-          if (sourceScene.next) {
-            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
-          }
-          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
-          if (!choiceText) {
-            throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id]);
-          }
-          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
-            ? link.choiceId.trim()
-            : uniqueChoiceId(sourceScene, choiceText);
-          const choice: VnMakerChoice = { id: choiceId, text: choiceText, next: scene.id };
-          sourceScene.choices.push(choice);
-        }
 
-        project.scenes.push(scene);
-        return manualMutationResult(store, project, scene.id);
+          const sourceScene = typeof record.sourceSceneId === "string"
+            ? project.scenes.find((scene) => scene.id === record.sourceSceneId)
+            : undefined;
+          if (linkType !== "none" && !sourceScene) {
+            throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [String(record.sourceSceneId || "")]);
+          }
+          if (sourceScene?.ending) {
+            throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+          }
+
+          const scene = sceneFromInput(project, record.scene);
+          let route = project.routes[0];
+          if (!route && linkType === "none" && project.characters[0]?.id) {
+            route = {
+              id: "route-main",
+              title: "기본 루트",
+              heroineId: project.characters[0].id,
+              summary: "",
+              entrySceneId: scene.id,
+              endings: []
+            };
+            project.routes.push(route);
+          }
+          if (linkType === "none" && project.scenes.length === 0) {
+            if (route) {
+              route.entrySceneId = scene.id;
+            }
+            if (route && !project.settings.defaultRouteId) {
+              project.settings.defaultRouteId = route.id;
+            }
+          }
+          if (linkType === "next" && sourceScene) {
+            if (sourceScene.choices.length > 0) {
+              throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            if (sourceScene.next && link.preservePreviousNext === true && !scene.ending && !scene.next) {
+              scene.next = sourceScene.next;
+            }
+            sourceScene.next = scene.id;
+          }
+          if (linkType === "choice" && sourceScene) {
+            if (sourceScene.next) {
+              throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+            if (!choiceText) {
+              throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id]);
+            }
+            const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+              ? link.choiceId.trim()
+              : uniqueChoiceId(sourceScene, choiceText);
+            const choice: VnMakerChoice = { id: choiceId, text: choiceText, next: scene.id };
+            sourceScene.choices.push(choice);
+          }
+
+          project.scenes.push(scene);
+          return { project, selectedSceneId: scene.id };
+        });
       } finally {
         store.close();
       }
@@ -2683,53 +4188,54 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = projectClone(store.requireProject());
-        const sourceSceneId = String(record.sourceSceneId || "");
-        const targetSceneId = String(record.targetSceneId || "");
-        const sourceScene = project.scenes.find((scene) => scene.id === sourceSceneId);
-        const targetScene = project.scenes.find((scene) => scene.id === targetSceneId);
-        if (!sourceScene) {
-          throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [sourceSceneId]);
-        }
-        if (!targetScene) {
-          throw manualInputError("연결할 target scene을 찾을 수 없습니다.", "targetSceneId", [targetSceneId]);
-        }
-        if (sourceScene.ending) {
-          throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
-        }
+        return manualTransactionalMutationResult(store, input, (project) => {
+          const sourceSceneId = String(record.sourceSceneId || "");
+          const targetSceneId = String(record.targetSceneId || "");
+          const sourceScene = project.scenes.find((scene) => scene.id === sourceSceneId);
+          const targetScene = project.scenes.find((scene) => scene.id === targetSceneId);
+          if (!sourceScene) {
+            throw manualInputError("연결할 source scene을 찾을 수 없습니다.", "sourceSceneId", [sourceSceneId]);
+          }
+          if (!targetScene) {
+            throw manualInputError("연결할 target scene을 찾을 수 없습니다.", "targetSceneId", [targetSceneId]);
+          }
+          if (sourceScene.ending) {
+            throw manualInputError("엔딩 장면 뒤에는 연결할 수 없습니다. 먼저 엔딩을 해제하세요.", "sourceSceneId", [sourceScene.id]);
+          }
 
-        const link = asRecord(record.link);
-        const linkType = typeof link.type === "string" ? link.type : "next";
-        if (linkType === "next") {
-          if (sourceScene.choices.length > 0) {
-            throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
-          }
-          sourceScene.next = targetScene.id;
-        } else if (linkType === "choice") {
-          if (sourceScene.next) {
-            throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
-          }
-          const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
-          const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
-            ? link.choiceId.trim()
-            : uniqueChoiceId(sourceScene, choiceText || targetScene.label);
-          const existingChoice = sourceScene.choices.find((choice) => choice.id === choiceId);
-          if (existingChoice) {
-            existingChoice.next = targetScene.id;
-            if (choiceText) {
-              existingChoice.text = choiceText;
+          const link = asRecord(record.link);
+          const linkType = typeof link.type === "string" ? link.type : "next";
+          if (linkType === "next") {
+            if (sourceScene.choices.length > 0) {
+              throw manualInputError("선택지가 있는 장면에는 next를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            sourceScene.next = targetScene.id;
+          } else if (linkType === "choice") {
+            if (sourceScene.next) {
+              throw manualInputError("next가 있는 장면에는 선택지를 연결할 수 없습니다.", "link.type", [sourceScene.id]);
+            }
+            const choiceText = typeof link.choiceText === "string" ? link.choiceText.trim() : "";
+            const choiceId = typeof link.choiceId === "string" && link.choiceId.trim()
+              ? link.choiceId.trim()
+              : uniqueChoiceId(sourceScene, choiceText || targetScene.label);
+            const existingChoice = sourceScene.choices.find((choice) => choice.id === choiceId);
+            if (existingChoice) {
+              existingChoice.next = targetScene.id;
+              if (choiceText) {
+                existingChoice.text = choiceText;
+              }
+            } else {
+              if (!choiceText) {
+                throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id], [choiceId]);
+              }
+              sourceScene.choices.push({ id: choiceId, text: choiceText, next: targetScene.id });
             }
           } else {
-            if (!choiceText) {
-              throw manualInputError("choiceText 입력이 필요합니다.", "link.choiceText", [sourceScene.id], [choiceId]);
-            }
-            sourceScene.choices.push({ id: choiceId, text: choiceText, next: targetScene.id });
+            throw manualInputError("link.type은 next 또는 choice여야 합니다.", "link.type", [sourceScene.id]);
           }
-        } else {
-          throw manualInputError("link.type은 next 또는 choice여야 합니다.", "link.type", [sourceScene.id]);
-        }
 
-        return manualMutationResult(store, project, targetScene.id);
+          return { project, selectedSceneId: targetScene.id };
+        });
       } finally {
         store.close();
       }
@@ -2739,27 +4245,28 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
-        const project = projectClone(store.requireProject());
-        const sceneId = String(record.sceneId || "");
-        const scene = project.scenes.find((item) => item.id === sceneId);
-        if (!scene) {
-          throw manualInputError("엔딩을 설정할 scene을 찾을 수 없습니다.", "sceneId", [sceneId]);
-        }
+        return manualTransactionalMutationResult(store, input, (project) => {
+          const sceneId = String(record.sceneId || "");
+          const scene = project.scenes.find((item) => item.id === sceneId);
+          if (!scene) {
+            throw manualInputError("엔딩을 설정할 scene을 찾을 수 없습니다.", "sceneId", [sceneId]);
+          }
 
-        if (record.ending === null) {
-          scene.ending = undefined;
-          return manualMutationResult(store, project, scene.id);
-        }
+          if (record.ending === null) {
+            scene.ending = undefined;
+            return { project, selectedSceneId: scene.id };
+          }
 
-        if ((scene.next || scene.choices.length > 0) && record.clearOutgoing !== true) {
-          throw manualInputError("엔딩으로 지정하려면 다음 장면이나 선택지를 제거해야 합니다.", "clearOutgoing", [scene.id]);
-        }
-        if (record.clearOutgoing === true) {
-          scene.next = undefined;
-          scene.choices = [];
-        }
-        scene.ending = endingFromInput(project, scene.id, record.ending);
-        return manualMutationResult(store, project, scene.id);
+          if ((scene.next || scene.choices.length > 0) && record.clearOutgoing !== true) {
+            throw manualInputError("엔딩으로 지정하려면 다음 장면이나 선택지를 제거해야 합니다.", "clearOutgoing", [scene.id]);
+          }
+          if (record.clearOutgoing === true) {
+            scene.next = undefined;
+            scene.choices = [];
+          }
+          scene.ending = endingFromInput(project, scene.id, record.ending);
+          return { project, selectedSceneId: scene.id };
+        });
       } finally {
         store.close();
       }
@@ -2782,7 +4289,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       try {
         const validation = store.validateAndStore();
         const project = store.requireProject();
-        return withActionState("validateProject", {
+        return withStoreActionState("validateProject", store, {
           ok: validation.ok,
           projectDirectory: store.paths.projectDirectory,
           issues: validation.issues,
@@ -2815,6 +4322,313 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           artifact: buildProjectHtml(store.requireProject())
         };
+      } finally {
+        store.close();
+      }
+    },
+
+    async listFixedPrompts(_input: unknown = {}) {
+      const fixedPromptSet = fixedPromptSetDto();
+      return {
+        ok: true,
+        fixedPromptSetId: fixedPromptSet.id,
+        fixedPromptSet,
+        fixtures: fixedPromptSet.fixtures
+      };
+    },
+
+    async replayFixedPrompt(input: unknown) {
+      const record = asRecord(input);
+      const fixture = fixedPromptById(record.promptId);
+      const adapterMode = fixedPromptAdapterMode(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const request = fixedPromptEventRequest(project, store, input, fixture);
+        const generatedAt = new Date().toISOString();
+        const resultId = createGenerationResultId();
+        const fixedPromptSet = fixedPromptSetDto();
+
+        if (adapterMode === "actual" && !options.eventText) {
+          const skippedReason = "actual event text adapter unavailable";
+          const validationIssues: ValidationIssue[] = [{
+            severity: "error",
+            path: "adapterMode",
+            message: skippedReason
+          }];
+          const generationResultLog = store.recordGenerationResultLog(createGenerationResultLog({
+            resultId,
+            fixture,
+            adapter: "codex-event-text-adapter",
+            sourceType: "unavailable",
+            generatedAt,
+            projectRevision,
+            outputSummary: skippedReason,
+            validationIssues,
+            classification: "generation_quality",
+            skippedReason
+          }));
+          return withStoreActionState("replayFixedPrompt", store, {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            fixedPromptSetId: fixedPromptSet.id,
+            fixedPromptSet,
+            fixedPrompt: fixture,
+            generationResultId: resultId,
+            generationResultLog,
+            request,
+            error: skippedReason,
+            validation: { ok: false, issues: validationIssues }
+          }, { project, validation: { ok: false, issues: validationIssues }, projectRevision });
+        }
+
+        let result: ExpandNaturalLanguageEventResult;
+        try {
+          result = await expandNaturalLanguageEvent({
+            project,
+            request,
+            adapter: adapterMode === "actual" ? options.eventText : undefined
+          });
+        } catch (error) {
+          const skippedReason = eventTextErrorMessage(error);
+          const validationIssues: ValidationIssue[] = [{
+            severity: "error",
+            path: "eventText",
+            message: skippedReason
+          }];
+          const source = adapterMode === "actual"
+            ? { adapter: "codex-event-text-adapter", sourceType: "unavailable" as const }
+            : { adapter: "deterministic-fixture-adapter", sourceType: "mock" as const };
+          const generationResultLog = store.recordGenerationResultLog(createGenerationResultLog({
+            resultId,
+            fixture,
+            adapter: source.adapter,
+            sourceType: source.sourceType,
+            generatedAt,
+            projectRevision,
+            outputSummary: skippedReason,
+            validationIssues,
+            classification: "generation_quality",
+            skippedReason
+          }));
+          return withStoreActionState("replayFixedPrompt", store, {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            fixedPromptSetId: fixedPromptSet.id,
+            fixedPromptSet,
+            fixedPrompt: fixture,
+            generationResultId: resultId,
+            generationResultLog,
+            request,
+            error: skippedReason,
+            validation: { ok: false, issues: validationIssues }
+          }, { project, validation: { ok: false, issues: validationIssues }, projectRevision });
+        }
+        const validation = result.ok
+          ? result.validation
+          : result.validation || {
+              ok: false,
+              issues: [{ severity: "error" as const, path: "eventText", message: result.error }]
+            };
+        const patchHistoryEntry = result.ok
+          ? store.recordPatchHistory({
+              status: "proposed",
+              summary: result.plan.summary,
+              request,
+              plan: result.plan,
+              rawOutput: result.rawOutput,
+              attempts: result.attempts,
+              validation: result.validation,
+              diff: result.validation.diff,
+              beforeProject: project,
+              afterProject: result.validation.appliedProject
+            })
+          : store.recordPatchHistory({
+              status: "failed",
+              summary: "fixed prompt replay 실패",
+              request,
+              rawOutput: result.rawOutput,
+              attempts: result.attempts,
+              validation
+            });
+        const source = adapterMode === "actual"
+          ? generationSourceFromRawOutput(result.rawOutput, "actual", "codex-event-text-adapter")
+          : { adapter: "deterministic-fixture-adapter", sourceType: "mock" as const };
+        const generationResultLog = store.recordGenerationResultLog(createGenerationResultLog({
+          resultId,
+          fixture,
+          adapter: source.adapter,
+          sourceType: source.sourceType,
+          generatedAt,
+          projectRevision,
+          outputSummary: generationOutputSummary(result),
+          validationIssues: validationIssuesForGenerationResult(result),
+          classification: eventTextResultClassification(result),
+          patchHistoryId: patchHistoryEntry.id
+        }));
+
+        if (!result.ok) {
+          return withStoreActionState("replayFixedPrompt", store, {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            fixedPromptSetId: fixedPromptSet.id,
+            fixedPromptSet,
+            fixedPrompt: fixture,
+            generationResultId: resultId,
+            generationResultLog,
+            request,
+            attempts: result.attempts,
+            rawOutput: result.rawOutput,
+            error: result.error,
+            validation,
+            patchHistoryEntry
+          }, { project, validation });
+        }
+
+        return withStoreActionState("replayFixedPrompt", store, {
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          fixedPromptSetId: fixedPromptSet.id,
+          fixedPromptSet,
+          fixedPrompt: fixture,
+          generationResultId: resultId,
+          generationResultLog,
+          request,
+          plan: result.plan,
+          validation: result.validation,
+          diff: result.validation.diff,
+          attempts: result.attempts,
+          rawOutput: result.rawOutput,
+          patchHistoryEntry
+        }, { project, validation: result.validation });
+      } finally {
+        store.close();
+      }
+    },
+
+    async listGenerationResultLogs(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const generationResultLogs = store.listGenerationResultLogs();
+        return withStoreActionState("listGenerationResultLogs", store, {
+          projectDirectory: store.paths.projectDirectory,
+          generationResultLogs,
+          count: generationResultLogs.length
+        }, { project });
+      } finally {
+        store.close();
+      }
+    },
+
+    async recordUXDecisionEvent(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const event = store.recordUXDecisionEvent(createUXDecisionEvent(input, project, projectRevision));
+        return withStoreActionState("recordUXDecisionEvent", store, {
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          eventLogId: event.eventLogId,
+          event,
+          uxDecisionEvent: event
+        }, { project, projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async listUXDecisionEvents(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const uxDecisionEvents = store.listUXDecisionEvents({
+          sessionId: stringField(record, "sessionId"),
+          eventLogId: stringField(record, "eventLogId")
+        });
+        return withStoreActionState("listUXDecisionEvents", store, {
+          projectDirectory: store.paths.projectDirectory,
+          uxDecisionEvents,
+          events: uxDecisionEvents,
+          count: uxDecisionEvents.length
+        }, { project });
+      } finally {
+        store.close();
+      }
+    },
+
+    async exportUXDecisionEventLog(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const eventLog: UXDecisionEventLogExportDto = store.exportUXDecisionEventLog({
+          sessionId: stringField(record, "sessionId"),
+          eventLogId: stringField(record, "eventLogId")
+        });
+        return withStoreActionState("exportUXDecisionEventLog", store, {
+          projectDirectory: store.paths.projectDirectory,
+          eventLogId: eventLog.eventLogId,
+          eventLog,
+          uxDecisionEvents: eventLog.events,
+          events: eventLog.events
+        }, { project, projectRevision: eventLog.projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async createPhase0DecisionReport(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const validationIssues = validateProjectSnapshot(project);
+        const validation = {
+          ok: validationIssues.every((issue) => issue.severity !== "error"),
+          issues: validationIssues
+        };
+        const previewPreflight = createPreviewPreflight(project, validation, projectRevision);
+        const sessionIds = new Set([
+          ...phase0StringList(record.sessionId),
+          ...phase0StringList(record.sessionIds)
+        ]);
+        const eventLogIds = new Set([
+          ...phase0StringList(record.eventLogId),
+          ...phase0StringList(record.eventLogIds)
+        ]);
+        const hasEventFilters = sessionIds.size > 0 || eventLogIds.size > 0;
+        const events = store.listUXDecisionEvents().filter((event) =>
+          !hasEventFilters || sessionIds.has(event.sessionId) || eventLogIds.has(event.eventLogId)
+        );
+        const participantResults = phase0ParticipantResultsFrom(input).filter((participant) =>
+          sessionIds.size === 0 || sessionIds.has(participant.sessionId)
+        );
+        const phase0DecisionReport = createPhase0DecisionReportDto({
+          project,
+          projectRevision,
+          previewPreflight,
+          events,
+          generationLogs: store.listGenerationResultLogs(),
+          participantResults,
+          generatedAt: stringField(record, "generatedAt") || new Date().toISOString()
+        });
+        return withStoreActionState("createPhase0DecisionReport", store, {
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          phase0DecisionReport,
+          decision: phase0DecisionReport.decision,
+          workPackages: phase0DecisionReport.workPackages,
+          denominator: phase0DecisionReport.denominator,
+          sessions: phase0DecisionReport.sessions
+        }, { project, validation, projectRevision });
       } finally {
         store.close();
       }
@@ -2862,7 +4676,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             attempts: result.attempts,
             validation
           });
-          return withActionState("expandEvent", {
+          return withStoreActionState("expandEvent", store, {
             ok: false,
             projectDirectory: store.paths.projectDirectory,
             request,
@@ -2883,7 +4697,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           beforeProject: project,
           afterProject: result.validation.appliedProject
         });
-        return withActionState("expandEvent", {
+        return withStoreActionState("expandEvent", store, {
           projectDirectory: store.paths.projectDirectory,
           request,
           plan: result.plan,
@@ -2903,8 +4717,13 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const store = await ensureProjectStore(input, defaultProjectDirectory);
       try {
         const sourcePatchHistoryId = typeof record.patchHistoryId === "string" ? record.patchHistoryId : undefined;
-        const result = store.applyEventExpansionPlan(requiredEventRequest(input), requiredEventPlan(input), sourcePatchHistoryId);
-        return withActionState("approveEvent", { projectDirectory: store.paths.projectDirectory, ...result }, {
+        const result = store.applyEventExpansionPlan({
+          expectedProjectRevision: expectedProjectRevisionFrom(input),
+          request: requiredEventRequest(input),
+          plan: requiredEventPlan(input),
+          sourcePatchHistoryId
+        });
+        return withStoreActionState("approveEvent", store, { projectDirectory: store.paths.projectDirectory, ...result }, {
           project: result.project,
           validation: result.validation
         });
@@ -2925,21 +4744,25 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.requireProject();
         const validation = store.validateAndStore();
         const initialReadiness = previewReadinessFor(project, validation);
-        if (!initialReadiness.canRun) {
-          return withActionState("previewProject", {
+        const initialPreflight = createPreviewPreflight(project, validation, store.getProjectRevision());
+        if (!initialPreflight.canRun || !initialReadiness.canRun) {
+          return withStoreActionState("previewProject", store, {
             ok: false,
             code: "PREVIEW_BLOCKED",
-            message: initialReadiness.failureCause,
-            error: initialReadiness.failureCause,
+            message: initialPreflight.disabledReason || initialReadiness.failureCause,
+            error: initialPreflight.disabledReason || initialReadiness.failureCause,
             projectDirectory: store.paths.projectDirectory,
             validation,
-            previewReadiness: initialReadiness
+            previewReadiness: initialReadiness,
+            previewPreflight: initialPreflight
           }, { project, validation });
         }
         let runtime;
         let routeGraphAnalysis;
         try {
-          runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined);
+          runtime = store.previewProject(typeof record.startSceneId === "string" ? record.startSceneId : undefined, {
+            conditionPreviewPreflightSuccess: initialPreflight.canRun
+          });
           routeGraphAnalysis = analyzeRouteGraph(project, typeof record.routeId === "string" ? record.routeId : undefined);
         } catch (error) {
           const validation = store.validateAndStore();
@@ -2948,7 +4771,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             failureCause: messageFromError(error),
             retryable: true
           });
-          return withActionState("previewProject", {
+          return withStoreActionState("previewProject", store, {
             ok: false,
             code: "SERVER_ERROR",
             message: messageFromError(error),
@@ -2960,7 +4783,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         }
         const previewReadiness = previewReadinessFor(project, runtime.validation);
         if (!previewReadiness.canRun) {
-          return withActionState("previewProject", {
+          return withStoreActionState("previewProject", store, {
             ok: false,
             code: "PREVIEW_BLOCKED",
             message: previewReadiness.failureCause,
@@ -2970,13 +4793,31 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             previewReadiness
           }, { project, validation: runtime.validation });
         }
-        return withActionState("previewProject", {
+        return withStoreActionState("previewProject", store, {
           projectDirectory: store.paths.projectDirectory,
           runtime,
           validation: runtime.validation,
           routeGraphAnalysis,
           previewReadiness
         }, { project, validation: runtime.validation });
+      } finally {
+        store.close();
+      }
+    },
+
+    async previewPreflightProject(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const validation = store.validateAndStore();
+        const previewReadiness = previewReadinessFor(project, validation);
+        const previewPreflight = createPreviewPreflight(project, validation, store.getProjectRevision());
+        return withStoreActionState("previewPreflightProject", store, {
+          projectDirectory: store.paths.projectDirectory,
+          validation,
+          previewReadiness,
+          previewPreflight
+        }, { project, validation });
       } finally {
         store.close();
       }
@@ -3019,7 +4860,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           failureCause: result.smoke.ok ? undefined : "실행 확인 결과 실패했습니다.",
           retryable: !result.smoke.ok
         });
-        return withActionState("exportProject", {
+        return withStoreActionState("exportProject", store, {
           projectDirectory: store.paths.projectDirectory,
           ...result,
           ok: result.smoke.ok,
@@ -3110,7 +4951,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
             ...job,
             asset: job.outputAssetId ? assetMap.get(job.outputAssetId) : undefined
           }));
-        return withActionState("listGenerationJobs", { projectDirectory: store.paths.projectDirectory, jobs, backgroundPolicy: backgroundPolicy(project) }, { project });
+        return withStoreActionState("listGenerationJobs", store, { projectDirectory: store.paths.projectDirectory, jobs, backgroundPolicy: backgroundPolicy(project) }, { project });
       } finally {
         store.close();
       }
@@ -3168,7 +5009,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           }
         }
         const failure = errors.length > 0 ? imageGenerationFailureFromMessages(errors) : null;
-        return withActionState("runGenerationJobs", {
+        return withStoreActionState("runGenerationJobs", store, {
           ok: errors.length === 0,
           ...(failure || {}),
           projectDirectory: store.paths.projectDirectory,
@@ -3338,9 +5179,124 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       }
     },
 
+    async previewRepair(input: unknown) {
+      const request = repairActionRequestFrom(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const validation = validationSnapshotForProject(project);
+        const repairPreview = repairPreviewFor(project, projectRevision, validation, request);
+        return withStoreActionState("previewRepair", store, {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          issues: validation.issues,
+          validation,
+          repairPreview
+        }, { project, validation, projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async applyRepair(input: unknown) {
+      const request = repairActionRequestFrom(input);
+      const expectedProjectRevision = expectedProjectRevisionFrom(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = assertExpectedProjectRevision(store, expectedProjectRevision);
+        const validation = validationSnapshotForProject(project);
+        const repairPreview = repairPreviewFor(project, projectRevision, validation, request);
+        const confirmToken = String(asRecord(input).confirmToken || "");
+        if (repairPreview.repairAction.destructive && confirmToken !== repairPreview.confirmToken) {
+          throw new InputValidationError("destructive repair에는 올바른 confirmToken이 필요합니다.", [{
+            severity: "error",
+            path: "confirmToken",
+            message: "수리 미리보기에서 받은 confirmToken과 일치해야 합니다."
+          }]);
+        }
+        const result = store.applyRepairMutation({
+          expectedProjectRevision,
+          summary: repairPreview.expectedAfterSummary,
+          diff: patchDescriptionForRepair(repairPreview),
+          rawOutput: (afterRevision) => ({
+            repair: {
+              preview: repairPreview,
+              afterRevision
+            }
+          }),
+          mutate: (currentProject) => {
+            const currentValidation = validationSnapshotForProject(currentProject);
+            const currentIssue = repairIssueForRequest(currentValidation, request);
+            return applyRepairMutationToProject(currentProject, request, currentIssue).project;
+          }
+        });
+        const repairHistoryEntry = repairHistoryEntryFromPatch(result.repairHistoryEntry);
+        return withStoreActionState("applyRepair", store, {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project: result.project,
+          previousRevision: result.previousRevision,
+          projectRevision: result.projectRevision,
+          issues: result.validation.issues,
+          validation: result.validation,
+          repairPreview,
+          repairHistoryEntry,
+          patchHistoryEntry: result.repairHistoryEntry
+        }, { project: result.project, validation: result.validation, projectRevision: result.projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async undoRepair(input: unknown) {
+      const record = asRecord(input);
+      const repairHistoryId = String(record.repairHistoryId || record.undoToken || "");
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const latestEntry = latestUnrevertedRepairPatchEntry(store);
+        if (!latestEntry) {
+          throw new InputValidationError("수리 이력을 찾을 수 없습니다.", [{ severity: "error", path: "repairHistoryId", message: "수리 이력을 찾을 수 없습니다." }]);
+        }
+        if (repairHistoryId && repairHistoryId !== latestEntry.id) {
+          throw new InputValidationError("마지막 수리만 되돌릴 수 있습니다.", [{
+            severity: "error",
+            path: "repairHistoryId",
+            message: "마지막 수리만 되돌릴 수 있습니다."
+          }]);
+        }
+        const previousRevision = store.getProjectRevision();
+        const project = store.undoPatchHistory(latestEntry.id);
+        const validation = store.validateAndStore();
+        const projectRevision = store.getProjectRevision();
+        const revertedEntry = store.getPatchHistoryEntry(latestEntry.id);
+        return withStoreActionState("undoRepair", store, {
+          ok: true,
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          previousRevision,
+          projectRevision,
+          issues: validation.issues,
+          validation,
+          repairHistoryEntry: revertedEntry ? repairHistoryEntryFromPatch(revertedEntry) : null,
+          repairHistory: []
+        }, { project, validation, projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
     validateProjectSnapshot(project: VnMakerProject) {
       const issues = validateProjectSnapshot(project);
-      return { ok: issues.every((issue) => issue.severity !== "error"), issues };
+      const validation = { ok: issues.every((issue) => issue.severity !== "error"), issues };
+      return withActionState("validateProject", {
+        ok: validation.ok,
+        issues,
+        project,
+        validation
+      }, { project, validation });
     }
   };
 }

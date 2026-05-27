@@ -22,6 +22,27 @@ const manualCliApiDirectory = join(tempRoot, "ManualCliApi.vnmaker");
 const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
+const validationDtoParityDirectory = join(tempRoot, "ValidationDtoParity.vnmaker");
+const previewPreflightBlockedDirectory = join(tempRoot, "PreviewPreflightBlocked.vnmaker");
+const previewPreflightMissingBackgroundDirectory = join(tempRoot, "PreviewPreflightMissingBackground.vnmaker");
+const previewPreflightRouteGateDirectory = join(tempRoot, "PreviewPreflightRouteGate.vnmaker");
+const previewPreflightReadyDirectory = join(tempRoot, "PreviewPreflightReady.vnmaker");
+const previewPreflightReadyExportDirectory = join(tempRoot, "preview-preflight-ready-export");
+const previewPreflightReadyCliExportDirectory = join(tempRoot, "preview-preflight-ready-cli-export");
+const repairActionMissingTargetDirectory = join(tempRoot, "RepairActionMissingTarget.vnmaker");
+const repairActionUncoveredTerminalDirectory = join(tempRoot, "RepairActionUncoveredTerminal.vnmaker");
+const repairActionMixedOutgoingDirectory = join(tempRoot, "RepairActionMixedOutgoing.vnmaker");
+const repairActionEndingOutgoingDirectory = join(tempRoot, "RepairActionEndingOutgoing.vnmaker");
+const repairActionUnknownIssueDirectory = join(tempRoot, "RepairActionUnknownIssue.vnmaker");
+const repairDiffApplyDirectory = join(tempRoot, "RepairDiffApply.vnmaker");
+const repairCliParityDirectory = join(tempRoot, "RepairCliParity.vnmaker");
+const repairRouteMissingTargetDirectory = join(tempRoot, "RepairRouteMissingTarget.vnmaker");
+const repairLastUndoDirectory = join(tempRoot, "RepairLastUndo.vnmaker");
+const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
+const fixedPromptApiCliDirectory = join(tempRoot, "FixedPromptApiCli.vnmaker");
+const fixedPromptCliDirectory = join(tempRoot, "FixedPromptCli.vnmaker");
+const uxEventApiDirectory = join(tempRoot, "UXEventApi.vnmaker");
+const uxEventCliDirectory = join(tempRoot, "UXEventCli.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
 const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
@@ -112,6 +133,24 @@ const project = core.createStarterProject({
   title: "테스트 미연시",
   premise: "방과 후 엔진 제작 테스트"
 });
+
+function projectWithPreviewBackground(sourceProject, assetId) {
+  const backgroundAsset = {
+    id: assetId,
+    kind: "background",
+    label: "프리뷰 배경",
+    uri: "data:image/png;base64,",
+    source: "placeholder"
+  };
+  return {
+    ...sourceProject,
+    assets: [...sourceProject.assets.filter((asset) => asset.id !== assetId), backgroundAsset],
+    scenes: sourceProject.scenes.map((scene) => ({
+      ...scene,
+      backgroundAssetId: assetId
+    }))
+  };
+}
 
 assert.equal(project.version, "vn-maker/v1");
 assert.equal(project.characters.length >= 1, true);
@@ -215,10 +254,14 @@ const cliOpen = JSON.parse(cliOpenOutput);
 assert.equal(cliOpen.ok, true);
 assert.equal(cliOpen.project.characters.some((character) => character.id === "mira"), true);
 assert.equal(cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile").ending.kind, "normal");
+const cliOpenRevisionStore = await projectStore.openProjectStore(projectDirectory);
+assert.deepEqual(cliOpen.projectRevision, cliOpenRevisionStore.getProjectRevision());
+cliOpenRevisionStore.close();
 
 const cliSaveSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
     projectDirectory,
+    expectedProjectRevision: cliOpen.projectRevision,
     scene: {
       ...cliOpen.project.scenes[0],
       text: "CLI가 같은 SQLite 프로젝트에 저장한 장면."
@@ -233,6 +276,7 @@ assert.match(cliSaveScene.project.scenes[0].text, /CLI가 같은 SQLite 프로�
 const cliSaveEndingSceneOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
     projectDirectory,
+    expectedProjectRevision: cliSaveScene.projectRevision,
     scene: {
       ...cliOpen.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
       text: "CLI가 ending metadata를 포함한 장면을 저장했다."
@@ -252,11 +296,919 @@ const apiValidation = await webHandlers.handleApiRequest({
 assert.equal(apiValidation.status, 200);
 assert.equal(apiValidation.body.ok, true);
 
+const validationDtoProject = core.createStarterProject({
+  id: "validation-dto-parity",
+  title: "Validation DTO Parity",
+  premise: "Web API와 CLI가 같은 stable validation DTO를 반환한다."
+});
+const validationDtoEntrySceneId = validationDtoProject.routes[0].entrySceneId;
+const validationDtoInvalidProject = {
+  ...validationDtoProject,
+  scenes: validationDtoProject.scenes.map((scene) => scene.id === validationDtoEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{ id: "choice-missing", text: "없는 장면으로 간다", next: "scene-missing-target" }]
+      }
+    : scene)
+};
+const validationDtoStore = await projectStore.createProjectWorkspace({
+  projectDirectory: validationDtoParityDirectory,
+  project: validationDtoInvalidProject
+});
+validationDtoStore.close();
+
+const validationDtoApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/validate",
+  body: { projectDirectory: validationDtoParityDirectory }
+});
+assert.equal(validationDtoApi.status, 200);
+assert.equal(validationDtoApi.body.ok, false);
+const validationDtoApiIssue = validationDtoApi.body.issues.find((issue) => issue.code === "missing-target");
+assert.ok(validationDtoApiIssue, "Web API validation output must include the missing-target stable issue code");
+assert.deepEqual(
+  {
+    code: validationDtoApiIssue.code,
+    domain: validationDtoApiIssue.domain,
+    path: validationDtoApiIssue.path,
+    sceneIds: validationDtoApiIssue.sceneIds,
+    choiceIds: validationDtoApiIssue.choiceIds,
+    targetSceneId: validationDtoApiIssue.targetSceneId
+  },
+  {
+    code: "missing-target",
+    domain: "route",
+    path: "scenes.0.choices.0",
+    sceneIds: [validationDtoEntrySceneId],
+    choiceIds: ["choice-missing"],
+    targetSceneId: "scene-missing-target"
+  }
+);
+
+const validationDtoCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "validate"], {
+  input: JSON.stringify({ projectDirectory: validationDtoParityDirectory }),
+  encoding: "utf8"
+}));
+const validationDtoCliIssue = validationDtoCli.issues.find((issue) => issue.code === "missing-target");
+assert.ok(validationDtoCliIssue, "CLI validation output must include the missing-target stable issue code");
+assert.deepEqual(
+  {
+    code: validationDtoCliIssue.code,
+    domain: validationDtoCliIssue.domain,
+    path: validationDtoCliIssue.path,
+    sceneIds: validationDtoCliIssue.sceneIds,
+    choiceIds: validationDtoCliIssue.choiceIds,
+    targetSceneId: validationDtoCliIssue.targetSceneId
+  },
+  {
+    code: validationDtoApiIssue.code,
+    domain: validationDtoApiIssue.domain,
+    path: validationDtoApiIssue.path,
+    sceneIds: validationDtoApiIssue.sceneIds,
+    choiceIds: validationDtoApiIssue.choiceIds,
+    targetSceneId: validationDtoApiIssue.targetSceneId
+  }
+);
+
+const previewPreflightBaseProject = core.createStarterProject({
+  id: "preview-preflight-blocked",
+  title: "Preview Preflight Blocked",
+  premise: "프리뷰 preflight가 validation blocker를 runtime 실행 전에 반환한다."
+});
+const previewPreflightEntrySceneId = previewPreflightBaseProject.routes[0].entrySceneId;
+const previewPreflightBlockedProject = projectWithPreviewBackground({
+  ...previewPreflightBaseProject,
+  scenes: previewPreflightBaseProject.scenes.map((scene) => scene.id === previewPreflightEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{ id: "choice-preflight-missing", text: "없는 타깃으로 간다", next: "scene-preflight-missing" }]
+      }
+    : scene)
+}, "asset-preview-preflight-blocked-background");
+const previewPreflightBlockedStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightBlockedDirectory,
+  project: previewPreflightBlockedProject
+});
+previewPreflightBlockedStore.close();
+
+const previewPreflightBlockedApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightBlockedDirectory }
+});
+assert.equal(previewPreflightBlockedApi.status, 409);
+assert.equal(previewPreflightBlockedApi.body.code, "PREVIEW_BLOCKED");
+assert.equal(previewPreflightBlockedApi.body.runtime, undefined);
+assert.equal(previewPreflightBlockedApi.body.previewPreflight.canRun, false);
+assert.match(previewPreflightBlockedApi.body.previewPreflight.disabledReason, /문제 확인|없는 타깃|target/);
+const previewPreflightMissingTargetBlocker = previewPreflightBlockedApi.body.previewPreflight.blockers.find((blocker) => blocker.issueCode === "missing-target");
+assert.ok(previewPreflightMissingTargetBlocker, "Preview preflight must expose missing-target as a stable blocker");
+assert.equal(previewPreflightMissingTargetBlocker.path, "scenes.0.choices.0");
+assert.deepEqual(previewPreflightMissingTargetBlocker.sceneIds, [previewPreflightEntrySceneId]);
+assert.deepEqual(previewPreflightMissingTargetBlocker.choiceIds, ["choice-preflight-missing"]);
+assert.equal(previewPreflightMissingTargetBlocker.repairActionIds.includes("create-target-scene"), true);
+assert.match(previewPreflightBlockedApi.body.previewPreflight.nextAction, /target|타깃|문제/);
+
+const previewPreflightBlockedCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightBlockedDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightBlockedCli.previewPreflight.canRun, false);
+assert.equal(previewPreflightBlockedCli.previewPreflight.blockers[0].issueCode, previewPreflightBlockedApi.body.previewPreflight.blockers[0].issueCode);
+assert.equal(previewPreflightBlockedCli.previewPreflight.nextAction, previewPreflightBlockedApi.body.previewPreflight.nextAction);
+assert.equal(previewPreflightBlockedCli.runtime, undefined);
+
+const previewPreflightMissingBackgroundBaseProject = core.createStarterProject({
+  id: "preview-preflight-missing-background",
+  title: "Preview Preflight Missing Background",
+  premise: "프리뷰 preflight가 필수 런타임 데이터 blocker도 canRun에 반영한다."
+});
+const previewPreflightMissingBackgroundProject = {
+  ...previewPreflightMissingBackgroundBaseProject,
+  assets: previewPreflightMissingBackgroundBaseProject.assets.filter((asset) => asset.kind !== "background"),
+  scenes: previewPreflightMissingBackgroundBaseProject.scenes.map((scene) => ({
+    ...scene,
+    backgroundAssetId: undefined
+  }))
+};
+const previewPreflightMissingBackgroundStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightMissingBackgroundDirectory,
+  project: previewPreflightMissingBackgroundProject
+});
+previewPreflightMissingBackgroundStore.close();
+
+const previewPreflightMissingBackgroundApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightMissingBackgroundDirectory }
+});
+assert.equal(previewPreflightMissingBackgroundApi.status, 409);
+assert.equal(previewPreflightMissingBackgroundApi.body.code, "PREVIEW_BLOCKED");
+assert.equal(previewPreflightMissingBackgroundApi.body.runtime, undefined);
+assert.equal(previewPreflightMissingBackgroundApi.body.previewReadiness.canRun, false);
+assert.equal(previewPreflightMissingBackgroundApi.body.previewPreflight.canRun, false);
+const previewPreflightBackgroundBlocker = previewPreflightMissingBackgroundApi.body.previewPreflight.blockers.find((blocker) => blocker.issueCode === "background-required");
+assert.ok(previewPreflightBackgroundBlocker, "Preview preflight must expose required background blockers");
+assert.equal(previewPreflightBackgroundBlocker.path, "assets");
+assert.equal(previewPreflightBackgroundBlocker.repairActionIds.includes("generate-background"), true);
+assert.match(previewPreflightMissingBackgroundApi.body.previewPreflight.disabledReason, /배경/);
+
+const previewPreflightMissingBackgroundCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightMissingBackgroundDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightMissingBackgroundCli.previewPreflight.canRun, false);
+assert.equal(previewPreflightMissingBackgroundCli.previewPreflight.blockers[0].issueCode, previewPreflightMissingBackgroundApi.body.previewPreflight.blockers[0].issueCode);
+assert.equal(previewPreflightMissingBackgroundCli.runtime, undefined);
+
+const previewPreflightRouteGateBaseProject = core.createStarterProject({
+  id: "preview-preflight-route-gate",
+  title: "Preview Preflight Route Gate",
+  premise: "프리뷰 preflight 전용 blocker가 runtime 실행을 막는다."
+});
+const previewPreflightRouteGateProject = projectWithPreviewBackground({
+  ...previewPreflightRouteGateBaseProject,
+  routes: [],
+  settings: {
+    ...previewPreflightRouteGateBaseProject.settings,
+    defaultRouteId: ""
+  }
+}, "asset-preview-preflight-route-gate-background");
+const previewPreflightRouteGateStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightRouteGateDirectory,
+  project: previewPreflightRouteGateProject
+});
+previewPreflightRouteGateStore.close();
+
+const previewPreflightRouteGatePreflightApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview/preflight",
+  body: { projectDirectory: previewPreflightRouteGateDirectory }
+});
+assert.equal(previewPreflightRouteGatePreflightApi.status, 200);
+assert.equal(previewPreflightRouteGatePreflightApi.body.runtime, undefined);
+assert.equal(previewPreflightRouteGatePreflightApi.body.previewPreflight.canRun, false);
+assert.equal(previewPreflightRouteGatePreflightApi.body.previewPreflight.blockers[0].issueCode, "route-required");
+assert.equal(previewPreflightRouteGatePreflightApi.body.previewPreflight.blockers[0].path, "routes");
+assert.match(previewPreflightRouteGatePreflightApi.body.previewPreflight.disabledReason, /루트/);
+
+const previewPreflightRouteGateCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview-preflight"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightRouteGateDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightRouteGateCli.runtime, undefined);
+assert.equal(previewPreflightRouteGateCli.previewPreflight.canRun, false);
+assert.equal(previewPreflightRouteGateCli.previewPreflight.blockers[0].issueCode, previewPreflightRouteGatePreflightApi.body.previewPreflight.blockers[0].issueCode);
+
+const previewPreflightRouteGatePreviewApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightRouteGateDirectory }
+});
+assert.equal(previewPreflightRouteGatePreviewApi.status, 409);
+assert.equal(previewPreflightRouteGatePreviewApi.body.code, "PREVIEW_BLOCKED");
+assert.equal(previewPreflightRouteGatePreviewApi.body.runtime, undefined);
+assert.equal(previewPreflightRouteGatePreviewApi.body.previewPreflight.canRun, false);
+assert.equal(previewPreflightRouteGatePreviewApi.body.previewPreflight.blockers[0].issueCode, "route-required");
+
+const previewPreflightReadyBaseProject = core.createStarterProject({
+  id: "preview-preflight-ready",
+  title: "Preview Preflight Ready",
+  premise: "조건 runtime 미지원은 실제 preview 가능 여부와 분리된다."
+});
+const previewPreflightReadyEntrySceneId = previewPreflightReadyBaseProject.routes[0].entrySceneId;
+const previewPreflightReadyTargetSceneId = previewPreflightReadyBaseProject.scenes.find((scene) => scene.id !== previewPreflightReadyEntrySceneId).id;
+const previewPreflightReadyProject = projectWithPreviewBackground({
+  ...previewPreflightReadyBaseProject,
+  scenes: previewPreflightReadyBaseProject.scenes.map((scene) => scene.id === previewPreflightReadyEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{
+          id: "choice-preflight-conditioned",
+          text: "믿고 따라간다",
+          next: previewPreflightReadyTargetSceneId,
+          condition: { flags: ["trusted-haru"] },
+          effects: { flags: ["previewed-conditioned-choice"] }
+        }]
+      }
+    : scene)
+}, "asset-preview-preflight-ready-background");
+const previewPreflightReadyStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightReadyDirectory,
+  project: previewPreflightReadyProject
+});
+previewPreflightReadyStore.close();
+
+const previewPreflightReadyApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightReadyDirectory }
+});
+assert.equal(previewPreflightReadyApi.status, 200);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.canRun, true);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.blockers, []);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.disabledReason, null);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.choiceConditionFiltering, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.choiceEffects, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.conditionSemanticsVersion, "unsupported");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings.some((warning) => warning.issueCode === "conditional-choice-runtime-unsupported"), true);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings.some((warning) => /condition preview not evaluated/.test(warning.message)), true);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings[0].path, "runtimeCapabilities");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.supported, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.strictPreviewStatus, "not_evaluated");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.strictPreviewSuccess, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.editorMode, "candidate_review_only");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionRuntimeSupport.reasonCode, "conditional-choice-runtime-unsupported");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.status, "not_evaluated");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.reasonCode, "conditional-choice-runtime-unsupported");
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.sceneIds, [previewPreflightReadyEntrySceneId]);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.choiceIds, ["choice-preflight-conditioned"]);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.visibleChoiceIds, []);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.hiddenChoiceIds, []);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.conditionEvaluationTrace.appliedEffects, []);
+assert.ok(previewPreflightReadyApi.body.runtime, "condition runtime unsupported must not block actual preview when validation blockers are absent");
+assert.equal(previewPreflightReadyApi.body.runtime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyApi.body.runtime.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyApi.body.runtime.conditionEvaluationTrace.status, "not_evaluated");
+const previewPreflightReadyRuntimeChoice = previewPreflightReadyApi.body.runtime.scenes
+  .find((scene) => scene.id === previewPreflightReadyEntrySceneId)
+  .choices.find((choice) => choice.id === "choice-preflight-conditioned");
+assert.equal("condition" in previewPreflightReadyRuntimeChoice, false);
+assert.equal("effects" in previewPreflightReadyRuntimeChoice, false);
+
+const previewPreflightReadyCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightReadyDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightReadyCli.previewPreflight.canRun, true);
+assert.equal(previewPreflightReadyCli.previewPreflight.disabledReason, null);
+assert.equal(previewPreflightReadyCli.previewPreflight.runtimeCapabilities.choiceConditionFiltering, false);
+assert.equal(previewPreflightReadyCli.previewPreflight.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyCli.previewPreflight.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyCli.previewPreflight.conditionEvaluationTrace.status, "not_evaluated");
+assert.equal(previewPreflightReadyCli.previewPreflight.warnings[0].issueCode, previewPreflightReadyApi.body.previewPreflight.warnings[0].issueCode);
+assert.equal(previewPreflightReadyCli.runtime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyCli.runtime.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.ok(previewPreflightReadyCli.runtime);
+const previewPreflightReadyExportApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/export",
+  body: {
+    outputDirectory: previewPreflightReadyExportDirectory,
+    projectDirectory: previewPreflightReadyDirectory
+  }
+});
+assert.equal(previewPreflightReadyExportApi.status, 200);
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionRuntimeSupport.strictPreviewSuccess, false);
+assert.equal(previewPreflightReadyExportApi.body.exportPlan.conditionEvaluationTrace.status, "not_evaluated");
+const previewPreflightReadyExportRuntime = JSON.parse(readFileSync(join(previewPreflightReadyExportApi.body.export.outputDirectory, "project-data.json"), "utf8"));
+assert.equal(previewPreflightReadyExportRuntime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyExportRuntime.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.deepEqual(previewPreflightReadyExportRuntime.conditionEvaluationTrace.choiceIds, ["choice-preflight-conditioned"]);
+const previewPreflightReadyExportChoice = previewPreflightReadyExportRuntime.scenes
+  .find((scene) => scene.id === previewPreflightReadyEntrySceneId)
+  .choices.find((choice) => choice.id === "choice-preflight-conditioned");
+assert.equal("condition" in previewPreflightReadyExportChoice, false);
+assert.equal("effects" in previewPreflightReadyExportChoice, false);
+const previewPreflightReadyCliExport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "export-web"], {
+  input: JSON.stringify({
+    outputPath: previewPreflightReadyCliExportDirectory,
+    projectDirectory: previewPreflightReadyDirectory
+  }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionRuntimeSupport.supportFlag, "support_false");
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionRuntimeSupport.previewPreflightSuccess, true);
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionRuntimeSupport.strictPreviewSuccess, false);
+assert.equal(previewPreflightReadyCliExport.exportPlan.conditionEvaluationTrace.status, "not_evaluated");
+const previewPreflightReadyCliExportRuntime = JSON.parse(readFileSync(join(previewPreflightReadyCliExport.export.outputDirectory, "project-data.json"), "utf8"));
+assert.equal(previewPreflightReadyCliExportRuntime.conditionRuntimeSupport.supportFlag, "support_false");
+assert.deepEqual(previewPreflightReadyCliExportRuntime.conditionEvaluationTrace.choiceIds, ["choice-preflight-conditioned"]);
+const previewPreflightReadyCliExportChoice = previewPreflightReadyCliExportRuntime.scenes
+  .find((scene) => scene.id === previewPreflightReadyEntrySceneId)
+  .choices.find((choice) => choice.id === "choice-preflight-conditioned");
+assert.equal("condition" in previewPreflightReadyCliExportChoice, false);
+assert.equal("effects" in previewPreflightReadyCliExportChoice, false);
+
+const repairCliInspect = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "inspect"], { encoding: "utf8" }));
+assert.equal(repairCliInspect.commands.includes("repair-preview"), true);
+assert.equal(repairCliInspect.commands.includes("repair-apply"), true);
+assert.equal(repairCliInspect.commands.includes("repair-undo"), true);
+
+function findRepairAction(result, issueCode, actionId) {
+  return (result.repairActions || []).find((action) => action.issueCode === issueCode && action.actionId === actionId);
+}
+
+function repairActionTuple(action) {
+  return {
+    actionId: action.actionId,
+    destructive: action.destructive,
+    disabledReason: action.disabledReason,
+    issueCode: action.issueCode,
+    preflightRepairActionIds: action.preflightBlocker?.repairActionIds || [],
+    requiredInputs: (action.requiredInputs || []).map((input) => ({
+      inputType: input.inputType,
+      label: input.label,
+      name: input.name,
+      options: (input.options || []).map((option) => ({ label: option.label, value: option.value }))
+    })),
+    requiresConfirmation: action.requiresConfirmation,
+    targetPath: action.targetPath
+  };
+}
+
+async function validateRepairFixture(projectDirectoryForFixture, projectForFixture) {
+  const store = await projectStore.createProjectWorkspace({
+    projectDirectory: projectDirectoryForFixture,
+    project: projectForFixture
+  });
+  store.close();
+  const api = await webHandlers.handleApiRequest({
+    method: "POST",
+    path: "/api/project/validate",
+    body: { projectDirectory: projectDirectoryForFixture }
+  });
+  const cli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "validate"], {
+    input: JSON.stringify({ projectDirectory: projectDirectoryForFixture }),
+    encoding: "utf8"
+  }));
+  return { api: api.body, cli };
+}
+
+const repairActionMissingTargetBaseProject = core.createStarterProject({
+  id: "repair-action-missing-target",
+  title: "Repair Action Missing Target",
+  premise: "missing target repair action 후보를 검증한다."
+});
+const repairActionMissingTargetEntrySceneId = repairActionMissingTargetBaseProject.routes[0].entrySceneId;
+const repairActionMissingTargetProject = {
+  ...repairActionMissingTargetBaseProject,
+  scenes: repairActionMissingTargetBaseProject.scenes.map((scene) => scene.id === repairActionMissingTargetEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{ id: "choice-repair-missing", text: "없는 타깃", next: "scene-repair-missing" }]
+      }
+    : scene)
+};
+const repairActionMissingTargetResult = await validateRepairFixture(repairActionMissingTargetDirectory, repairActionMissingTargetProject);
+const repairActionMissingTargetProjectCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "validate"], {
+  input: JSON.stringify({ project: repairActionMissingTargetProject }),
+  encoding: "utf8"
+}));
+const createTargetRepair = findRepairAction(repairActionMissingTargetResult.api, "missing-target", "create-target-scene");
+assert.ok(createTargetRepair, "missing-target must expose create-target-scene repair action");
+assert.equal(createTargetRepair.targetPath, "scenes.0.choices.0");
+assert.equal(createTargetRepair.destructive, false);
+assert.equal(createTargetRepair.requiresConfirmation, false);
+assert.equal(createTargetRepair.disabledReason, null);
+assert.deepEqual(createTargetRepair.expectedTarget.sceneIds, [repairActionMissingTargetEntrySceneId]);
+assert.deepEqual(createTargetRepair.expectedTarget.choiceIds, ["choice-repair-missing"]);
+assert.equal(createTargetRepair.expectedTarget.targetSceneId, "scene-repair-missing");
+assert.equal(createTargetRepair.requiredInputs.some((input) => input.name === "sceneLabel"), true);
+assert.equal(createTargetRepair.preflightBlocker.issueCode, "missing-target");
+assert.equal(createTargetRepair.preflightBlocker.repairActionIds.includes("create-target-scene"), true);
+const connectExistingRepair = findRepairAction(repairActionMissingTargetResult.api, "missing-target", "connect-existing-scene");
+assert.ok(connectExistingRepair, "missing-target must expose connect-existing-scene repair action");
+assert.equal(connectExistingRepair.requiredInputs.some((input) => input.name === "existingSceneId"), true);
+assert.deepEqual(
+  repairActionMissingTargetResult.cli.repairActions.map(repairActionTuple),
+  repairActionMissingTargetResult.api.repairActions.map(repairActionTuple)
+);
+assert.deepEqual(
+  repairActionMissingTargetProjectCli.repairActions.map(repairActionTuple),
+  repairActionMissingTargetResult.api.repairActions.map(repairActionTuple),
+  "CLI direct project validation must expose the same repair action DTO candidates"
+);
+
+const repairActionUncoveredBaseProject = core.createStarterProject({
+  id: "repair-action-uncovered-terminal",
+  title: "Repair Action Uncovered Terminal",
+  premise: "uncovered terminal repair action 후보를 검증한다."
+});
+const repairActionUncoveredTerminalProject = {
+  ...repairActionUncoveredBaseProject,
+  scenes: repairActionUncoveredBaseProject.scenes.map((scene) => scene.id === "scene-haru-smile"
+    ? {
+        ...scene,
+        ending: undefined,
+        choices: [],
+        next: undefined
+      }
+    : scene)
+};
+const repairActionUncoveredResult = await validateRepairFixture(repairActionUncoveredTerminalDirectory, repairActionUncoveredTerminalProject);
+const setEndingRepair = findRepairAction(repairActionUncoveredResult.api, "uncovered-terminal", "set-scene-ending");
+assert.ok(setEndingRepair, "uncovered-terminal must expose set-scene-ending repair action");
+assert.equal(setEndingRepair.targetPath, "scenes.1");
+assert.equal(setEndingRepair.destructive, false);
+assert.equal(setEndingRepair.requiredInputs.some((input) => input.name === "endingTitle"), true);
+assert.equal(setEndingRepair.requiredInputs.some((input) => input.name === "endingKind"), true);
+assert.deepEqual(
+  repairActionUncoveredResult.cli.repairActions.map(repairActionTuple),
+  repairActionUncoveredResult.api.repairActions.map(repairActionTuple)
+);
+
+const repairActionMixedBaseProject = core.createStarterProject({
+  id: "repair-action-mixed-outgoing",
+  title: "Repair Action Mixed Outgoing",
+  premise: "mixed outgoing repair action 후보를 검증한다."
+});
+const repairActionMixedProject = {
+  ...repairActionMixedBaseProject,
+  scenes: repairActionMixedBaseProject.scenes.map((scene) => scene.id === repairActionMixedBaseProject.routes[0].entrySceneId
+    ? {
+        ...scene,
+        next: "scene-haru-smile"
+      }
+    : scene)
+};
+const repairActionMixedResult = await validateRepairFixture(repairActionMixedOutgoingDirectory, repairActionMixedProject);
+const removeMixedNextRepair = findRepairAction(repairActionMixedResult.api, "mixed-outgoing", "remove-next");
+assert.ok(removeMixedNextRepair, "mixed-outgoing must expose remove-next repair action");
+assert.equal(removeMixedNextRepair.targetPath, "scenes.0");
+assert.equal(removeMixedNextRepair.destructive, true);
+assert.equal(removeMixedNextRepair.requiresConfirmation, true);
+assert.deepEqual(removeMixedNextRepair.requiredInputs, []);
+
+const repairActionEndingBaseProject = core.createStarterProject({
+  id: "repair-action-ending-outgoing",
+  title: "Repair Action Ending Outgoing",
+  premise: "ending outgoing repair action 후보를 검증한다."
+});
+const repairActionEndingProject = {
+  ...repairActionEndingBaseProject,
+  scenes: repairActionEndingBaseProject.scenes.map((scene) => scene.id === "scene-haru-smile"
+    ? {
+        ...scene,
+        next: "scene-opening"
+      }
+    : scene)
+};
+const repairActionEndingResult = await validateRepairFixture(repairActionEndingOutgoingDirectory, repairActionEndingProject);
+const removeEndingNextRepair = findRepairAction(repairActionEndingResult.api, "ending-has-outgoing", "remove-next");
+assert.ok(removeEndingNextRepair, "ending-has-outgoing must expose remove-next repair action");
+assert.equal(removeEndingNextRepair.destructive, true);
+assert.equal(removeEndingNextRepair.requiresConfirmation, true);
+
+const repairActionUnknownBaseProject = core.createStarterProject({
+  id: "repair-action-unknown-issue",
+  title: "Repair Action Unknown Issue",
+  premise: "unknown issue에는 repair action 후보를 만들지 않는다."
+});
+const repairActionUnknownProject = {
+  ...repairActionUnknownBaseProject,
+  scenes: repairActionUnknownBaseProject.scenes.map((scene) => scene.id === "scene-opening"
+    ? {
+        ...scene,
+        choices: [
+          { id: "choice-duplicate", text: "첫 번째 중복 선택지", next: "scene-haru-smile" },
+          { id: "choice-duplicate", text: "두 번째 중복 선택지", next: "scene-haru-smile" }
+        ]
+      }
+    : scene)
+};
+const repairActionUnknownResult = await validateRepairFixture(repairActionUnknownIssueDirectory, repairActionUnknownProject);
+assert.equal(repairActionUnknownResult.api.issues.some((issue) => issue.code === "duplicate-choice-id"), true);
+assert.equal((repairActionUnknownResult.api.repairActions || []).some((action) => action.issueCode === "duplicate-choice-id"), false);
+assert.deepEqual(
+  (repairActionUnknownResult.api.previewPreflight?.blockers || [])
+    .filter((blocker) => blocker.issueCode === "duplicate-choice-id")
+    .flatMap((blocker) => blocker.repairActionIds || []),
+  [],
+  "unsupported validation issues must remain diagnostic-only in preflight repairActionIds"
+);
+assert.deepEqual(
+  repairActionUnknownResult.cli.repairActions.map(repairActionTuple),
+  repairActionUnknownResult.api.repairActions.map(repairActionTuple)
+);
+
+function mixedOutgoingRepairProject(id, title) {
+  const baseProject = core.createStarterProject({
+    id,
+    title,
+    premise: "mixed outgoing repair diff/apply/undo를 검증한다."
+  });
+  return {
+    ...baseProject,
+    scenes: baseProject.scenes.map((scene) => scene.id === baseProject.routes[0].entrySceneId
+      ? {
+          ...scene,
+          next: "scene-haru-smile"
+        }
+      : scene)
+  };
+}
+
+function repairRemoveNextRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "remove-next",
+      issueCode: "mixed-outgoing",
+      targetPath: "scenes.0"
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+function repairSetEndingRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "set-scene-ending",
+      issueCode: "uncovered-terminal",
+      targetPath: "scenes.1",
+      inputs: {
+        endingTitle: "수리된 엔딩",
+        endingKind: "normal"
+      }
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+function repairCreateTargetSceneRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "create-target-scene",
+      issueCode: "missing-target",
+      targetPath: "routes",
+      inputs: {
+        sceneLabel: "복구된 시작 씬"
+      }
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+function repairConnectExistingRouteRequest(projectDirectoryForFixture, expectedProjectRevision, confirmToken) {
+  return {
+    projectDirectory: projectDirectoryForFixture,
+    expectedProjectRevision,
+    repairAction: {
+      actionId: "connect-existing-scene",
+      issueCode: "missing-target",
+      targetPath: "routes",
+      inputs: {
+        existingSceneId: "scene-opening"
+      }
+    },
+    ...(confirmToken ? { confirmToken } : {})
+  };
+}
+
+async function repairApi(path, body) {
+  return webHandlers.handleApiRequest({
+    method: "POST",
+    path,
+    body
+  });
+}
+
+const repairDiffApplyStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairDiffApplyDirectory,
+  project: mixedOutgoingRepairProject("repair-diff-apply", "Repair Diff Apply")
+});
+repairDiffApplyStore.close();
+const repairDiffValidate = await repairApi("/api/project/validate", { projectDirectory: repairDiffApplyDirectory });
+assert.equal(repairDiffValidate.body.validation.ok, false);
+assert.equal(repairDiffValidate.body.issues.some((issue) => issue.code === "mixed-outgoing"), true);
+const repairDiffRevision = repairDiffValidate.body.projectRevision;
+const repairPreviewApi = await repairApi("/api/project/repair/preview", repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision));
+assert.equal(repairPreviewApi.status, 200);
+assert.equal(repairPreviewApi.body.ok, true);
+assert.equal(repairPreviewApi.body.repairPreview.actionId, "remove-next");
+assert.equal(repairPreviewApi.body.repairPreview.issueCode, "mixed-outgoing");
+assert.equal(repairPreviewApi.body.repairPreview.beforeRevision.revision, repairDiffRevision.revision);
+assert.equal(typeof repairPreviewApi.body.repairPreview.confirmToken, "string");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].op, "remove");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].path, "scenes.0.next");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].before, "scene-haru-smile");
+assert.equal(repairPreviewApi.body.repairPreview.diff[0].after, null);
+assert.match(repairPreviewApi.body.repairPreview.diff[0].humanLabel, /next 연결 제거/);
+assert.equal(repairPreviewApi.body.repairPreview.destructiveWarnings.length > 0, true);
+
+const repairPreviewCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-preview"], {
+  input: JSON.stringify(repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision)),
+  encoding: "utf8"
+}));
+assert.deepEqual(
+  repairPreviewCli.repairPreview.diff,
+  repairPreviewApi.body.repairPreview.diff,
+  "CLI repair-preview diff must match Web API repair-preview diff"
+);
+
+const repairApplyMismatch = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision, "wrong-token"));
+assert.equal(repairApplyMismatch.body.ok, false);
+assert.equal(repairApplyMismatch.body.issues.some((issue) => issue.path === "confirmToken"), true);
+
+const repairApplyApi = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(
+  repairDiffApplyDirectory,
+  repairDiffRevision,
+  repairPreviewApi.body.repairPreview.confirmToken
+));
+assert.equal(repairApplyApi.status, 200);
+assert.equal(repairApplyApi.body.ok, true);
+assert.equal(repairApplyApi.body.previousRevision.revision, repairDiffRevision.revision);
+assert.notEqual(repairApplyApi.body.projectRevision.revision, repairDiffRevision.revision);
+assert.equal(repairApplyApi.body.validation.ok, true);
+assert.equal(repairApplyApi.body.repairHistoryEntry.actionId, "remove-next");
+assert.equal(repairApplyApi.body.repairHistoryEntry.issueCode, "mixed-outgoing");
+assert.equal(repairApplyApi.body.project.scenes.find((scene) => scene.id === "scene-opening").next, undefined);
+assert.equal(repairApplyApi.body.issues.some((issue) => issue.code === "mixed-outgoing"), false);
+assert.equal((repairApplyApi.body.previewPreflight.blockers || []).some((blocker) => blocker.issueCode === "mixed-outgoing"), false);
+
+const repairApplyStaleBeforeConfirm = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(repairDiffApplyDirectory, repairDiffRevision, "wrong-token"));
+assert.equal(repairApplyStaleBeforeConfirm.body.ok, false);
+assert.equal(repairApplyStaleBeforeConfirm.body.code, "STALE_PROJECT_REVISION");
+
+const repairUndoApi = await repairApi("/api/project/repair/undo", {
+  projectDirectory: repairDiffApplyDirectory,
+  repairHistoryId: repairApplyApi.body.repairHistoryEntry.id
+});
+assert.equal(repairUndoApi.status, 200);
+assert.equal(repairUndoApi.body.ok, true);
+assert.equal(repairUndoApi.body.project.scenes.find((scene) => scene.id === "scene-opening").next, "scene-haru-smile");
+assert.equal(repairUndoApi.body.validation.ok, false);
+assert.equal(repairUndoApi.body.issues.some((issue) => issue.code === "mixed-outgoing"), true);
+assert.equal((repairUndoApi.body.previewPreflight.blockers || []).some((blocker) => blocker.issueCode === "mixed-outgoing"), true);
+
+const repairCliStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairCliParityDirectory,
+  project: mixedOutgoingRepairProject("repair-cli-parity", "Repair CLI Parity")
+});
+repairCliStore.close();
+const repairCliValidate = await repairApi("/api/project/validate", { projectDirectory: repairCliParityDirectory });
+const repairCliRevision = repairCliValidate.body.projectRevision;
+const repairCliPreview = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-preview"], {
+  input: JSON.stringify(repairRemoveNextRequest(repairCliParityDirectory, repairCliRevision)),
+  encoding: "utf8"
+}));
+const repairCliApply = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-apply"], {
+  input: JSON.stringify(repairRemoveNextRequest(repairCliParityDirectory, repairCliRevision, repairCliPreview.repairPreview.confirmToken)),
+  encoding: "utf8"
+}));
+assert.equal(repairCliApply.ok, true);
+assert.equal(repairCliApply.validation.ok, true);
+assert.equal(repairCliApply.repairHistoryEntry.actionId, "remove-next");
+const repairCliUndo = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "repair-undo"], {
+  input: JSON.stringify({
+    projectDirectory: repairCliParityDirectory,
+    repairHistoryId: repairCliApply.repairHistoryEntry.id
+  }),
+  encoding: "utf8"
+}));
+assert.equal(repairCliUndo.ok, true);
+assert.equal(repairCliUndo.validation.ok, false);
+assert.equal(repairCliUndo.issues.some((issue) => issue.code === "mixed-outgoing"), true);
+
+const repairFailureCli = spawnSync(process.execPath, ["packages/cli/dist/index.js", "repair-apply"], {
+  input: JSON.stringify({
+    projectDirectory: repairCliParityDirectory,
+    repairAction: {
+      actionId: "remove-next",
+      issueCode: "mixed-outgoing",
+      targetPath: "scenes.0"
+    },
+    confirmToken: "missing-revision"
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(repairFailureCli.status, 0);
+const repairFailureCliBody = JSON.parse(repairFailureCli.stdout);
+assert.equal(repairFailureCliBody.action, "applyRepair");
+
+const routeMissingTargetBaseProject = core.createStarterProject({
+  id: "repair-route-missing-target",
+  title: "Repair Route Missing Target",
+  premise: "route entrySceneId missing-target 수리를 검증한다."
+});
+const routeMissingTargetProject = {
+  ...routeMissingTargetBaseProject,
+  routes: routeMissingTargetBaseProject.routes.map((route) => ({
+    ...route,
+    entrySceneId: "scene-missing-entry"
+  }))
+};
+const routeMissingTargetStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairRouteMissingTargetDirectory,
+  project: routeMissingTargetProject
+});
+routeMissingTargetStore.close();
+const routeMissingValidate = await repairApi("/api/project/validate", { projectDirectory: repairRouteMissingTargetDirectory });
+assert.equal(routeMissingValidate.body.issues.some((issue) => issue.code === "missing-target" && issue.path === "routes"), true);
+const routeMissingRevision = routeMissingValidate.body.projectRevision;
+const routeCreatePreview = await repairApi("/api/project/repair/preview", repairCreateTargetSceneRequest(repairRouteMissingTargetDirectory, routeMissingRevision));
+assert.equal(routeCreatePreview.body.ok, true);
+assert.equal(routeCreatePreview.body.repairPreview.diff[0].path, "scenes.2");
+assert.equal(routeCreatePreview.body.repairPreview.diff[0].after.id, "scene-missing-entry");
+const routeConnectPreview = await repairApi("/api/project/repair/preview", repairConnectExistingRouteRequest(repairRouteMissingTargetDirectory, routeMissingRevision));
+assert.equal(routeConnectPreview.body.ok, true);
+assert.equal(routeConnectPreview.body.repairPreview.diff[0].path, "routes.0.entrySceneId");
+assert.equal(routeConnectPreview.body.repairPreview.diff[0].after, "scene-opening");
+const routeConnectApply = await repairApi("/api/project/repair/apply", repairConnectExistingRouteRequest(
+  repairRouteMissingTargetDirectory,
+  routeMissingRevision,
+  routeConnectPreview.body.repairPreview.confirmToken
+));
+assert.equal(routeConnectApply.body.ok, true);
+assert.equal(routeConnectApply.body.project.routes[0].entrySceneId, "scene-opening");
+assert.equal(routeConnectApply.body.issues.some((issue) => issue.code === "missing-target"), false);
+
+const repairLastUndoBaseProject = core.createStarterProject({
+  id: "repair-last-undo",
+  title: "Repair Last Undo",
+  premise: "last action undo만 허용한다."
+});
+const repairLastUndoProject = {
+  ...repairLastUndoBaseProject,
+  scenes: repairLastUndoBaseProject.scenes.map((scene) => {
+    if (scene.id === repairLastUndoBaseProject.routes[0].entrySceneId) {
+      return { ...scene, next: "scene-haru-smile" };
+    }
+    if (scene.id === "scene-haru-smile") {
+      return { ...scene, ending: undefined, choices: [], next: undefined };
+    }
+    return scene;
+  })
+};
+const repairLastUndoStore = await projectStore.createProjectWorkspace({
+  projectDirectory: repairLastUndoDirectory,
+  project: repairLastUndoProject
+});
+repairLastUndoStore.close();
+const repairLastInitial = await repairApi("/api/project/validate", { projectDirectory: repairLastUndoDirectory });
+const repairLastInitialRevision = repairLastInitial.body.projectRevision;
+const repairLastRemovePreview = await repairApi("/api/project/repair/preview", repairRemoveNextRequest(repairLastUndoDirectory, repairLastInitialRevision));
+const repairLastFirstApply = await repairApi("/api/project/repair/apply", repairRemoveNextRequest(
+  repairLastUndoDirectory,
+  repairLastInitialRevision,
+  repairLastRemovePreview.body.repairPreview.confirmToken
+));
+assert.equal(repairLastFirstApply.body.ok, true);
+const repairLastEndingRevision = repairLastFirstApply.body.projectRevision;
+const repairLastEndingPreview = await repairApi("/api/project/repair/preview", repairSetEndingRequest(repairLastUndoDirectory, repairLastEndingRevision));
+const repairLastSecondApply = await repairApi("/api/project/repair/apply", repairSetEndingRequest(
+  repairLastUndoDirectory,
+  repairLastEndingRevision,
+  repairLastEndingPreview.body.repairPreview.confirmToken
+));
+assert.equal(repairLastSecondApply.body.ok, true);
+const repairUndoOld = await repairApi("/api/project/repair/undo", {
+  projectDirectory: repairLastUndoDirectory,
+  repairHistoryId: repairLastFirstApply.body.repairHistoryEntry.id
+});
+assert.equal(repairUndoOld.body.ok, false);
+assert.equal(repairUndoOld.body.issues.some((issue) => issue.path === "repairHistoryId" && /마지막/.test(issue.message)), true);
+const repairUndoLatest = await repairApi("/api/project/repair/undo", {
+  projectDirectory: repairLastUndoDirectory,
+  repairHistoryId: repairLastSecondApply.body.repairHistoryEntry.id
+});
+assert.equal(repairUndoLatest.body.ok, true);
+assert.equal(Boolean(repairUndoLatest.body.repairHistoryEntry.revertedAt), true);
+assert.deepEqual(repairUndoLatest.body.repairHistory || [], []);
+
+const revisionGuardProject = core.createStarterProject({
+  id: "revision-guard",
+  title: "Revision Guard",
+  premise: "expectedProjectRevision과 transactional apply를 검증한다."
+});
+const revisionGuardStore = await projectStore.createProjectWorkspace({
+  projectDirectory: revisionGuardDirectory,
+  project: revisionGuardProject
+});
+const revisionGuardInitialRevision = revisionGuardStore.getProjectRevision();
+const revisionGuardEntrySceneId = revisionGuardProject.routes[0].entrySceneId;
+const revisionGuardEntryScene = revisionGuardProject.scenes.find((scene) => scene.id === revisionGuardEntrySceneId);
+revisionGuardStore.close();
+
+const revisionGuardInvalidScene = {
+  ...revisionGuardEntryScene,
+  text: "revision guard가 검증 문제 저장까지 한 번에 처리한다.",
+  next: undefined,
+  choices: [{ id: "choice-stale-target", text: "사라진 장면으로 간다", next: "scene-stale-missing" }]
+};
+const revisionGuardApiApply = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes",
+  body: {
+    projectDirectory: revisionGuardDirectory,
+    expectedProjectRevision: revisionGuardInitialRevision,
+    scene: revisionGuardInvalidScene
+  }
+});
+assert.equal(revisionGuardApiApply.status, 200);
+assert.equal(revisionGuardApiApply.body.ok, true);
+assert.equal(revisionGuardApiApply.body.previousRevision.revision, revisionGuardInitialRevision.revision);
+assert.notEqual(revisionGuardApiApply.body.projectRevision.revision, revisionGuardInitialRevision.revision);
+assert.equal(revisionGuardApiApply.body.validation.ok, false);
+assert.equal(revisionGuardApiApply.body.validation.issues.some((issue) => issue.code === "missing-target"), true);
+
+const revisionGuardAfterApplyStore = await projectStore.openProjectStore(revisionGuardDirectory);
+const storedRevisionGuardIssue = revisionGuardAfterApplyStore.readValidationIssues().find((issue) => issue.code === "missing-target");
+assert.ok(storedRevisionGuardIssue, "transactional apply must store validation issue codes");
+assert.deepEqual(storedRevisionGuardIssue.sceneIds, [revisionGuardEntrySceneId]);
+assert.deepEqual(storedRevisionGuardIssue.choiceIds, ["choice-stale-target"]);
+revisionGuardAfterApplyStore.close();
+
+const staleRevisionGuardScene = {
+  ...revisionGuardInvalidScene,
+  text: "stale mutation이 이 텍스트로 덮어쓰면 안 된다."
+};
+const revisionGuardApiStale = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes",
+  body: {
+    projectDirectory: revisionGuardDirectory,
+    expectedProjectRevision: revisionGuardInitialRevision,
+    scene: staleRevisionGuardScene
+  }
+});
+assert.equal(revisionGuardApiStale.status, 409);
+assert.equal(revisionGuardApiStale.body.code, "STALE_PROJECT_REVISION");
+assert.equal(revisionGuardApiStale.body.expectedRevision, revisionGuardInitialRevision.revision);
+assert.equal(revisionGuardApiStale.body.actualRevision.revision, revisionGuardApiApply.body.projectRevision.revision);
+assert.equal(revisionGuardApiStale.body.nextAction, "최신 프로젝트를 다시 불러온 뒤 시도하세요.");
+
+const revisionGuardCliStale = spawnSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+  input: JSON.stringify({
+    projectDirectory: revisionGuardDirectory,
+    expectedProjectRevision: revisionGuardInitialRevision,
+    scene: staleRevisionGuardScene
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(revisionGuardCliStale.status, 0);
+const revisionGuardCliStaleBody = JSON.parse(revisionGuardCliStale.stdout);
+assert.equal(revisionGuardCliStaleBody.code, "STALE_PROJECT_REVISION");
+assert.equal(revisionGuardCliStaleBody.expectedRevision, revisionGuardApiStale.body.expectedRevision);
+assert.equal(revisionGuardCliStaleBody.actualRevision.revision, revisionGuardApiStale.body.actualRevision.revision);
+assert.equal(revisionGuardCliStaleBody.nextAction, revisionGuardApiStale.body.nextAction);
+
+const revisionGuardAfterStaleStore = await projectStore.openProjectStore(revisionGuardDirectory);
+const revisionGuardAfterStaleProject = revisionGuardAfterStaleStore.requireProject();
+assert.equal(revisionGuardAfterStaleProject.scenes.find((scene) => scene.id === revisionGuardEntrySceneId).text, revisionGuardInvalidScene.text);
+assert.notEqual(revisionGuardAfterStaleProject.scenes.find((scene) => scene.id === revisionGuardEntrySceneId).text, staleRevisionGuardScene.text);
+revisionGuardAfterStaleStore.close();
+
 const apiScene = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/project/scenes",
   body: {
     projectDirectory,
+    expectedProjectRevision: cliSaveEndingScene.projectRevision,
     scene: {
       ...cliSaveEndingScene.project.scenes.find((scene) => scene.id === "scene-haru-smile"),
       text: "Web API가 ending metadata를 포함한 장면을 저장했다."
@@ -324,9 +1276,10 @@ const manualCliCreate = JSON.parse(manualCliCreateOutput);
 assert.equal(manualCliCreate.ok, true);
 const manualCliOpeningId = manualCliCreate.project.routes[0].entrySceneId;
 
-execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
+const manualCliOpenBranchOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   input: JSON.stringify({
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliCreate.projectRevision,
     scene: {
       ...manualCliCreate.project.scenes.find((scene) => scene.id === manualCliOpeningId),
       next: undefined
@@ -334,10 +1287,12 @@ execFileSync(process.execPath, ["packages/cli/dist/index.js", "save-scene"], {
   }),
   encoding: "utf8"
 });
+const manualCliOpenBranch = JSON.parse(manualCliOpenBranchOutput);
 
 const manualCliInsertOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "insert-scene"], {
   input: JSON.stringify({
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliOpenBranch.projectRevision,
     sourceSceneId: manualCliOpeningId,
     link: { type: "choice", choiceId: "choice-good", choiceText: "고백한다" },
     scene: {
@@ -358,6 +1313,7 @@ assert.equal(manualCliInsert.selectedSceneId, "scene-cli-good-ending");
 const manualCliEndingOutput = execFileSync(process.execPath, ["packages/cli/dist/index.js", "set-scene-ending"], {
   input: JSON.stringify({
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliInsert.projectRevision,
     sceneId: "scene-cli-good-ending",
     ending: { id: "ending-cli-good", title: "CLI의 약속", kind: "good" }
   }),
@@ -372,6 +1328,7 @@ const manualApiInsert = await webHandlers.handleApiRequest({
   path: "/api/project/scenes/insert",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualCliEnding.projectRevision,
     link: { type: "none" },
     scene: {
       id: "scene-api-normal-ending",
@@ -392,6 +1349,7 @@ const manualApiLink = await webHandlers.handleApiRequest({
   path: "/api/project/scenes/link",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualApiInsert.body.projectRevision,
     sourceSceneId: manualCliOpeningId,
     targetSceneId: "scene-api-normal-ending",
     link: { type: "choice", choiceId: "choice-normal", choiceText: "전시를 마무리한다" }
@@ -402,11 +1360,87 @@ assert.equal(manualApiLink.body.ok, true);
 assert.deepEqual(manualApiLink.body.routeGraphAnalysis.uncoveredTerminalSceneIds, []);
 assert.deepEqual([...manualApiLink.body.routeGraphAnalysis.reachableEndingIds].sort(), ["ending-api-normal", "ending-cli-good"]);
 
+const manualStaleRevision = manualApiInsert.body.projectRevision;
+const manualApiStaleInsert = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/insert",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sourceSceneId: "scene-does-not-exist",
+    link: { type: "choice", choiceText: "stale insert가 먼저 막힌다" },
+    scene: {
+      id: "scene-stale-insert",
+      label: "Stale Insert",
+      speaker: "하루",
+      text: "이 장면은 저장되면 안 된다.",
+      characters: [],
+      choices: []
+    }
+  }
+});
+assert.equal(manualApiStaleInsert.status, 409);
+assert.equal(manualApiStaleInsert.body.code, "STALE_PROJECT_REVISION");
+assert.equal(manualApiStaleInsert.body.expectedRevision, manualStaleRevision.revision);
+assert.equal(manualApiStaleInsert.body.actualRevision.revision, manualApiLink.body.projectRevision.revision);
+assert.equal(manualApiStaleInsert.body.nextAction, "최신 프로젝트를 다시 불러온 뒤 시도하세요.");
+
+const manualApiStaleLink = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/link",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sourceSceneId: "scene-does-not-exist",
+    targetSceneId: "scene-also-missing",
+    link: { type: "choice", choiceText: "stale link가 먼저 막힌다" }
+  }
+});
+assert.equal(manualApiStaleLink.status, 409);
+assert.equal(manualApiStaleLink.body.code, "STALE_PROJECT_REVISION");
+assert.equal(manualApiStaleLink.body.expectedRevision, manualStaleRevision.revision);
+assert.equal(manualApiStaleLink.body.actualRevision.revision, manualApiLink.body.projectRevision.revision);
+assert.equal(manualApiStaleLink.body.nextAction, manualApiStaleInsert.body.nextAction);
+
+const manualApiStaleEnding = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/scenes/ending",
+  body: {
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sceneId: "scene-does-not-exist",
+    ending: { id: "ending-stale", title: "Stale Ending", kind: "bad" }
+  }
+});
+assert.equal(manualApiStaleEnding.status, 409);
+assert.equal(manualApiStaleEnding.body.code, "STALE_PROJECT_REVISION");
+assert.equal(manualApiStaleEnding.body.expectedRevision, manualStaleRevision.revision);
+assert.equal(manualApiStaleEnding.body.actualRevision.revision, manualApiLink.body.projectRevision.revision);
+assert.equal(manualApiStaleEnding.body.nextAction, manualApiStaleInsert.body.nextAction);
+
+const manualCliStaleLink = spawnSync(process.execPath, ["packages/cli/dist/index.js", "link-scene"], {
+  input: JSON.stringify({
+    projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualStaleRevision,
+    sourceSceneId: "scene-does-not-exist",
+    targetSceneId: "scene-also-missing",
+    link: { type: "choice", choiceText: "stale CLI link가 먼저 막힌다" }
+  }),
+  encoding: "utf8"
+});
+assert.notEqual(manualCliStaleLink.status, 0);
+const manualCliStaleLinkBody = JSON.parse(manualCliStaleLink.stdout);
+assert.equal(manualCliStaleLinkBody.code, "STALE_PROJECT_REVISION");
+assert.equal(manualCliStaleLinkBody.expectedRevision, manualApiStaleLink.body.expectedRevision);
+assert.equal(manualCliStaleLinkBody.actualRevision.revision, manualApiStaleLink.body.actualRevision.revision);
+assert.equal(manualCliStaleLinkBody.nextAction, manualApiStaleLink.body.nextAction);
+
 const manualApiMissingTarget = await webHandlers.handleApiRequest({
   method: "POST",
   path: "/api/project/scenes/link",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualApiLink.body.projectRevision,
     sourceSceneId: manualCliOpeningId,
     targetSceneId: "scene-does-not-exist",
     link: { type: "choice", choiceText: "없는 장면으로 간다" }
@@ -420,6 +1454,7 @@ const manualApiEndingFailure = await webHandlers.handleApiRequest({
   path: "/api/project/scenes/ending",
   body: {
     projectDirectory: manualCliApiDirectory,
+    expectedProjectRevision: manualApiLink.body.projectRevision,
     sceneId: manualCliOpeningId,
     ending: { id: "ending-api-bad", title: "갑작스런 끝", kind: "bad" },
     clearOutgoing: false
@@ -661,6 +1696,334 @@ const mockCodex = {
 };
 
 const mockApi = webHandlers.createApiRequestHandler({ codex: mockCodex, recentProjectIndexFile: apiRecentProjectIndexFile });
+const fixedPromptApiCliHeroine = core.createHeroineProfile({
+  id: "fixed-prompt-haru",
+  name: "하루",
+  description: "고정 프롬프트 API/CLI parity 테스트 히로인.",
+  personality: "차분하지만 중요한 순간에는 솔직하다.",
+  speechStyle: "짧고 담백한 말투.",
+  appearance: "단정한 교복과 연분홍 머리핀."
+});
+const fixedPromptApiCliProject = core.createProjectFromHeroine({
+  id: "fixed-prompt-api-cli",
+  title: "Fixed Prompt API CLI",
+  premise: "고정 프롬프트 replay와 결과 로그 API/CLI 계약을 검증한다.",
+  heroine: fixedPromptApiCliHeroine
+});
+const fixedPromptApiCliStore = await projectStore.createProjectWorkspace({
+  projectDirectory: fixedPromptApiCliDirectory,
+  project: fixedPromptApiCliProject
+});
+fixedPromptApiCliStore.close();
+const fixedPromptApiList = await mockApi({
+  method: "POST",
+  path: "/api/events/fixed-prompts",
+  body: { projectDirectory: fixedPromptApiCliDirectory }
+});
+assert.equal(fixedPromptApiList.status, 200);
+assert.equal(fixedPromptApiList.body.ok, true);
+assert.equal(typeof fixedPromptApiList.body.fixedPromptSetId, "string");
+assert.equal(fixedPromptApiList.body.fixedPromptSet.id, fixedPromptApiList.body.fixedPromptSetId);
+assert.equal(fixedPromptApiList.body.fixtures.length >= 3, true);
+const fixedPromptApiReplay = await mockApi({
+  method: "POST",
+  path: "/api/events/fixed-prompts/replay",
+  body: {
+    projectDirectory: fixedPromptApiCliDirectory,
+    promptId: fixedPromptApiList.body.fixtures[0].promptId,
+    adapterMode: "actual"
+  }
+});
+assert.equal(fixedPromptApiReplay.status, 200);
+assert.equal(fixedPromptApiReplay.body.ok, true);
+assert.equal(fixedPromptApiReplay.body.fixedPromptSetId, fixedPromptApiList.body.fixedPromptSetId);
+assert.equal(fixedPromptApiReplay.body.generationResultId, fixedPromptApiReplay.body.generationResultLog.resultId);
+assert.equal(fixedPromptApiReplay.body.generationResultLog.promptText, fixedPromptApiList.body.fixtures[0].promptText);
+assert.equal(fixedPromptApiReplay.body.generationResultLog.sourceType, "actual");
+assert.equal(fixedPromptApiReplay.body.generationResultLog.adapter, "codex-event-text-adapter");
+assert.equal(fixedPromptApiReplay.body.generationResultLog.classification, "passed");
+assert.equal(fixedPromptApiReplay.body.generationResultLog.patchHistoryId, fixedPromptApiReplay.body.patchHistoryEntry.id);
+assert.equal(fixedPromptApiReplay.body.patchHistoryEntry.status, "proposed");
+assert.equal(fixedPromptApiReplay.body.actionEvent.eventName, "generated");
+assert.equal(fixedPromptApiReplay.body.actionEvent.promptId, fixedPromptApiList.body.fixtures[0].promptId);
+assert.equal(fixedPromptApiReplay.body.actionEvent.correlationId, fixedPromptApiReplay.body.correlationId);
+const fixedPromptApiLogs = await mockApi({
+  method: "POST",
+  path: "/api/events/generation-result-logs",
+  body: { projectDirectory: fixedPromptApiCliDirectory }
+});
+assert.equal(fixedPromptApiLogs.status, 200);
+assert.equal(fixedPromptApiLogs.body.generationResultLogs.some((log) => log.resultId === fixedPromptApiReplay.body.generationResultId), true);
+
+const uxEventApiStore = await projectStore.createProjectWorkspace({
+  projectDirectory: uxEventApiDirectory,
+  project: {
+    ...fixedPromptApiCliProject,
+    id: "ux-event-api"
+  }
+});
+uxEventApiStore.close();
+const uxEventApiStarted = await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "started",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    participantType: "novice_non_dev_story_creator",
+    taskId: "api-task",
+    outcome: "started"
+  }
+});
+assert.equal(uxEventApiStarted.status, 200);
+assert.equal(uxEventApiStarted.body.ok, true);
+assert.equal(uxEventApiStarted.body.actionEvent.eventName, "started");
+assert.equal(typeof uxEventApiStarted.body.event.eventLogId, "string");
+const uxEventApiRecipe = await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "recipe_used",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    promptId: fixedPromptApiList.body.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    outcome: "used"
+  }
+});
+assert.equal(uxEventApiRecipe.status, 200);
+assert.equal(uxEventApiRecipe.body.event.eventLogId, uxEventApiStarted.body.event.eventLogId);
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "repair_action_used",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    issueCode: "missing-target",
+    repairActionId: "create-target-scene",
+    outcome: "used"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "repaired",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    issueCode: "missing-target",
+    issueCodesBefore: ["missing-target"],
+    issueCodesAfter: [],
+    repairActionId: "create-target-scene",
+    outcome: "success"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "previewed",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    preflightResult: { canRun: true },
+    outcome: "completed"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "hint_given",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    helpChannel: "moderator_hint",
+    hintLevel: 1,
+    outcome: "given"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "abandoned",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    outcome: "abandoned"
+  }
+});
+const uxEventApiExport = await mockApi({
+  method: "POST",
+  path: "/api/events/ux/export",
+  body: { projectDirectory: uxEventApiDirectory, sessionId: "api-session-104" }
+});
+assert.equal(uxEventApiExport.status, 200);
+assert.equal(uxEventApiExport.body.eventLog.eventLogId, uxEventApiStarted.body.event.eventLogId);
+assert.equal(uxEventApiExport.body.eventLog.projectRevision.revision, uxEventApiExport.body.projectRevision.revision);
+assert.deepEqual(
+  uxEventApiExport.body.eventLog.events
+    .filter((event) => ["started", "recipe_used", "repair_action_used", "repaired", "previewed"].includes(event.eventName))
+    .map((event) => event.eventName)
+    .slice(0, 5),
+  ["started", "recipe_used", "repair_action_used", "repaired", "previewed"]
+);
+assert.equal(uxEventApiExport.body.eventLog.events.find((event) => event.eventName === "hint_given").helpChannel, "moderator_hint");
+assert.equal(uxEventApiExport.body.eventLog.events.find((event) => event.eventName === "abandoned").outcome, "abandoned");
+
+const phase0ApiReport = await mockApi({
+  method: "POST",
+  path: "/api/phase0/decision-report",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    sessionIds: ["api-session-104"],
+    participantResults: [{
+      participantIdHash: "api-participant-hash",
+      sessionId: "api-session-104",
+      inputMode: "fixed_prompt",
+      taskId: "api-task",
+      promptId: fixedPromptApiList.body.fixtures[0].promptId,
+      vnToolCompletedCount: 0,
+      professionalDeveloper: false,
+      regularScriptingWork: false,
+      storyCreatorLastYear: true,
+      completed: true,
+      reachedValidPreview: true,
+      usedModeratorHint: true,
+      abandoned: false,
+      blockingErrorCount: 2,
+      completionMs: 90000,
+      actualPreview: true,
+      mockPreview: true
+    }]
+  }
+});
+assert.equal(phase0ApiReport.status, 200);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.decision, "Iterate");
+assert.equal(phase0ApiReport.body.phase0DecisionReport.workPackages.length, 9);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.denominator.totalSessions, 1);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.sessions[0].eventLogId, uxEventApiStarted.body.eventLogId);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.mockActualSeparation.fakeOrMockPreviewCount, 1);
+assert.equal(phase0ApiReport.body.phase0DecisionReport.conditionRuntime.strictPreviewStatus, "not_evaluated");
+
+const fixedPromptCliList = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "fixed-prompts"], {
+  input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(fixedPromptCliList.ok, true);
+assert.equal(fixedPromptCliList.fixedPromptSetId, fixedPromptApiList.body.fixedPromptSetId);
+assert.equal(fixedPromptCliList.fixtures.length >= 3, true);
+const fixedPromptCliReplay = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "replay-fixed-prompt"], {
+  input: JSON.stringify({
+    projectDirectory: fixedPromptCliDirectory,
+    project: {
+      ...fixedPromptApiCliProject,
+      id: "fixed-prompt-cli"
+    },
+    promptId: fixedPromptCliList.fixtures[1].promptId,
+    adapterMode: "mock"
+  }),
+  encoding: "utf8"
+}));
+assert.equal(fixedPromptCliReplay.ok, true);
+assert.equal(fixedPromptCliReplay.fixedPromptSetId, fixedPromptApiReplay.body.fixedPromptSetId);
+assert.equal(fixedPromptCliReplay.generationResultId, fixedPromptCliReplay.generationResultLog.resultId);
+assert.equal(fixedPromptCliReplay.generationResultLog.sourceType, "mock");
+assert.equal(fixedPromptCliReplay.generationResultLog.adapter, "deterministic-fixture-adapter");
+assert.equal(fixedPromptCliReplay.generationResultLog.classification, "passed");
+assert.equal(fixedPromptCliReplay.actionEvent.eventName, "generated");
+assert.equal(fixedPromptCliReplay.actionEvent.promptId, fixedPromptCliList.fixtures[1].promptId);
+assert.equal(fixedPromptCliReplay.actionEvent.correlationId, fixedPromptCliReplay.correlationId);
+const fixedPromptCliLogs = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "generation-result-logs"], {
+  input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(fixedPromptCliLogs.ok, true);
+assert.equal(fixedPromptCliLogs.generationResultLogs.some((log) => log.resultId === fixedPromptCliReplay.generationResultId), true);
+const uxEventCliRecord = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "record-ux-event"], {
+  input: JSON.stringify({
+    projectDirectory: uxEventCliDirectory,
+    project: {
+      ...fixedPromptApiCliProject,
+      id: "ux-event-cli"
+    },
+    eventName: "started",
+    sessionId: "cli-session-104",
+    participantIdHash: "cli-participant-hash",
+    taskId: "cli-task",
+    outcome: "started"
+  }),
+  encoding: "utf8"
+}));
+assert.equal(uxEventCliRecord.ok, true);
+assert.equal(uxEventCliRecord.actionEvent.eventName, "started");
+assert.equal(uxEventCliRecord.actionEvent.correlationId, uxEventCliRecord.correlationId);
+execFileSync(process.execPath, ["packages/cli/dist/index.js", "record-ux-event"], {
+  input: JSON.stringify({
+    projectDirectory: uxEventCliDirectory,
+    eventName: "previewed",
+    sessionId: "cli-session-104",
+    participantIdHash: "cli-participant-hash",
+    taskId: "cli-task",
+    inputMode: "fixed_prompt",
+    preflightResult: { canRun: true },
+    outcome: "completed"
+  }),
+  encoding: "utf8"
+});
+const uxEventCliExport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "export-ux-event-log"], {
+  input: JSON.stringify({ projectDirectory: uxEventCliDirectory, sessionId: "cli-session-104" }),
+  encoding: "utf8"
+}));
+assert.equal(uxEventCliExport.ok, true);
+assert.equal(uxEventCliExport.eventLog.eventLogId, uxEventCliRecord.eventLogId);
+assert.equal(uxEventCliExport.eventLog.events[0].eventName, "started");
+assert.equal(uxEventCliExport.eventLog.events[0].projectRevision.revision, uxEventCliExport.projectRevision.revision);
+const phase0CliReport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "phase0-decision-report"], {
+  input: JSON.stringify({
+    projectDirectory: uxEventCliDirectory,
+    sessionIds: ["cli-session-104"],
+    participantResults: [{
+      participantIdHash: "cli-participant-hash",
+      sessionId: "cli-session-104",
+      inputMode: "fixed_prompt",
+      taskId: "cli-task",
+      vnToolCompletedCount: 0,
+      professionalDeveloper: false,
+      regularScriptingWork: false,
+      storyCreatorLastYear: true,
+      completed: true,
+      reachedValidPreview: true,
+      usedModeratorHint: false,
+      abandoned: false,
+      blockingErrorCount: 0,
+      completionMs: 600000,
+      actualPreview: true,
+      mockPreview: true
+    }]
+  }),
+  encoding: "utf8"
+}));
+assert.equal(phase0CliReport.ok, true);
+assert.equal(phase0CliReport.phase0DecisionReport.decision, phase0ApiReport.body.phase0DecisionReport.decision);
+assert.equal(phase0CliReport.phase0DecisionReport.workPackages.length, phase0ApiReport.body.phase0DecisionReport.workPackages.length);
+assert.equal(phase0CliReport.phase0DecisionReport.denominator.totalSessions, 1);
+assert.equal(phase0CliReport.phase0DecisionReport.sessions[0].eventLogId, uxEventCliRecord.eventLogId);
+assert.equal(phase0CliReport.phase0DecisionReport.mockActualSeparation.fakeOrMockPreviewCount, 1);
+mockCodexTextCalls = 0;
+
 const apiServerFailure = await mockApi({
   method: "POST",
   path: "/api/project/open",
@@ -1479,6 +2842,7 @@ const apiApprove = await mockApi({
   path: "/api/events/approve",
   body: {
     projectDirectory: alphaDirectory,
+    expectedProjectRevision: apiExpand.body.projectRevision,
     request: apiExpand.body.request,
     plan: apiExpand.body.plan
   }
@@ -1486,6 +2850,8 @@ const apiApprove = await mockApi({
 assert.equal(apiApprove.status, 200);
 assert.equal(apiApprove.body.validation.ok, true);
 assert.equal(apiApprove.body.project.scenes.length, 5);
+assert.equal(apiApprove.body.previousRevision.revision, apiExpand.body.projectRevision.revision);
+assert.notEqual(apiApprove.body.projectRevision.revision, apiExpand.body.projectRevision.revision);
 
 const approvedProject = apiApprove.body.project;
 const plannedCgJob = approvedProject.generationJobs.find((job) => job.kind === "cg" && job.status === "planned");

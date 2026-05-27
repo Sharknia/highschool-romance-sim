@@ -11,7 +11,7 @@ export interface ApiResult {
   message?: string;
   code?: ApiFailureCode | string;
   requestId?: string;
-  issues?: Array<{ severity?: string; path?: string; message?: string }>;
+  issues?: Array<{ severity?: string; path?: string; message?: string; code?: string; domain?: string; sceneIds?: string[]; choiceIds?: string[]; targetSceneId?: string }>;
   retryable?: boolean;
   httpStatus?: number;
   userSummary?: string;

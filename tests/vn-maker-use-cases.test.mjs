@@ -12,7 +12,11 @@ const useCasesModule = await import("../packages/use-cases/dist/index.js");
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-use-cases-"));
 const projectDirectory = join(tempRoot, "UseCase.vnmaker");
 const manualProjectDirectory = join(tempRoot, "ManualScenes.vnmaker");
+const blankStartSceneProjectDirectory = join(tempRoot, "BlankStartScene.vnmaker");
+const noRouteStartSceneProjectDirectory = join(tempRoot, "NoRouteStartScene.vnmaker");
 const preserveNextProjectDirectory = join(tempRoot, "PreserveNext.vnmaker");
+const fixedPromptDirectory = join(tempRoot, "FixedPrompt.vnmaker");
+const fixedPromptUnavailableDirectory = join(tempRoot, "FixedPromptUnavailable.vnmaker");
 const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
 const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
 const heroineContractDirectory = join(tempRoot, "HeroineContract.vnmaker");
@@ -845,6 +849,7 @@ assert.equal(assignedSnapshot.workflowSummary.primaryAction, "goToBackground");
 const blankOpeningSceneId = assignedSnapshot.project.routes[0].entrySceneId;
 const blankSceneBeforeBackground = await useCases.insertManualScene({
   projectDirectory: blankProjectDirectory,
+  expectedProjectRevision: assignedSnapshot.projectRevision,
   sourceSceneId: blankOpeningSceneId,
   link: {
     type: "next",
@@ -873,8 +878,10 @@ assert.equal(
   blankAssignedBackground.project.scenes.every((scene) => scene.backgroundAssetId === "asset-blank-assigned-background"),
   true
 );
+const blankAfterBackgroundOpen = await useCases.openProject({ projectDirectory: blankProjectDirectory });
 const blankSceneAfterBackground = await useCases.insertManualScene({
   projectDirectory: blankProjectDirectory,
+  expectedProjectRevision: blankAfterBackgroundOpen.projectRevision,
   sourceSceneId: "scene-blank-before-background",
   link: {
     type: "next",
@@ -930,6 +937,86 @@ const manualCreated = await useCases.createProjectFromHeroine({
 });
 assert.equal(manualCreated.ok, true);
 
+const blankStartCreated = await useCases.createProject({
+  projectDirectory: blankStartSceneProjectDirectory,
+  project: {
+    version: "vn-maker/v1",
+    id: "blank-start-scene",
+    title: "Blank Start Scene",
+    premise: "Studio 첫 씬 생성을 검증한다.",
+    characters: [{
+      id: "haru",
+      displayName: "하루",
+      role: "메인 히로인",
+      profile: "첫 씬 생성 테스트용 히로인",
+      emotionTags: ["normal"],
+      portraitAssetIds: []
+    }],
+    routes: [{
+      id: "haru-route",
+      title: "하루 루트",
+      heroineId: "haru",
+      summary: "",
+      entrySceneId: "scene-placeholder-start",
+      endings: []
+    }],
+    scenes: [],
+    assets: [],
+    generationJobs: [],
+    settings: {
+      defaultRouteId: "haru-route",
+      outputFileName: "index.html",
+      language: "ko"
+    }
+  }
+});
+assert.equal(blankStartCreated.ok, true);
+assert.equal(blankStartCreated.project.scenes.length, 0);
+const blankStartInserted = await useCases.insertManualScene({
+  projectDirectory: blankStartSceneProjectDirectory,
+  expectedProjectRevision: blankStartCreated.projectRevision,
+  link: { type: "none" },
+  scene: {
+    id: "scene-first-manual",
+    label: "첫 수동 장면",
+    speaker: "나",
+    text: "처음 만든 씬이 route 시작점이 된다.",
+    characters: [],
+    choices: []
+  }
+});
+assert.equal(blankStartInserted.ok, true);
+assert.equal(blankStartInserted.selectedSceneId, "scene-first-manual");
+assert.equal(blankStartInserted.project.routes[0].entrySceneId, "scene-first-manual");
+
+const noRouteStartCreated = await useCases.createProject({
+  projectDirectory: noRouteStartSceneProjectDirectory,
+  project: core.createBlankProject({
+    id: "no-route-start-scene",
+    title: "No Route Start Scene",
+    premise: "Studio 빈 프로젝트 첫 씬 생성을 검증한다."
+  })
+});
+assert.equal(noRouteStartCreated.ok, true);
+assert.equal(noRouteStartCreated.project.routes.length, 0);
+const noRouteStartInserted = await useCases.insertManualScene({
+  projectDirectory: noRouteStartSceneProjectDirectory,
+  expectedProjectRevision: noRouteStartCreated.projectRevision,
+  link: { type: "none" },
+  scene: {
+    id: "scene-first-no-route",
+    label: "첫 수동 장면",
+    speaker: "나",
+    text: "route 없는 프로젝트도 Studio에서 첫 씬을 만들 수 있다.",
+    characters: [],
+    choices: []
+  }
+});
+assert.equal(noRouteStartInserted.ok, true);
+assert.equal(noRouteStartInserted.project.scenes.length, 1);
+assert.equal(noRouteStartInserted.project.routes.length, 0);
+assert.equal(noRouteStartInserted.validation.issues.some((issue) => issue.path === "routes.0.heroineId"), false);
+
 const preserveCreated = await useCases.createProjectFromHeroine({
   projectDirectory: preserveNextProjectDirectory,
   heroine,
@@ -940,6 +1027,7 @@ const preserveOpening = preserveCreated.project.routes[0].entrySceneId;
 const previousNext = preserveCreated.project.scenes.find((scene) => scene.id === preserveOpening).next;
 const preservedInsert = await useCases.insertManualScene({
   projectDirectory: preserveNextProjectDirectory,
+  expectedProjectRevision: preserveCreated.projectRevision,
   sourceSceneId: preserveOpening,
   link: {
     type: "next",
@@ -962,6 +1050,7 @@ assert.equal(preservedInsert.validation.ok, true);
 const manualOpening = manualCreated.project.routes[0].entrySceneId;
 const openedBranch = await useCases.saveScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: manualCreated.projectRevision,
   scene: {
     ...manualCreated.project.scenes.find((scene) => scene.id === manualOpening),
     next: undefined
@@ -994,6 +1083,7 @@ assert.equal(invalidPreview.previewReadiness.nextAction.includes("해결 탭으�
 
 const insertedGood = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: openedBranch.projectRevision,
   sourceSceneId: manualOpening,
   link: {
     type: "choice",
@@ -1015,6 +1105,7 @@ assert.equal(insertedGood.routeGraphAnalysis.issues.some((issue) => issue.code =
 
 const goodEnded = await useCases.setSceneEnding({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: insertedGood.projectRevision,
   sceneId: "scene-good-ending",
   ending: {
     id: "ending-good",
@@ -1027,6 +1118,7 @@ assert.equal(goodEnded.routeGraphAnalysis.reachableEndingIds.includes("ending-go
 
 const insertedNormal = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: goodEnded.projectRevision,
   link: { type: "none" },
   scene: {
     id: "scene-normal-ending",
@@ -1047,6 +1139,7 @@ assert.equal(insertedNormal.routeGraphAnalysis.orphanSceneIds.includes("scene-no
 
 const linkedNormal = await useCases.linkManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: insertedNormal.projectRevision,
   sourceSceneId: manualOpening,
   targetSceneId: "scene-normal-ending",
   link: {
@@ -1063,6 +1156,7 @@ assert.equal(linkedNormal.project.scenes.find((scene) => scene.id === manualOpen
 await assert.rejects(
   () => useCases.linkManualScene({
     projectDirectory: manualProjectDirectory,
+    expectedProjectRevision: linkedNormal.projectRevision,
     sourceSceneId: "scene-good-ending",
     targetSceneId: "scene-normal-ending",
     link: { type: "next" }
@@ -1072,6 +1166,7 @@ await assert.rejects(
 
 const nextInserted = await useCases.insertManualScene({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: linkedNormal.projectRevision,
   sourceSceneId: "scene-normal-ending",
   link: { type: "next" },
   scene: {
@@ -1087,6 +1182,7 @@ assert.match(nextInserted.message, /엔딩 장면 뒤에는 연결할 수 없습
 
 const endingNeedsConfirmation = await useCases.setSceneEnding({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: linkedNormal.projectRevision,
   sceneId: manualOpening,
   ending: {
     id: "ending-opening",
@@ -1099,6 +1195,7 @@ assert.match(endingNeedsConfirmation.message, /다음 장면이나 선택지를 
 
 const clearedOpeningEnding = await useCases.setSceneEnding({
   projectDirectory: manualProjectDirectory,
+  expectedProjectRevision: linkedNormal.projectRevision,
   sceneId: manualOpening,
   ending: {
     id: "ending-opening",
@@ -1118,8 +1215,414 @@ const expanded = await useCases.expandEvent({
 assert.equal(expanded.ok, true);
 assert.equal(expanded.plan.decision.sceneCount, 3);
 
+const fixedPromptProject = core.createProjectFromHeroine({
+  id: "fixed-prompt-use-case",
+  title: "Fixed Prompt Use Case",
+  premise: "고정 프롬프트 replay와 결과 로그 저장을 검증한다.",
+  heroine
+});
+const fixedPromptStore = await projectStoreModule.createProjectWorkspace({
+  projectDirectory: fixedPromptDirectory,
+  project: fixedPromptProject
+});
+fixedPromptStore.close();
+const fixedPromptSet = await useCases.listFixedPrompts({ projectDirectory: fixedPromptDirectory });
+assert.equal(fixedPromptSet.ok, true);
+assert.equal(typeof fixedPromptSet.fixedPromptSetId, "string");
+assert.equal(fixedPromptSet.fixedPromptSet.id, fixedPromptSet.fixedPromptSetId);
+assert.equal(fixedPromptSet.fixtures.length >= 3, true);
+assert.equal(fixedPromptSet.fixtures.every((fixture) => fixture.promptId && fixture.promptText), true);
+assert.equal(fixedPromptSet.fixtures.every((fixture) => Array.isArray(fixture.expectedElements)), true);
+assert.equal(fixedPromptSet.fixtures.every((fixture) => Array.isArray(fixture.allowedVariation)), true);
+
+const fixedPromptReplay = await useCases.replayFixedPrompt({
+  projectDirectory: fixedPromptDirectory,
+  promptId: fixedPromptSet.fixtures[0].promptId,
+  adapterMode: "mock"
+});
+assert.equal(fixedPromptReplay.ok, true);
+assert.equal(fixedPromptReplay.fixedPromptSetId, fixedPromptSet.fixedPromptSetId);
+assert.equal(fixedPromptReplay.generationResultId, fixedPromptReplay.generationResultLog.resultId);
+assert.equal(fixedPromptReplay.generationResultLog.promptId, fixedPromptSet.fixtures[0].promptId);
+assert.equal(fixedPromptReplay.generationResultLog.promptText, fixedPromptSet.fixtures[0].promptText);
+assert.equal(fixedPromptReplay.generationResultLog.adapter, "deterministic-fixture-adapter");
+assert.equal(fixedPromptReplay.generationResultLog.sourceType, "mock");
+assert.equal(fixedPromptReplay.generationResultLog.classification, "passed");
+assert.equal(fixedPromptReplay.generationResultLog.patchHistoryId, fixedPromptReplay.patchHistoryEntry.id);
+assert.equal(fixedPromptReplay.patchHistoryEntry.status, "proposed");
+assert.equal(Array.isArray(fixedPromptReplay.generationResultLog.validationIssues), true);
+assert.equal(typeof fixedPromptReplay.generationResultLog.projectRevision.revision, "string");
+assert.equal(fixedPromptReplay.actionEvent.eventName, "generated");
+assert.equal(fixedPromptReplay.actionEvent.promptId, fixedPromptSet.fixtures[0].promptId);
+assert.equal(fixedPromptReplay.actionEvent.projectId, fixedPromptProject.id);
+assert.equal(fixedPromptReplay.actionEvent.projectRevision.revision, fixedPromptReplay.projectRevision.revision);
+assert.equal(fixedPromptReplay.actionEvent.correlationId, fixedPromptReplay.correlationId);
+const fixedPromptLogs = await useCases.listGenerationResultLogs({ projectDirectory: fixedPromptDirectory });
+assert.equal(fixedPromptLogs.ok, true);
+assert.equal(fixedPromptLogs.generationResultLogs.some((log) => log.resultId === fixedPromptReplay.generationResultId), true);
+
+const uxSessionId = "session-issue-104";
+const uxStarted = await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "started",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  participantType: "novice_non_dev_story_creator",
+  taskId: "fixed-prompt-valid-preview",
+  inputMode: "fixed_prompt",
+  outcome: "started",
+  elapsedMs: 0
+});
+assert.equal(uxStarted.ok, true);
+assert.equal(uxStarted.actionEvent.eventName, "started");
+assert.equal(uxStarted.event.eventLogId, uxStarted.eventLogId);
+assert.equal(uxStarted.event.projectRevision.revision, uxStarted.projectRevision.revision);
+
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "recipe_used",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  promptId: fixedPromptSet.fixtures[0].promptId,
+  inputMode: "fixed_prompt",
+  outcome: "used",
+  elapsedMs: 1200
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "repair_action_used",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  issueCode: "missing-target",
+  issueCodesBefore: ["missing-target"],
+  repairActionId: "create-target-scene",
+  outcome: "used",
+  elapsedMs: 2600
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "repaired",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  issueCode: "missing-target",
+  issueCodesBefore: ["missing-target"],
+  issueCodesAfter: [],
+  repairActionId: "create-target-scene",
+  revisionBefore: fixedPromptReplay.projectRevision,
+  revisionAfter: fixedPromptReplay.projectRevision,
+  outcome: "success",
+  elapsedMs: 4200
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "previewed",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  preflightResult: { canRun: true },
+  outcome: "completed",
+  elapsedMs: 5400
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "help_opened",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  helpChannel: "static_tutorial",
+  outcome: "opened",
+  elapsedMs: 6000
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "hint_given",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  helpChannel: "moderator_hint",
+  hintLevel: 1,
+  outcome: "given",
+  elapsedMs: 90000,
+  stallDurationMs: 90000
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "abandoned",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  outcome: "abandoned",
+  elapsedMs: 96000
+});
+const uxEvents = await useCases.listUXDecisionEvents({ projectDirectory: fixedPromptDirectory, sessionId: uxSessionId });
+assert.equal(uxEvents.ok, true);
+assert.equal(uxEvents.events.length >= 8, true);
+const uxExport = await useCases.exportUXDecisionEventLog({ projectDirectory: fixedPromptDirectory, sessionId: uxSessionId });
+assert.equal(uxExport.ok, true);
+assert.equal(uxExport.eventLog.eventLogId, uxStarted.eventLogId);
+assert.equal(uxExport.eventLog.sessionId, uxSessionId);
+assert.equal(uxExport.eventLog.projectRevision.revision, uxExport.projectRevision.revision);
+assert.equal(uxExport.eventLog.events[0].eventName, "started");
+assert.deepEqual(
+  uxExport.eventLog.events
+    .filter((event) => ["started", "recipe_used", "repair_action_used", "repaired", "previewed"].includes(event.eventName))
+    .map((event) => event.eventName)
+    .slice(0, 5),
+  ["started", "recipe_used", "repair_action_used", "repaired", "previewed"]
+);
+const exportedHelpEvent = uxExport.eventLog.events.find((event) => event.eventName === "help_opened");
+const exportedHintEvent = uxExport.eventLog.events.find((event) => event.eventName === "hint_given");
+const exportedAbandonedEvent = uxExport.eventLog.events.find((event) => event.eventName === "abandoned");
+assert.equal(exportedHelpEvent.helpChannel, "static_tutorial");
+assert.equal(exportedHintEvent.helpChannel, "moderator_hint");
+assert.equal(exportedHintEvent.hintLevel, 1);
+assert.equal(exportedAbandonedEvent.outcome, "abandoned");
+
+const phase0ParticipantResults = [{
+  participantIdHash: "participant-hash-104",
+  sessionId: uxSessionId,
+  inputMode: "fixed_prompt",
+  taskId: "fixed-prompt-valid-preview",
+  promptId: fixedPromptSet.fixtures[0].promptId,
+  vnToolCompletedCount: 0,
+  professionalDeveloper: false,
+  regularScriptingWork: false,
+  storyCreatorLastYear: true,
+  completed: false,
+  reachedValidPreview: false,
+  usedModeratorHint: true,
+  usedStaticTutorial: true,
+  abandoned: true,
+  blockingErrorCount: 2,
+  completionMs: 96000,
+  actualPreview: true,
+  mockPreview: false,
+  criticalIncidentCause: "moderator-hint-completion"
+}];
+
+for (let index = 0; index < 6; index += 1) {
+  const sessionId = `phase0-fixed-success-${index}`;
+  const participantIdHash = `phase0-fixed-participant-${index}`;
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "started",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    outcome: "started",
+    elapsedMs: 0
+  });
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "recipe_used",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    outcome: "used",
+    elapsedMs: 1200
+  });
+  if (index === 0) {
+    await useCases.recordUXDecisionEvent({
+      projectDirectory: fixedPromptDirectory,
+      eventName: "help_opened",
+      sessionId,
+      participantIdHash,
+      taskId: "fixed-prompt-valid-preview",
+      helpChannel: "static_tutorial",
+      outcome: "opened",
+      elapsedMs: 2200
+    });
+  }
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "repair_action_used",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    issueCode: "missing-target",
+    issueCodesBefore: ["missing-target"],
+    repairActionId: "create-target-scene",
+    outcome: "used",
+    elapsedMs: 3000
+  });
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "repaired",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    issueCode: "missing-target",
+    issueCodesBefore: ["missing-target"],
+    issueCodesAfter: [],
+    repairActionId: "create-target-scene",
+    revisionBefore: fixedPromptReplay.projectRevision,
+    revisionAfter: fixedPromptReplay.projectRevision,
+    outcome: "success",
+    elapsedMs: 4200
+  });
+  await useCases.recordUXDecisionEvent({
+    projectDirectory: fixedPromptDirectory,
+    eventName: "previewed",
+    sessionId,
+    participantIdHash,
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    preflightResult: { canRun: true },
+    outcome: "completed",
+    elapsedMs: 540000
+  });
+  phase0ParticipantResults.push({
+    participantIdHash,
+    sessionId,
+    inputMode: "fixed_prompt",
+    taskId: "fixed-prompt-valid-preview",
+    promptId: fixedPromptSet.fixtures[0].promptId,
+    vnToolCompletedCount: index % 2,
+    professionalDeveloper: false,
+    regularScriptingWork: false,
+    storyCreatorLastYear: true,
+    completed: true,
+    reachedValidPreview: true,
+    usedModeratorHint: false,
+    usedStaticTutorial: index === 0,
+    abandoned: false,
+    blockingErrorCount: 1,
+    completionMs: 540000,
+    actualPreview: true,
+    mockPreview: index === 0
+  });
+}
+
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "started",
+  sessionId: "phase0-free-exploratory",
+  participantIdHash: "phase0-free-participant",
+  taskId: "free-input-exploratory",
+  inputMode: "free_input",
+  outcome: "started"
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "generated",
+  sessionId: "phase0-free-exploratory",
+  participantIdHash: "phase0-free-participant",
+  taskId: "free-input-exploratory",
+  inputMode: "free_input",
+  outcome: "success"
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "previewed",
+  sessionId: "phase0-free-exploratory",
+  participantIdHash: "phase0-free-participant",
+  taskId: "free-input-exploratory",
+  inputMode: "free_input",
+  preflightResult: { canRun: true },
+  outcome: "completed",
+  elapsedMs: 720000
+});
+phase0ParticipantResults.push({
+  participantIdHash: "phase0-free-participant",
+  sessionId: "phase0-free-exploratory",
+  inputMode: "free_input",
+  taskId: "free-input-exploratory",
+  vnToolCompletedCount: 1,
+  professionalDeveloper: false,
+  regularScriptingWork: false,
+  storyCreatorLastYear: true,
+  completed: true,
+  reachedValidPreview: true,
+  usedModeratorHint: false,
+  usedStaticTutorial: false,
+  abandoned: false,
+  blockingErrorCount: 0,
+  completionMs: 720000,
+  actualPreview: true,
+  mockPreview: false,
+  criticalIncidentCause: "term-confusion"
+});
+
+const phase0ReportResult = await useCases.createPhase0DecisionReport({
+  projectDirectory: fixedPromptDirectory,
+  participantResults: phase0ParticipantResults
+});
+assert.equal(phase0ReportResult.ok, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.decision, "Iterate");
+assert.equal(phase0ReportResult.phase0DecisionReport.maximumDecisionDueToMissing, "Iterate");
+assert.equal(phase0ReportResult.phase0DecisionReport.workPackages.length, 9);
+assert.equal(phase0ReportResult.phase0DecisionReport.workPackages.every((item) => ["Ready", "Partial", "Missing"].includes(item.status)), true);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.totalSessions, 8);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.abandonedSessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.stall90sSessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.staticTutorialRecoverySessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.denominator.moderatorHintSessions, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.fixedInputMetrics.sessionCount, 7);
+assert.equal(phase0ReportResult.phase0DecisionReport.freeInputFindings.sessionCount, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.fixedInputMetrics.noviceNonDevStoryCreatorCount >= 6, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.fixedInputMetrics.majorityValidPreviewWithoutHint, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.mockActualSeparation.fakeOrMockPreviewCount, 1);
+assert.equal(phase0ReportResult.phase0DecisionReport.mockActualSeparation.actualPreviewCount >= 6, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.conditionRuntime.strictPreviewStatus, "not_evaluated");
+assert.equal(phase0ReportResult.phase0DecisionReport.conditionRuntime.actualPreviewCanRun, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.conditionRuntime.conditionPreviewCountsAsStrictSuccess, false);
+const guidedRepairEvidence = phase0ReportResult.phase0DecisionReport.sessions.find((session) => session.guidedRepairEvidence?.ready);
+assert.equal(Boolean(guidedRepairEvidence), true);
+assert.equal(Boolean(guidedRepairEvidence.eventLogId), true);
+assert.equal(guidedRepairEvidence.guidedRepairEvidence.issueCode, "missing-target");
+assert.equal(guidedRepairEvidence.guidedRepairEvidence.repairActionId, "create-target-scene");
+assert.equal(Boolean(guidedRepairEvidence.guidedRepairEvidence.revisionBefore?.revision), true);
+assert.equal(Boolean(guidedRepairEvidence.guidedRepairEvidence.revisionAfter?.revision), true);
+assert.equal(guidedRepairEvidence.guidedRepairEvidence.preflightResult.canRun, true);
+assert.equal(phase0ReportResult.phase0DecisionReport.mockActualSeparation.combinedTotalsUsed, false);
+
+const noEventTextUseCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile: join(tempRoot, "fixed-prompt-unavailable-recent.json")
+});
+const fixedPromptUnavailable = await noEventTextUseCases.replayFixedPrompt({
+  projectDirectory: fixedPromptUnavailableDirectory,
+  project: fixedPromptProject,
+  promptId: fixedPromptSet.fixtures[1].promptId,
+  adapterMode: "actual"
+});
+assert.equal(fixedPromptUnavailable.ok, false);
+assert.equal(fixedPromptUnavailable.fixedPromptSetId, fixedPromptSet.fixedPromptSetId);
+assert.equal(fixedPromptUnavailable.generationResultId, fixedPromptUnavailable.generationResultLog.resultId);
+assert.equal(fixedPromptUnavailable.generationResultLog.sourceType, "unavailable");
+assert.equal(fixedPromptUnavailable.generationResultLog.classification, "generation_quality");
+assert.match(fixedPromptUnavailable.generationResultLog.skippedReason, /adapter unavailable/);
+assert.equal(fixedPromptUnavailable.generationResultLog.patchHistoryId, undefined);
+
+const throwingEventTextUseCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile: join(tempRoot, "fixed-prompt-throwing-recent.json"),
+  eventText: {
+    async generateEventExpansionPlan() {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+  }
+});
+const fixedPromptActualBlocked = await throwingEventTextUseCases.replayFixedPrompt({
+  projectDirectory: fixedPromptUnavailableDirectory,
+  promptId: fixedPromptSet.fixtures[2].promptId,
+  adapterMode: "actual"
+});
+assert.equal(fixedPromptActualBlocked.ok, false);
+assert.equal(fixedPromptActualBlocked.generationResultLog.sourceType, "unavailable");
+assert.equal(fixedPromptActualBlocked.generationResultLog.adapter, "codex-event-text-adapter");
+assert.match(fixedPromptActualBlocked.generationResultLog.skippedReason, /OAuth/);
+assert.equal(fixedPromptActualBlocked.generationResultLog.patchHistoryId, undefined);
+
 const approved = await useCases.approveEvent({
   projectDirectory,
+  expectedProjectRevision: expanded.projectRevision,
   request: expanded.request,
   plan: expanded.plan
 });
