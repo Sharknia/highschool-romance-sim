@@ -205,6 +205,7 @@ a {
   cursor: pointer;
   white-space: nowrap;
   text-align: center;
+  line-height: 1.2;
 }
 
 .button:hover:not(:disabled) {
@@ -716,6 +717,46 @@ a {
 .inline-status.warning {
   border-color: #f2c94c;
   color: #fff0bd;
+}
+
+.dummy-fallback-warning {
+  display: grid;
+  gap: 8px;
+}
+
+.dummy-badge-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dummy-badge-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dummy-target-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.dummy-target-list li {
+  min-width: 0;
+}
+
+.dummy-target-list span,
+.dummy-target-list small,
+.diagnostic-value {
+  overflow-wrap: anywhere;
+}
+
+.dummy-fallback-warning .button,
+.asset-job-list .button {
+  white-space: normal;
 }
 
 .job-board {
@@ -1361,6 +1402,11 @@ a {
   gap: 10px;
 }
 
+.detail-tab-grid > .readiness-panel,
+.detail-tab-grid > .asset-state-panel {
+  grid-column: span 2;
+}
+
 .snapshot-comparison-grid {
   grid-template-columns: repeat(2, minmax(260px, 1fr));
 }
@@ -1578,7 +1624,7 @@ a {
   background: #0f0f0d;
 }
 
-.asset-job-list div {
+.asset-job-list > li > div {
   min-width: 0;
   display: grid;
   gap: 4px;
@@ -2360,6 +2406,11 @@ pre {
 
   .detail-tab-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-tab-grid > .readiness-panel,
+  .detail-tab-grid > .asset-state-panel {
+    grid-column: 1 / -1;
   }
 
   .heroine-card-grid,

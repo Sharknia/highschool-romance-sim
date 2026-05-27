@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Heart, Image as ImageIcon, Play, RefreshCw } from "lucide-react";
+import { ArrowRight, CheckCircle2, Copy, ExternalLink, Heart, Image as ImageIcon, Play, RefreshCw, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -33,8 +33,15 @@ import {
   backgroundConnectionText,
   backgroundSceneConnectionText,
   displayWorkflowStep,
+  dummyFallbackDetailText,
+  dummyFallbackSummaryText,
+  dummyFallbackTargetText,
+  dummyPackVersionText,
+  fallbackReasonText,
   generationProviderText,
   imageJobKindLabel,
+  isDummyAsset,
+  isDummyGenerationJob,
   jobStatusLabel
 } from "./projectDisplayText";
 
@@ -55,6 +62,16 @@ type PendingEventPatch = ProjectApiResult & Required<Pick<ProjectApiResult, "req
 type AssetState = "empty" | "planned" | "running" | "failed" | "completed" | "partialFailed";
 type PreviewState = "empty" | "blocked" | "stale" | "running" | "ready" | "failed";
 type ExportState = "empty" | "blocked" | "running" | "ready" | "completed" | "failed";
+
+interface DummyFallbackTarget {
+  asset?: ProjectAsset;
+  fallbackReason?: string;
+  job?: ProjectGenerationJob;
+  key: string;
+  location?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
+}
 
 const tabsWithLocalPrimaryAction = new Set<ProjectTabId>(["overview", "heroine", "background", "preview", "export"]);
 
@@ -194,6 +211,85 @@ function backgroundAsset(project: ProjectData | null): ProjectAsset | null {
     || null;
 }
 
+function dummyAssetKey(asset?: ProjectAsset | null): string {
+  return asset?.id || asset?.uri || asset?.generationJobId || "";
+}
+
+function jobAsset(job: ProjectGenerationJob, assets: ProjectAsset[]): ProjectAsset | undefined {
+  return job.asset
+    || assets.find((asset) => asset.id && asset.id === job.outputAssetId)
+    || assets.find((asset) => asset.generationJobId && asset.generationJobId === job.id);
+}
+
+function collectDummyImageAssets(project: ProjectData | null, exportPlan: ProjectExportPlan | null, runtime: ProjectRuntime | null): ProjectAsset[] {
+  const assets = [
+    ...(project?.assets || []),
+    ...(exportPlan?.includedAssets || []),
+    ...(runtime?.assets || [])
+  ].filter(isDummyAsset);
+  const seen = new Set<string>();
+  return assets.filter((asset, index) => {
+    const key = dummyAssetKey(asset) || `asset-${index}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildDummyFallbackTargets(jobs: ProjectGenerationJob[], assets: ProjectAsset[]): DummyFallbackTarget[] {
+  const targets: DummyFallbackTarget[] = [];
+  const consumedAssetKeys = new Set<string>();
+  jobs.filter(isDummyGenerationJob).forEach((job, index) => {
+    const asset = jobAsset(job, assets);
+    const assetKey = dummyAssetKey(asset);
+    if (assetKey) {
+      consumedAssetKeys.add(assetKey);
+    }
+    targets.push({
+      asset,
+      fallbackReason: job.fallbackReason || asset?.provenance?.fallbackReason,
+      job,
+      key: `job:${job.id || job.outputAssetId || index}`,
+      location: asset?.uri || job.asset?.uri,
+      packVersion: job.packVersion || asset?.provenance?.packVersion,
+      sourceGeneratedBy: job.sourceGeneratedBy || asset?.provenance?.sourceGeneratedBy
+    });
+  });
+  assets.forEach((asset, index) => {
+    const assetKey = dummyAssetKey(asset);
+    if (assetKey && consumedAssetKeys.has(assetKey)) {
+      return;
+    }
+    targets.push({
+      asset,
+      fallbackReason: asset.provenance?.fallbackReason,
+      key: `asset:${assetKey || index}`,
+      location: asset.uri,
+      packVersion: asset.provenance?.packVersion,
+      sourceGeneratedBy: asset.provenance?.sourceGeneratedBy
+    });
+  });
+  return targets;
+}
+
+function isSafeDummyAssetLocation(location?: string): boolean {
+  const value = location?.trim();
+  if (!value) {
+    return false;
+  }
+  if (value.toLowerCase().startsWith("javascript:")) {
+    return false;
+  }
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "file:";
+  } catch {
+    return false;
+  }
+}
+
 function previewStateLabel(value: PreviewState): string {
   if (value === "empty") return "프리뷰 없음";
   if (value === "blocked") return "차단";
@@ -323,6 +419,7 @@ export function ProjectDetailView({
   const [assetStatus, setAssetStatus] = useState("배경 화면 작업과 이벤트 CG 작업을 확인합니다.");
   const [assetErrors, setAssetErrors] = useState<string[]>([]);
   const [assetBusy, setAssetBusy] = useState(false);
+  const [dummyActionStatus, setDummyActionStatus] = useState("");
   const [backgroundPrompt, setBackgroundPrompt] = useState("");
   const [backgroundStatus, setBackgroundStatus] = useState("배경 생성 전 확인 정보를 검토하세요.");
   const [backgroundBusy, setBackgroundBusy] = useState(false);
@@ -393,6 +490,13 @@ export function ProjectDetailView({
   const currentPreviewReadiness = previewReadiness || projectPreviewReadiness || emptyPreviewReadiness;
   const previewRunBlocked = currentPreviewReadiness.canRun !== true;
   const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
+  const dummyImageAssets = collectDummyImageAssets(currentProject, currentExportPlan, previewRuntime);
+  const dummyImageJobs = imageJobs.filter(isDummyGenerationJob);
+  const dummyFallbackTargets = buildDummyFallbackTargets(dummyImageJobs, dummyImageAssets);
+  const dummyFallbackWarning = dummyFallbackSummaryText(dummyFallbackTargets.length);
+  const primaryDummyFallbackItem = dummyFallbackTargets[0]?.job || dummyFallbackTargets[0]?.asset || null;
+  const dummyFallbackDetail = dummyFallbackDetailText(primaryDummyFallbackItem);
+  const dummyReplacementJobIds = dummyImageJobs.filter((job) => job.id).map((job) => String(job.id));
   const previewResolutionActions = [
     ...(currentPreviewReadiness.nextActions || []).map((action) => ({
       label: action.label || "해결 탭으로 이동",
@@ -533,6 +637,7 @@ export function ProjectDetailView({
     setAssetJobs([]);
     setAssetErrors([]);
     setAssetStatus("배경 화면 작업과 이벤트 CG 작업을 확인합니다.");
+    setDummyActionStatus("");
     resetPreviewAndExportState({
       exportPlan: projectExportPlan,
       previewReadiness: projectPreviewReadiness
@@ -577,6 +682,37 @@ export function ProjectDetailView({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function copyDummyAssetLocation(location?: string): Promise<void> {
+    if (!location) {
+      setDummyActionStatus("목 이미지 파일 위치가 아직 없습니다.");
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setDummyActionStatus("목 이미지 파일 위치 복사를 브라우저가 지원하지 않습니다. 개발자 상세에서 경로를 확인하세요.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(location);
+      setDummyActionStatus("목 이미지 파일 위치를 복사했습니다.");
+    } catch (error) {
+      setDummyActionStatus(`목 이미지 파일 위치 복사 실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function openDummyAssetLocation(location?: string): void {
+    const safeLocation = location?.trim();
+    if (!safeLocation) {
+      setDummyActionStatus("열 목 이미지 파일 위치가 아직 없습니다.");
+      return;
+    }
+    if (!isSafeDummyAssetLocation(safeLocation)) {
+      setDummyActionStatus("안전하지 않은 목 이미지 파일 위치라 열지 않았습니다.");
+      return;
+    }
+    window.open(safeLocation, "_blank", "noopener,noreferrer");
+    setDummyActionStatus("목 이미지 파일 위치 열기를 요청했습니다.");
   }
 
   function applyEventFailure(result: ProjectApiResult, fallbackMessage: string): void {
@@ -829,20 +965,20 @@ export function ProjectDetailView({
     }
   }
 
-  async function runImageJobs(jobIds: string[], retryFailed = false): Promise<void> {
+  async function runImageJobs(jobIds: string[], retryFailed = false, replaceCompleted = false): Promise<void> {
     if (jobIds.length === 0) {
-      setAssetStatus(retryFailed ? "재시도할 실패 작업이 없습니다." : "실행할 예정 이미지 작업이 없습니다.");
+      setAssetStatus(replaceCompleted ? "교체할 더미 이미지 작업이 없습니다." : retryFailed ? "재시도할 실패 작업이 없습니다." : "실행할 예정 이미지 작업이 없습니다.");
       return;
     }
     setAssetBusy(true);
     setAssetErrors([]);
-    setAssetStatus(retryFailed ? "실패 작업 재시도 실행 중입니다." : "이미지 만들기 실행 중입니다.");
+    setAssetStatus(replaceCompleted ? "실제 이미지로 교체 실행 중입니다." : retryFailed ? "실패 작업 재시도 실행 중입니다." : "이미지 만들기 실행 중입니다.");
     try {
       const result = await postAuthedJson<ProjectApiResult>("/api/generation/jobs/run", {
         projectDirectory,
         jobIds,
         retryFailed,
-        replaceCompleted: false
+        replaceCompleted
       });
       const nextJobs = (result.project?.generationJobs || result.jobs || []).filter(isVisualImageJob);
       if (nextJobs.length > 0) {
@@ -864,8 +1000,8 @@ export function ProjectDetailView({
         return;
       }
       setAssetStatus(result.assets?.length
-        ? "이미지 생성 완료. 결과 에셋이 프로젝트에 연결되었습니다."
-        : "완료된 작업은 다시 호출하지 않습니다. 결과 에셋을 유지했습니다.");
+        ? replaceCompleted ? "실제 이미지 교체 요청이 완료되었습니다. 결과 에셋이 프로젝트에 연결되었습니다." : "이미지 생성 완료. 결과 에셋이 프로젝트에 연결되었습니다."
+        : replaceCompleted ? "실제 이미지 교체 요청을 완료했으나 연결된 결과 에셋이 없습니다." : "완료된 작업은 다시 호출하지 않습니다. 결과 에셋을 유지했습니다.");
     } catch (error) {
       setAssetStatus(`이미지 만들기 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -1281,6 +1417,38 @@ export function ProjectDetailView({
               ) : (
                 <p className="page-muted">현재 표시할 생성 오류가 없습니다. 실패하면 연결 인증, 생성 서버, 생성 처리, 응답 형식 중 하나로 분류됩니다.</p>
               )}
+              {dummyFallbackTargets.length ? (
+                <div className="inline-status warning dummy-fallback-warning">
+                  <div className="dummy-badge-row">
+                    <StatusChip tone="warning">목 이미지</StatusChip>
+                    <strong>{dummyFallbackWarning}</strong>
+                  </div>
+                  <p>{dummyFallbackDetail} 실제 생성 결과가 준비되면 같은 작업 ID로 교체할 수 있습니다.</p>
+                  <ul className="dummy-target-list">
+                    {dummyFallbackTargets.map((target) => (
+                      <li key={target.key}>
+                        <span>{dummyFallbackTargetText(target.job || target.asset)}</span>
+                        <small>사유 {fallbackReasonText(target.fallbackReason)} · {target.packVersion ? `packVersion ${target.packVersion}` : "packVersion 확인 필요"}</small>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="button-row">
+                    <Button icon={<Settings size={16} />} onClick={() => navigate("/settings")} variant="ghost">
+                      Codex 연결하러 가기
+                    </Button>
+                    <Button disabled={assetBusy || dummyReplacementJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(dummyReplacementJobIds, true, true)} variant="primary">
+                      실제 이미지로 교체
+                    </Button>
+                    <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
+                      더미 유지하고 프리뷰로 이동
+                    </Button>
+                    <Button disabled={!dummyFallbackTargets[0]?.location} icon={<Copy size={16} />} onClick={() => void copyDummyAssetLocation(dummyFallbackTargets[0]?.location)} variant="ghost">
+                      목 이미지 파일 위치 복사
+                    </Button>
+                  </div>
+                  {dummyActionStatus ? <small>{dummyActionStatus}</small> : null}
+                </div>
+              ) : null}
               <dl className="summary-list">
                 <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri ? "생성된 배경 경로는 진단에서 확인" : "생성 전"}</dd></div>
                 <div><dt>에셋 연결</dt><dd>{backgroundConnectionText(currentBackgroundAsset, activeBackgroundJob)}</dd></div>
@@ -1300,10 +1468,38 @@ export function ProjectDetailView({
                     <li key={job.id || job.outputAssetId}>
                       {job.asset?.uri ? <img alt={job.asset.label || "생성된 결과 에셋"} src={job.asset.uri} /> : <span className="asset-job-thumb"><ImageIcon size={18} /></span>}
                       <div>
-                        <strong>{imageJobKindLabel(job.kind)}</strong>
+                        <div className="dummy-badge-row">
+                          <strong>{imageJobKindLabel(job.kind)}</strong>
+                          {isDummyGenerationJob(job) ? <StatusChip tone="warning">목 이미지</StatusChip> : null}
+                        </div>
                         <span>{jobStatusLabel(job.status)} · {generationProviderText(job.provider)}</span>
                         <p>{job.prompt || "프롬프트 없음"}</p>
                         <small>{job.asset?.uri ? "결과 에셋 연결됨" : "결과 에셋 대기 중"}</small>
+                        {isDummyGenerationJob(job) ? (
+                          <>
+                            <p>{dummyFallbackDetailText(job)}</p>
+                            <small>{dummyFallbackTargetText(job)} · 사유 {fallbackReasonText(job.fallbackReason || job.asset?.provenance?.fallbackReason)} · {dummyPackVersionText(job)}</small>
+                            <div className="button-row">
+                              <Button disabled={!job.asset?.uri} icon={<Copy size={16} />} onClick={() => void copyDummyAssetLocation(job.asset?.uri)} variant="ghost">
+                                목 이미지 파일 위치 복사
+                              </Button>
+                              <Button disabled={!job.asset?.uri} icon={<ExternalLink size={16} />} onClick={() => openDummyAssetLocation(job.asset?.uri)} variant="ghost">
+                                목 이미지 파일 위치 열기
+                              </Button>
+                            </div>
+                            <DiagnosticDrawer summary="목 이미지 진단">
+                              <dl className="summary-list">
+                                <div><dt>generationJobId</dt><dd className="diagnostic-value">{job.id || "기록 없음"}</dd></div>
+                                <div><dt>outputAssetId</dt><dd className="diagnostic-value">{job.outputAssetId || "기록 없음"}</dd></div>
+                                <div><dt>fallbackReason</dt><dd className="diagnostic-value">{job.fallbackReason || job.asset?.provenance?.fallbackReason || "기록 없음"}</dd></div>
+                                <div><dt>packVersion</dt><dd className="diagnostic-value">{job.packVersion || job.asset?.provenance?.packVersion || "기록 없음"}</dd></div>
+                                <div><dt>sourceGeneratedBy</dt><dd className="diagnostic-value">{job.sourceGeneratedBy || job.asset?.provenance?.sourceGeneratedBy || "기록 없음"}</dd></div>
+                                <div><dt>file path</dt><dd className="diagnostic-value">{job.asset?.uri || "기록 없음"}</dd></div>
+                              </dl>
+                              <pre>{JSON.stringify({ label: "raw payload", job, asset: job.asset }, null, 2)}</pre>
+                            </DiagnosticDrawer>
+                          </>
+                        ) : null}
                         {job.failureMessage ? <small>{job.failureMessage}</small> : null}
                       </div>
                     </li>
@@ -1337,6 +1533,38 @@ export function ProjectDetailView({
               <div className={previewState === "failed" || previewState === "blocked" ? "inline-status warning" : "inline-status success"}>
                 {previewStatus}
               </div>
+              {dummyFallbackTargets.length ? (
+                <div className="inline-status warning dummy-fallback-warning">
+                  <div className="dummy-badge-row">
+                    <StatusChip tone="warning">{dummyFallbackWarning}</StatusChip>
+                    <strong>Alpha 프리뷰는 목 이미지를 포함해 실행할 수 있습니다.</strong>
+                  </div>
+                  <p>{dummyFallbackDetail} 프리뷰는 더미 이미지를 차단하지 않고 대상 목록을 표시합니다.</p>
+                  <ul className="dummy-target-list">
+                    {dummyFallbackTargets.map((target) => (
+                      <li key={`preview-${target.key}`}>
+                        <span>{dummyFallbackTargetText(target.job || target.asset)}</span>
+                        <small>사유 {fallbackReasonText(target.fallbackReason)} · {target.packVersion ? `packVersion ${target.packVersion}` : "packVersion 확인 필요"}</small>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="button-row">
+                    <Button icon={<Settings size={16} />} onClick={() => navigate("/settings")} variant="ghost">
+                      Codex 연결하러 가기
+                    </Button>
+                    <Button disabled={assetBusy || dummyReplacementJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(dummyReplacementJobIds, true, true)} variant="primary">
+                      실제 이미지로 교체
+                    </Button>
+                    <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
+                      더미 유지하고 프리뷰로 이동
+                    </Button>
+                    <Button disabled={!dummyFallbackTargets[0]?.location} icon={<Copy size={16} />} onClick={() => void copyDummyAssetLocation(dummyFallbackTargets[0]?.location)} variant="ghost">
+                      목 이미지 파일 위치 복사
+                    </Button>
+                  </div>
+                  {dummyActionStatus ? <small>{dummyActionStatus}</small> : null}
+                </div>
+              ) : null}
               <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. 현재 상태: {previewReadinessStateLabel(currentPreviewReadiness.availableState || currentPreviewReadiness.state)}</p>
               <dl className="summary-list">
                 <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
@@ -1419,6 +1647,45 @@ export function ProjectDetailView({
                 {exportStatus}
               </div>
               <p className="page-muted">내보내기 대상: 로컬 데스크톱형 웹 앱</p>
+              {dummyFallbackTargets.length ? (
+                <div className="inline-status warning dummy-fallback-warning">
+                  <div className="dummy-badge-row">
+                    <StatusChip tone="warning">{dummyFallbackWarning}</StatusChip>
+                    <strong>Alpha 검증 목적 내보내기는 더미 이미지를 차단하지 않습니다.</strong>
+                  </div>
+                  <p>{dummyFallbackDetail} 산출물에는 아래 목 이미지 대상이 포함될 수 있습니다.</p>
+                  <ul className="dummy-target-list">
+                    {dummyFallbackTargets.map((target) => (
+                      <li key={`export-${target.key}`}>
+                        <span>{dummyFallbackTargetText(target.job || target.asset)}</span>
+                        <small>사유 {fallbackReasonText(target.fallbackReason)} · {target.packVersion ? `packVersion ${target.packVersion}` : "packVersion 확인 필요"}</small>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="button-row">
+                    <Button icon={<Settings size={16} />} onClick={() => navigate("/settings")} variant="ghost">
+                      Codex 연결하러 가기
+                    </Button>
+                    <Button disabled={assetBusy || dummyReplacementJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runImageJobs(dummyReplacementJobIds, true, true)} variant="primary">
+                      실제 이미지로 교체
+                    </Button>
+                    <Button icon={<Play size={16} />} onClick={() => navigate(`/projects/${detailProjectId}/preview`)} variant="ghost">
+                      더미 유지하고 프리뷰로 이동
+                    </Button>
+                    <Button disabled={!dummyFallbackTargets[0]?.location} icon={<Copy size={16} />} onClick={() => void copyDummyAssetLocation(dummyFallbackTargets[0]?.location)} variant="ghost">
+                      목 이미지 파일 위치 복사
+                    </Button>
+                  </div>
+                  <DiagnosticDrawer summary="더미 이미지 내보내기 진단">
+                    <dl className="summary-list">
+                      <div><dt>더미 이미지</dt><dd>{dummyFallbackWarning}</dd></div>
+                      <div><dt>대상</dt><dd>{dummyFallbackTargets.map((target) => dummyFallbackTargetText(target.job || target.asset)).join(" · ")}</dd></div>
+                    </dl>
+                    <pre>{JSON.stringify({ label: "raw payload", targets: dummyFallbackTargets, exportPlan: currentExportPlan }, null, 2)}</pre>
+                  </DiagnosticDrawer>
+                  {dummyActionStatus ? <small>{dummyActionStatus}</small> : null}
+                </div>
+              ) : null}
               <dl className="summary-list">
                 <div><dt>검증 요약</dt><dd>{exportValidationSummaryText(currentExportPlan)}</dd></div>
                 <div><dt>포함될 프로젝트 데이터</dt><dd>{currentExportPlan.includedData?.join(" · ") || "확인 전"}</dd></div>

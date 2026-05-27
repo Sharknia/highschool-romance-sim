@@ -11,6 +11,16 @@ export const detailTabs = [
 
 export type ProjectTabId = typeof detailTabs[number]["id"];
 
+export interface ProjectAssetProvenance {
+  adapter?: string;
+  fallbackReason?: string;
+  packId?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
+  license?: string;
+  sourceUri?: string;
+}
+
 export interface ProjectAsset {
   id?: string;
   kind?: string;
@@ -18,6 +28,7 @@ export interface ProjectAsset {
   uri?: string;
   source?: string;
   generationJobId?: string;
+  provenance?: ProjectAssetProvenance;
 }
 
 export interface ProjectGenerationJob {
@@ -30,6 +41,10 @@ export interface ProjectGenerationJob {
   status?: "planned" | "running" | "failed" | "completed" | string;
   outputAssetId?: string;
   failureMessage?: string;
+  dummy?: boolean;
+  fallbackReason?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
   asset?: ProjectAsset;
 }
 
@@ -236,6 +251,13 @@ export interface ProjectApiResult extends ApiResult {
   issues?: ProjectIssue[];
   job?: ProjectGenerationJob;
   jobs?: ProjectGenerationJob[];
+  dummy?: boolean;
+  fallbackReason?: string;
+  packVersion?: string;
+  sourceGeneratedBy?: string;
+  generationJobId?: string;
+  outputAssetId?: string;
+  asset?: ProjectAsset;
   backgroundPolicy?: {
     limit?: number;
     existingAssetId?: string;
@@ -259,6 +281,8 @@ export interface ProjectApiResult extends ApiResult {
     reachableEndingIds?: string[];
     uncoveredTerminalSceneIds?: string[];
   };
+  raw?: unknown;
+  rawOutput?: unknown;
   runtime?: ProjectRuntime;
   smoke?: ProjectSmokeResult;
   expectedProjectId?: string;
