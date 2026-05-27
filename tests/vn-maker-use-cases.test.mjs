@@ -1252,9 +1252,134 @@ assert.equal(fixedPromptReplay.generationResultLog.patchHistoryId, fixedPromptRe
 assert.equal(fixedPromptReplay.patchHistoryEntry.status, "proposed");
 assert.equal(Array.isArray(fixedPromptReplay.generationResultLog.validationIssues), true);
 assert.equal(typeof fixedPromptReplay.generationResultLog.projectRevision.revision, "string");
+assert.equal(fixedPromptReplay.actionEvent.eventName, "generated");
+assert.equal(fixedPromptReplay.actionEvent.promptId, fixedPromptSet.fixtures[0].promptId);
+assert.equal(fixedPromptReplay.actionEvent.projectId, fixedPromptProject.id);
+assert.equal(fixedPromptReplay.actionEvent.projectRevision.revision, fixedPromptReplay.projectRevision.revision);
+assert.equal(fixedPromptReplay.actionEvent.correlationId, fixedPromptReplay.correlationId);
 const fixedPromptLogs = await useCases.listGenerationResultLogs({ projectDirectory: fixedPromptDirectory });
 assert.equal(fixedPromptLogs.ok, true);
 assert.equal(fixedPromptLogs.generationResultLogs.some((log) => log.resultId === fixedPromptReplay.generationResultId), true);
+
+const uxSessionId = "session-issue-104";
+const uxStarted = await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "started",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  participantType: "novice_non_dev_story_creator",
+  taskId: "fixed-prompt-valid-preview",
+  inputMode: "fixed_prompt",
+  outcome: "started",
+  elapsedMs: 0
+});
+assert.equal(uxStarted.ok, true);
+assert.equal(uxStarted.actionEvent.eventName, "started");
+assert.equal(uxStarted.event.eventLogId, uxStarted.eventLogId);
+assert.equal(uxStarted.event.projectRevision.revision, uxStarted.projectRevision.revision);
+
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "recipe_used",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  promptId: fixedPromptSet.fixtures[0].promptId,
+  inputMode: "fixed_prompt",
+  outcome: "used",
+  elapsedMs: 1200
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "repair_action_used",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  issueCode: "missing-target",
+  issueCodesBefore: ["missing-target"],
+  repairActionId: "create-target-scene",
+  outcome: "used",
+  elapsedMs: 2600
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "repaired",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  issueCode: "missing-target",
+  issueCodesBefore: ["missing-target"],
+  issueCodesAfter: [],
+  repairActionId: "create-target-scene",
+  revisionBefore: fixedPromptReplay.projectRevision,
+  revisionAfter: fixedPromptReplay.projectRevision,
+  outcome: "success",
+  elapsedMs: 4200
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "previewed",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  preflightResult: { canRun: true },
+  outcome: "completed",
+  elapsedMs: 5400
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "help_opened",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  helpChannel: "static_tutorial",
+  outcome: "opened",
+  elapsedMs: 6000
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "hint_given",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  helpChannel: "moderator_hint",
+  hintLevel: 1,
+  outcome: "given",
+  elapsedMs: 90000,
+  stallDurationMs: 90000
+});
+await useCases.recordUXDecisionEvent({
+  projectDirectory: fixedPromptDirectory,
+  eventName: "abandoned",
+  sessionId: uxSessionId,
+  participantIdHash: "participant-hash-104",
+  taskId: "fixed-prompt-valid-preview",
+  outcome: "abandoned",
+  elapsedMs: 96000
+});
+const uxEvents = await useCases.listUXDecisionEvents({ projectDirectory: fixedPromptDirectory, sessionId: uxSessionId });
+assert.equal(uxEvents.ok, true);
+assert.equal(uxEvents.events.length >= 8, true);
+const uxExport = await useCases.exportUXDecisionEventLog({ projectDirectory: fixedPromptDirectory, sessionId: uxSessionId });
+assert.equal(uxExport.ok, true);
+assert.equal(uxExport.eventLog.eventLogId, uxStarted.eventLogId);
+assert.equal(uxExport.eventLog.sessionId, uxSessionId);
+assert.equal(uxExport.eventLog.projectRevision.revision, uxExport.projectRevision.revision);
+assert.equal(uxExport.eventLog.events[0].eventName, "started");
+assert.deepEqual(
+  uxExport.eventLog.events
+    .filter((event) => ["started", "recipe_used", "repair_action_used", "repaired", "previewed"].includes(event.eventName))
+    .map((event) => event.eventName)
+    .slice(0, 5),
+  ["started", "recipe_used", "repair_action_used", "repaired", "previewed"]
+);
+const exportedHelpEvent = uxExport.eventLog.events.find((event) => event.eventName === "help_opened");
+const exportedHintEvent = uxExport.eventLog.events.find((event) => event.eventName === "hint_given");
+const exportedAbandonedEvent = uxExport.eventLog.events.find((event) => event.eventName === "abandoned");
+assert.equal(exportedHelpEvent.helpChannel, "static_tutorial");
+assert.equal(exportedHintEvent.helpChannel, "moderator_hint");
+assert.equal(exportedHintEvent.hintLevel, 1);
+assert.equal(exportedAbandonedEvent.outcome, "abandoned");
 
 const noEventTextUseCases = useCasesModule.createVnMakerUseCases({
   recentProjectIndexFile: join(tempRoot, "fixed-prompt-unavailable-recent.json")

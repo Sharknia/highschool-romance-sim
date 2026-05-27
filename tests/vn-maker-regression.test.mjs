@@ -41,6 +41,8 @@ const repairLastUndoDirectory = join(tempRoot, "RepairLastUndo.vnmaker");
 const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
 const fixedPromptApiCliDirectory = join(tempRoot, "FixedPromptApiCli.vnmaker");
 const fixedPromptCliDirectory = join(tempRoot, "FixedPromptCli.vnmaker");
+const uxEventApiDirectory = join(tempRoot, "UXEventApi.vnmaker");
+const uxEventCliDirectory = join(tempRoot, "UXEventCli.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
 const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
@@ -1742,6 +1744,9 @@ assert.equal(fixedPromptApiReplay.body.generationResultLog.adapter, "codex-event
 assert.equal(fixedPromptApiReplay.body.generationResultLog.classification, "passed");
 assert.equal(fixedPromptApiReplay.body.generationResultLog.patchHistoryId, fixedPromptApiReplay.body.patchHistoryEntry.id);
 assert.equal(fixedPromptApiReplay.body.patchHistoryEntry.status, "proposed");
+assert.equal(fixedPromptApiReplay.body.actionEvent.eventName, "generated");
+assert.equal(fixedPromptApiReplay.body.actionEvent.promptId, fixedPromptApiList.body.fixtures[0].promptId);
+assert.equal(fixedPromptApiReplay.body.actionEvent.correlationId, fixedPromptApiReplay.body.correlationId);
 const fixedPromptApiLogs = await mockApi({
   method: "POST",
   path: "/api/events/generation-result-logs",
@@ -1749,6 +1754,134 @@ const fixedPromptApiLogs = await mockApi({
 });
 assert.equal(fixedPromptApiLogs.status, 200);
 assert.equal(fixedPromptApiLogs.body.generationResultLogs.some((log) => log.resultId === fixedPromptApiReplay.body.generationResultId), true);
+
+const uxEventApiStore = await projectStore.createProjectWorkspace({
+  projectDirectory: uxEventApiDirectory,
+  project: {
+    ...fixedPromptApiCliProject,
+    id: "ux-event-api"
+  }
+});
+uxEventApiStore.close();
+const uxEventApiStarted = await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "started",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    participantType: "novice_non_dev_story_creator",
+    taskId: "api-task",
+    outcome: "started"
+  }
+});
+assert.equal(uxEventApiStarted.status, 200);
+assert.equal(uxEventApiStarted.body.ok, true);
+assert.equal(uxEventApiStarted.body.actionEvent.eventName, "started");
+assert.equal(typeof uxEventApiStarted.body.event.eventLogId, "string");
+const uxEventApiRecipe = await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "recipe_used",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    promptId: fixedPromptApiList.body.fixtures[0].promptId,
+    inputMode: "fixed_prompt",
+    outcome: "used"
+  }
+});
+assert.equal(uxEventApiRecipe.status, 200);
+assert.equal(uxEventApiRecipe.body.event.eventLogId, uxEventApiStarted.body.event.eventLogId);
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "repair_action_used",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    issueCode: "missing-target",
+    repairActionId: "create-target-scene",
+    outcome: "used"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "repaired",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    issueCode: "missing-target",
+    issueCodesBefore: ["missing-target"],
+    issueCodesAfter: [],
+    repairActionId: "create-target-scene",
+    outcome: "success"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "previewed",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    preflightResult: { canRun: true },
+    outcome: "completed"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "hint_given",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    helpChannel: "moderator_hint",
+    hintLevel: 1,
+    outcome: "given"
+  }
+});
+await mockApi({
+  method: "POST",
+  path: "/api/events/ux/record",
+  body: {
+    projectDirectory: uxEventApiDirectory,
+    eventName: "abandoned",
+    sessionId: "api-session-104",
+    participantIdHash: "api-participant-hash",
+    taskId: "api-task",
+    outcome: "abandoned"
+  }
+});
+const uxEventApiExport = await mockApi({
+  method: "POST",
+  path: "/api/events/ux/export",
+  body: { projectDirectory: uxEventApiDirectory, sessionId: "api-session-104" }
+});
+assert.equal(uxEventApiExport.status, 200);
+assert.equal(uxEventApiExport.body.eventLog.eventLogId, uxEventApiStarted.body.event.eventLogId);
+assert.equal(uxEventApiExport.body.eventLog.projectRevision.revision, uxEventApiExport.body.projectRevision.revision);
+assert.deepEqual(
+  uxEventApiExport.body.eventLog.events
+    .filter((event) => ["started", "recipe_used", "repair_action_used", "repaired", "previewed"].includes(event.eventName))
+    .map((event) => event.eventName)
+    .slice(0, 5),
+  ["started", "recipe_used", "repair_action_used", "repaired", "previewed"]
+);
+assert.equal(uxEventApiExport.body.eventLog.events.find((event) => event.eventName === "hint_given").helpChannel, "moderator_hint");
+assert.equal(uxEventApiExport.body.eventLog.events.find((event) => event.eventName === "abandoned").outcome, "abandoned");
 
 const fixedPromptCliList = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "fixed-prompts"], {
   input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
@@ -1775,12 +1908,41 @@ assert.equal(fixedPromptCliReplay.generationResultId, fixedPromptCliReplay.gener
 assert.equal(fixedPromptCliReplay.generationResultLog.sourceType, "mock");
 assert.equal(fixedPromptCliReplay.generationResultLog.adapter, "deterministic-fixture-adapter");
 assert.equal(fixedPromptCliReplay.generationResultLog.classification, "passed");
+assert.equal(fixedPromptCliReplay.actionEvent.eventName, "generated");
+assert.equal(fixedPromptCliReplay.actionEvent.promptId, fixedPromptCliList.fixtures[1].promptId);
+assert.equal(fixedPromptCliReplay.actionEvent.correlationId, fixedPromptCliReplay.correlationId);
 const fixedPromptCliLogs = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "generation-result-logs"], {
   input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
   encoding: "utf8"
 }));
 assert.equal(fixedPromptCliLogs.ok, true);
 assert.equal(fixedPromptCliLogs.generationResultLogs.some((log) => log.resultId === fixedPromptCliReplay.generationResultId), true);
+const uxEventCliRecord = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "record-ux-event"], {
+  input: JSON.stringify({
+    projectDirectory: uxEventCliDirectory,
+    project: {
+      ...fixedPromptApiCliProject,
+      id: "ux-event-cli"
+    },
+    eventName: "started",
+    sessionId: "cli-session-104",
+    participantIdHash: "cli-participant-hash",
+    taskId: "cli-task",
+    outcome: "started"
+  }),
+  encoding: "utf8"
+}));
+assert.equal(uxEventCliRecord.ok, true);
+assert.equal(uxEventCliRecord.actionEvent.eventName, "started");
+assert.equal(uxEventCliRecord.actionEvent.correlationId, uxEventCliRecord.correlationId);
+const uxEventCliExport = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "export-ux-event-log"], {
+  input: JSON.stringify({ projectDirectory: uxEventCliDirectory, sessionId: "cli-session-104" }),
+  encoding: "utf8"
+}));
+assert.equal(uxEventCliExport.ok, true);
+assert.equal(uxEventCliExport.eventLog.eventLogId, uxEventCliRecord.eventLogId);
+assert.equal(uxEventCliExport.eventLog.events[0].eventName, "started");
+assert.equal(uxEventCliExport.eventLog.events[0].projectRevision.revision, uxEventCliExport.projectRevision.revision);
 mockCodexTextCalls = 0;
 
 const apiServerFailure = await mockApi({

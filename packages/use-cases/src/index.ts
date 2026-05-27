@@ -30,6 +30,8 @@ import {
   upsertProjectScene,
   validateEventExpansionPlan,
   validateProject as validateProjectSnapshot,
+  UX_DECISION_HELP_CHANNELS,
+  UX_DECISION_EVENT_NAMES,
   type CreateImageGenerationJobInput,
   type CreateStarterProjectInput,
   type ConditionEvaluationTraceDto,
@@ -45,9 +47,14 @@ import {
   type HeroineProfile,
   type PreviewPreflightDto,
   type ProjectPatchDescription,
+  type ProjectActionEventDto,
   type ProjectRevisionDto,
   type TestPromptFixtureDto,
   type TestPromptSetDto,
+  type UXDecisionEventDto,
+  type UXDecisionEventLogExportDto,
+  type UXDecisionEventName,
+  type UXDecisionHelpChannel,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -222,6 +229,9 @@ export type MakerActionId =
   | "listFixedPrompts"
   | "replayFixedPrompt"
   | "listGenerationResultLogs"
+  | "recordUXDecisionEvent"
+  | "listUXDecisionEvents"
+  | "exportUXDecisionEventLog"
   | "listGenerationJobs"
   | "runGenerationJobs"
   | "previewPreflightProject"
@@ -229,6 +239,7 @@ export type MakerActionId =
   | "previewRepair"
   | "applyRepair"
   | "undoRepair"
+  | "undoPatch"
   | "exportProject";
 
 export type MakerValidationState = "unknown" | "valid" | "warning" | "error";
@@ -419,6 +430,7 @@ export interface ProjectActionFailureDto {
   error: string;
   nextAction: string;
   requestId: string;
+  correlationId?: string;
   projectId?: string;
   projectDirectory?: string;
   expectedProjectId?: string;
@@ -430,6 +442,7 @@ export interface ProjectActionFailureDto {
   previewPreflight?: PreviewPreflightDto;
   repairActions?: RepairActionDto[];
   exportPlan?: ProjectExportPlanDto;
+  actionEvent?: ProjectActionEventDto;
   issues?: ValidationIssue[];
   retryable: boolean;
 }
@@ -679,6 +692,18 @@ const reservedProjectIds = new Set(["new", "open", "settings", "delete", "create
 
 function createRequestId(): string {
   return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createCorrelationId(action: MakerActionId): string {
+  return `corr-${action}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+}
+
+function createUXDecisionEventId(): string {
+  return `uxevent-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+}
+
+function createUXDecisionEventLogId(projectId: string, sessionId: string): string {
+  return `uxlog-${projectId}-${sessionId}`.replace(/[^A-Za-z0-9._:-]/g, "-");
 }
 
 function cloneFixedPromptFixture(fixture: TestPromptFixtureDto): TestPromptFixtureDto {
@@ -1617,6 +1642,183 @@ function attachProjectFailureContext(
   return error;
 }
 
+function stringField(record: JsonRecord, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberField(record: JsonRecord, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringArrayField(record: JsonRecord, key: string): string[] | undefined {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
+  return items.length ? items : [];
+}
+
+function projectRevisionField(record: JsonRecord, key: string): ProjectRevisionDto | undefined {
+  const value = asRecord(record[key]);
+  return typeof value.revision === "string" && typeof value.hashAlgorithm === "string" && typeof value.createdAt === "string"
+    ? value as unknown as ProjectRevisionDto
+    : undefined;
+}
+
+function isUXDecisionEventName(value: unknown): value is UXDecisionEventName {
+  return typeof value === "string" && (UX_DECISION_EVENT_NAMES as readonly string[]).includes(value);
+}
+
+function actionEventNameFor(action: MakerActionId, body: JsonRecord): UXDecisionEventName | null {
+  if (action === "recordUXDecisionEvent") {
+    const event = asRecord(body.event || body.uxDecisionEvent);
+    return isUXDecisionEventName(event.eventName) ? event.eventName : null;
+  }
+  if (action === "replayFixedPrompt" || action === "expandEvent" || action === "approveEvent") {
+    return "generated";
+  }
+  if (action === "previewRepair") {
+    return "repair_action_used";
+  }
+  if (action === "applyRepair") {
+    return "repaired";
+  }
+  if (action === "undoRepair" || action === "undoPatch") {
+    return "undo_used";
+  }
+  if (action === "previewProject") {
+    return "previewed";
+  }
+  if (action === "validateProject" && asRecord(body.validation).ok === false) {
+    return "validation_failed";
+  }
+  return null;
+}
+
+function actionEventContextRecord(body: JsonRecord): JsonRecord {
+  return {
+    ...asRecord(body.request),
+    ...asRecord(body.fixedPrompt),
+    ...asRecord(body.repairPreview),
+    ...asRecord(body.repairHistoryEntry),
+    ...asRecord(body.event),
+    ...asRecord(body.uxDecisionEvent),
+    ...body
+  };
+}
+
+function createProjectActionEvent(
+  action: MakerActionId,
+  body: JsonRecord,
+  input: {
+    correlationId: string;
+    requestId: string;
+    project?: VnMakerProject;
+    projectRevision?: ProjectRevisionDto;
+  }
+): ProjectActionEventDto | undefined {
+  const eventName = actionEventNameFor(action, body);
+  if (!eventName) {
+    return undefined;
+  }
+  const record = actionEventContextRecord(body);
+  return {
+    eventName,
+    timestamp: new Date().toISOString(),
+    correlationId: input.correlationId,
+    requestId: input.requestId,
+    action,
+    ...(stringField(record, "eventLogId") ? { eventLogId: stringField(record, "eventLogId") } : {}),
+    ...(input.project?.id || stringField(record, "projectId") ? { projectId: input.project?.id || stringField(record, "projectId") } : {}),
+    ...(stringField(record, "routeId") ? { routeId: stringField(record, "routeId") } : {}),
+    ...(stringField(record, "sceneId") ? { sceneId: stringField(record, "sceneId") } : {}),
+    ...(stringField(record, "promptId") ? { promptId: stringField(record, "promptId") } : {}),
+    ...(stringField(record, "issueCode") ? { issueCode: stringField(record, "issueCode") } : {}),
+    ...(stringField(record, "repairActionId") || stringField(record, "actionId") ? { repairActionId: stringField(record, "repairActionId") || stringField(record, "actionId") } : {}),
+    outcome: body.ok === false ? "failed" : stringField(record, "outcome") || "success",
+    ...(input.projectRevision ? { projectRevision: input.projectRevision } : {})
+  };
+}
+
+function uxDecisionHelpChannel(value: unknown): UXDecisionHelpChannel | undefined {
+  return typeof value === "string" && (UX_DECISION_HELP_CHANNELS as readonly string[]).includes(value)
+    ? value as UXDecisionHelpChannel
+    : undefined;
+}
+
+function uxDecisionEventNameFrom(input: JsonRecord): UXDecisionEventName {
+  const value = input.eventName;
+  if (!isUXDecisionEventName(value)) {
+    throw new InputValidationError("지원하지 않는 UX decision eventName입니다.", [{
+      severity: "error",
+      path: "eventName",
+      message: `필수 eventName 중 하나여야 합니다: ${UX_DECISION_EVENT_NAMES.join(", ")}`
+    }]);
+  }
+  return value;
+}
+
+function uxDecisionRecordFrom(input: unknown): JsonRecord {
+  const record = asRecord(input);
+  return {
+    ...asRecord(record.event),
+    ...record
+  };
+}
+
+function createUXDecisionEvent(
+  input: unknown,
+  project: VnMakerProject,
+  projectRevision: ProjectRevisionDto
+): UXDecisionEventDto {
+  const record = uxDecisionRecordFrom(input);
+  const sessionId = stringField(record, "sessionId");
+  if (!sessionId) {
+    throw new InputValidationError("UX decision event sessionId 입력이 필요합니다.", [{
+      severity: "error",
+      path: "sessionId",
+      message: "비어 있을 수 없습니다."
+    }]);
+  }
+  const timestamp = stringField(record, "timestamp") || new Date().toISOString();
+  const eventLogId = stringField(record, "eventLogId") || createUXDecisionEventLogId(project.id, sessionId);
+  return {
+    eventLogId,
+    eventId: stringField(record, "eventId") || createUXDecisionEventId(),
+    eventName: uxDecisionEventNameFrom(record),
+    timestamp,
+    sessionId,
+    ...(stringField(record, "participantIdHash") ? { participantIdHash: stringField(record, "participantIdHash") } : {}),
+    ...(stringField(record, "participantType") ? { participantType: stringField(record, "participantType") } : {}),
+    ...(stringField(record, "taskId") ? { taskId: stringField(record, "taskId") } : {}),
+    ...(stringField(record, "promptId") ? { promptId: stringField(record, "promptId") } : {}),
+    ...(stringField(record, "inputMode") ? { inputMode: stringField(record, "inputMode") } : {}),
+    projectId: stringField(record, "projectId") || project.id,
+    ...(stringField(record, "routeId") ? { routeId: stringField(record, "routeId") } : {}),
+    ...(stringField(record, "sceneId") ? { sceneId: stringField(record, "sceneId") } : {}),
+    ...(stringField(record, "issueCode") ? { issueCode: stringField(record, "issueCode") } : {}),
+    ...(stringArrayField(record, "issueCodesBefore") ? { issueCodesBefore: stringArrayField(record, "issueCodesBefore") } : {}),
+    ...(stringArrayField(record, "issueCodesAfter") ? { issueCodesAfter: stringArrayField(record, "issueCodesAfter") } : {}),
+    ...(stringField(record, "repairActionId") ? { repairActionId: stringField(record, "repairActionId") } : {}),
+    ...(uxDecisionHelpChannel(record.helpChannel) ? { helpChannel: uxDecisionHelpChannel(record.helpChannel) } : {}),
+    ...(numberField(record, "hintLevel") !== undefined ? { hintLevel: numberField(record, "hintLevel") } : {}),
+    ...(numberField(record, "elapsedMs") !== undefined ? { elapsedMs: numberField(record, "elapsedMs") } : {}),
+    ...(numberField(record, "stallDurationMs") !== undefined ? { stallDurationMs: numberField(record, "stallDurationMs") } : {}),
+    ...(stringField(record, "outcome") ? { outcome: stringField(record, "outcome") } : {}),
+    projectRevision,
+    ...(projectRevisionField(record, "revisionBefore") ? { revisionBefore: projectRevisionField(record, "revisionBefore") } : {}),
+    ...(projectRevisionField(record, "revisionAfter") ? { revisionAfter: projectRevisionField(record, "revisionAfter") } : {}),
+    ...(asRecord(record.preflightResult) === record.preflightResult ? { preflightResult: record.preflightResult as UXDecisionEventDto["preflightResult"] } : {}),
+    ...(stringField(record, "correlationId") ? { correlationId: stringField(record, "correlationId") } : {}),
+    ...(stringField(record, "action") ? { action: stringField(record, "action") } : {}),
+    ...(stringField(record, "resultId") ? { resultId: stringField(record, "resultId") } : {}),
+    ...(asRecord(record.metadata) === record.metadata ? { metadata: record.metadata as Record<string, unknown> } : {})
+  };
+}
+
 function withActionState<T extends JsonRecord>(
   action: MakerActionId,
   body: T,
@@ -1624,7 +1826,9 @@ function withActionState<T extends JsonRecord>(
 ): T & {
   ok: boolean;
   requestId: string;
+  correlationId: string;
   action: MakerActionId;
+  actionEvent?: ProjectActionEventDto;
   baseProjectHash?: string;
   projectRevision?: ProjectRevisionDto;
   previewPreflight?: PreviewPreflightDto;
@@ -1655,11 +1859,21 @@ function withActionState<T extends JsonRecord>(
   const exportPlan = project
     ? explicitExportPlan || exportPlanFor(project, stateValidation || { ok: true, issues: [] })
     : explicitExportPlan;
+  const requestId = createRequestId();
+  const correlationId = createCorrelationId(action);
+  const actionEvent = createProjectActionEvent(action, body, {
+    correlationId,
+    requestId,
+    project,
+    projectRevision
+  });
   return {
     ...body,
     ok: body.ok !== false,
-    requestId: createRequestId(),
+    requestId,
+    correlationId,
     action,
+    ...(actionEvent ? { actionEvent } : {}),
     baseProjectHash: projectHash,
     projectRevision,
     workflowSummary: createWorkflowSummary(project, stateValidation),
@@ -1778,6 +1992,8 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
   const code = failureCodeFromError(error);
   const contract = projectFailureContractForCode(code);
   const message = projectFailureMessageFromError(error, contract);
+  const requestId = createRequestId();
+  const correlationId = action ? createCorrelationId(action) : undefined;
   const expectedProjectId = typeof errorRecord.expectedProjectId === "string" ? errorRecord.expectedProjectId : undefined;
   const issues = error instanceof InputValidationError
     ? error.issues
@@ -1793,6 +2009,14 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
   const exportPlan = errorRecord.exportPlan && typeof errorRecord.exportPlan === "object"
     ? errorRecord.exportPlan as ProjectExportPlanDto
     : undefined;
+  const actualRevision = errorRecord.actualRevision && typeof errorRecord.actualRevision === "object" ? errorRecord.actualRevision as ProjectRevisionDto : undefined;
+  const actionEvent = action && correlationId
+    ? createProjectActionEvent(action, {
+        ok: false,
+        ...errorRecord,
+        validation: errorRecord.validation || (issues ? { ok: false, issues } : undefined)
+      }, { correlationId, requestId, projectRevision: actualRevision })
+    : undefined;
   return {
     ok: false,
     action,
@@ -1800,16 +2024,18 @@ export function projectActionFailureFromError(error: unknown, action?: MakerActi
     message,
     error: message,
     nextAction: typeof errorRecord.nextAction === "string" && errorRecord.nextAction.trim() ? errorRecord.nextAction.trim() : contract.nextAction,
-    requestId: createRequestId(),
+    requestId,
+    ...(correlationId ? { correlationId } : {}),
     projectId: typeof errorRecord.projectId === "string" ? errorRecord.projectId : expectedProjectId,
     projectDirectory: typeof errorRecord.projectDirectory === "string" ? errorRecord.projectDirectory : undefined,
     expectedProjectId,
     actualProjectId: typeof errorRecord.actualProjectId === "string" ? errorRecord.actualProjectId : undefined,
     expectedRevision: typeof errorRecord.expectedRevision === "string" ? errorRecord.expectedRevision : undefined,
-    actualRevision: errorRecord.actualRevision && typeof errorRecord.actualRevision === "object" ? errorRecord.actualRevision as ProjectRevisionDto : undefined,
+    actualRevision,
     workflowSummary,
     previewReadiness,
     exportPlan,
+    ...(actionEvent ? { actionEvent } : {}),
     issues,
     retryable: contract.retryable
   };
@@ -3881,6 +4107,65 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           generationResultLogs,
           count: generationResultLogs.length
         }, { project });
+      } finally {
+        store.close();
+      }
+    },
+
+    async recordUXDecisionEvent(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const event = store.recordUXDecisionEvent(createUXDecisionEvent(input, project, projectRevision));
+        return withStoreActionState("recordUXDecisionEvent", store, {
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          eventLogId: event.eventLogId,
+          event,
+          uxDecisionEvent: event
+        }, { project, projectRevision });
+      } finally {
+        store.close();
+      }
+    },
+
+    async listUXDecisionEvents(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const uxDecisionEvents = store.listUXDecisionEvents({
+          sessionId: stringField(record, "sessionId"),
+          eventLogId: stringField(record, "eventLogId")
+        });
+        return withStoreActionState("listUXDecisionEvents", store, {
+          projectDirectory: store.paths.projectDirectory,
+          uxDecisionEvents,
+          events: uxDecisionEvents,
+          count: uxDecisionEvents.length
+        }, { project });
+      } finally {
+        store.close();
+      }
+    },
+
+    async exportUXDecisionEventLog(input: unknown) {
+      const record = asRecord(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const eventLog: UXDecisionEventLogExportDto = store.exportUXDecisionEventLog({
+          sessionId: stringField(record, "sessionId"),
+          eventLogId: stringField(record, "eventLogId")
+        });
+        return withStoreActionState("exportUXDecisionEventLog", store, {
+          projectDirectory: store.paths.projectDirectory,
+          eventLogId: eventLog.eventLogId,
+          eventLog,
+          uxDecisionEvents: eventLog.events,
+          events: eventLog.events
+        }, { project, projectRevision: eventLog.projectRevision });
       } finally {
         store.close();
       }

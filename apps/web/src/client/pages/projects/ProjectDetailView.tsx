@@ -541,6 +541,7 @@ export function ProjectDetailView({
   const [smokeResult, setSmokeResult] = useState<ProjectSmokeResult | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const lastResetProjectIdRef = useRef<string | null>(null);
+  const uxSessionIdRef = useRef(`detail-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const routeProjectLoaded = !projectId || loadedProject?.id === projectId;
   const currentProject = routeProjectLoaded ? loadedProject : null;
   const currentWorkflowSummary = routeProjectLoaded ? workflowSummary : null;
@@ -614,6 +615,38 @@ export function ProjectDetailView({
     }))
   ].filter((action, index, actions) => actions.findIndex((candidate) => candidate.tab === action.tab) === index);
   const exportRunReady = Boolean(currentProject && currentExportPlan.canExport === true && exportState !== "blocked" && exportState !== "failed");
+
+  function recordUXDecisionEvent(event: Record<string, unknown>): void {
+    if (!projectDirectory) {
+      return;
+    }
+    void postAuthedJson<ProjectApiResult>("/api/events/ux/record", {
+      projectDirectory,
+      sessionId: uxSessionIdRef.current,
+      participantIdHash: "local-browser-session",
+      participantType: "local_operator",
+      taskId: "phase0-preview-repair-session",
+      projectId: detailProjectId,
+      routeId: currentRoute?.id,
+      sceneId: currentEventScene?.id,
+      projectRevision: currentPreviewPreflight?.projectRevision || undefined,
+      ...event
+    }).catch(() => {
+      // Event capture must not interrupt repair or preview actions.
+    });
+  }
+
+  function recordModeratorHintGiven(): void {
+    recordUXDecisionEvent({ eventName: "hint_given", helpChannel: "moderator_hint", outcome: "given" });
+  }
+
+  useEffect(() => {
+    function handleModeratorHint(): void {
+      recordModeratorHintGiven();
+    }
+    window.addEventListener("vn-maker:moderator-hint", handleModeratorHint);
+    return () => window.removeEventListener("vn-maker:moderator-hint", handleModeratorHint);
+  }, [projectDirectory, detailProjectId]);
   const eventDisplayState: EventTabState = !assignedHeroine
     ? "blockedNoHeroine"
     : pendingPatch && eventState === "ready"
@@ -1237,6 +1270,12 @@ export function ProjectDetailView({
     }
     setRepairBusy(true);
     setRepairStatus("수리 diff를 계산하는 중입니다.");
+    recordUXDecisionEvent({
+      eventName: "repair_action_used",
+      issueCode: action.issueCode,
+      repairActionId: action.actionId,
+      outcome: "used"
+    });
     try {
       const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/preview", repairRequestBody(action));
       if (result.ok === false || !result.repairPreview) {
@@ -1253,6 +1292,13 @@ export function ProjectDetailView({
       setRepairActions(result.repairActions || []);
       setExportPlan(result.exportPlan || null);
       setRepairPreview(result.repairPreview);
+      recordUXDecisionEvent({
+        eventName: "repair_action_used",
+        correlationId: result.correlationId,
+        issueCode: result.repairPreview.issueCode,
+        repairActionId: result.repairPreview.actionId,
+        outcome: "success"
+      });
       setRepairStatus("수리 diff를 확인한 뒤 변경 적용을 누르세요.");
     } catch (error) {
       setRepairPreview(null);
@@ -1290,6 +1336,17 @@ export function ProjectDetailView({
         return;
       }
       setRepairPreview(null);
+      recordUXDecisionEvent({
+        eventName: "repaired",
+        correlationId: result.correlationId,
+        issueCode: result.repairHistoryEntry?.issueCode || repairPreview.repairAction.issueCode,
+        issueCodesBefore: result.repairHistoryEntry?.issueCode ? [result.repairHistoryEntry.issueCode] : [],
+        issueCodesAfter: (result.previewPreflight?.blockers || []).map((blocker) => blocker.issueCode || blocker.path || "unknown"),
+        repairActionId: result.repairHistoryEntry?.actionId || repairPreview.repairAction.actionId,
+        revisionBefore: result.previousRevision || repairPreview.beforeRevision,
+        revisionAfter: result.projectRevision,
+        outcome: "success"
+      });
       applyRepairResultState(result, "수리 적용 완료. 마지막 수리는 되돌릴 수 있습니다.");
     } catch (error) {
       setRepairPreview(null);
@@ -1320,6 +1377,15 @@ export function ProjectDetailView({
         return;
       }
       setRepairPreview(null);
+      recordUXDecisionEvent({
+        eventName: "undo_used",
+        correlationId: result.correlationId,
+        issueCode: result.repairHistoryEntry?.issueCode || undoRepairEntry.issueCode,
+        repairActionId: result.repairHistoryEntry?.actionId || undoRepairEntry.actionId,
+        revisionBefore: result.previousRevision,
+        revisionAfter: result.projectRevision,
+        outcome: "undone"
+      });
       applyRepairResultState(result, "마지막 수리를 되돌렸습니다. 검증 결과와 사전 점검을 다시 확인하세요.");
     } catch (error) {
       setRepairStatus(`수리 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -1352,6 +1418,12 @@ export function ProjectDetailView({
       setPreviewIssues(messages);
       setPreviewReadiness(nextReadiness);
       setPreviewStatus(result.previewPreflight?.disabledReason || result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
+      recordUXDecisionEvent({
+        eventName: "validation_failed",
+        issueCodesBefore: issues.map((issue) => issue.code || issue.path || "unknown"),
+        outcome: "failed",
+        preflightResult: result.previewPreflight
+      });
       return false;
     }
     setPreviewIssues(messages);
@@ -1412,6 +1484,12 @@ export function ProjectDetailView({
       setExportPlan(result.exportPlan || null);
       setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
       setPreviewStatus(blocked ? nextPreflight?.disabledReason || nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
+      recordUXDecisionEvent({
+        eventName: "previewed",
+        correlationId: result.correlationId,
+        outcome: blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "completed",
+        preflightResult: nextPreflight || undefined
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");

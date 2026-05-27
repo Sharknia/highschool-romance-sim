@@ -158,6 +158,9 @@ function printCapabilities(): void {
       "fixed-prompts",
       "replay-fixed-prompt",
       "generation-result-logs",
+      "record-ux-event",
+      "list-ux-events",
+      "export-ux-event-log",
       "expand-event",
       "approve-event",
       "preview-preflight",
@@ -202,6 +205,9 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "fixed-prompts": "listFixedPrompts",
     "replay-fixed-prompt": "replayFixedPrompt",
     "generation-result-logs": "listGenerationResultLogs",
+    "record-ux-event": "recordUXDecisionEvent",
+    "list-ux-events": "listUXDecisionEvents",
+    "export-ux-event-log": "exportUXDecisionEventLog",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
     "preview-preflight": "previewPreflightProject",
@@ -209,6 +215,7 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "export-web": "exportProject",
     "list-generation-jobs": "listGenerationJobs",
     "run-generation-jobs": "runGenerationJobs",
+    "undo-patch": "undoPatch",
     "repair-preview": "previewRepair",
     "repair-apply": "applyRepair",
     "repair-undo": "undoRepair"
@@ -405,6 +412,21 @@ async function run(): Promise<void> {
 
   if (command === "generation-result-logs") {
     writeJson(await useCases.listGenerationResultLogs(input));
+    return;
+  }
+
+  if (command === "record-ux-event") {
+    writeJson(await useCases.recordUXDecisionEvent(input));
+    return;
+  }
+
+  if (command === "list-ux-events") {
+    writeJson(await useCases.listUXDecisionEvents(input));
+    return;
+  }
+
+  if (command === "export-ux-event-log") {
+    writeJson(await useCases.exportUXDecisionEventLog(input));
     return;
   }
 

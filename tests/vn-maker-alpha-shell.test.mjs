@@ -255,15 +255,41 @@ const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRe
   "TestPromptFixtureDto",
   "GenerationResultLogDto",
   "GenerationFailureClassification",
-  "GenerationResultClassification"
+  "GenerationResultClassification",
+  "UXDecisionEventDto",
+  "UXDecisionEventLogExportDto",
+  "UX_DECISION_EVENT_NAMES"
 ].forEach((requiredText) => {
   assert.match(engineCoreSource, new RegExp(requiredText), `engine-core는 ${requiredText} DTO 계약을 소유해야 합니다.`);
+});
+[
+  "started",
+  "generated",
+  "added_choices",
+  "added_condition",
+  "validation_failed",
+  "repaired",
+  "previewed",
+  "abandoned",
+  "help_opened",
+  "hint_given",
+  "recipe_used",
+  "repair_action_used",
+  "undo_used",
+  "revert_used"
+].forEach((requiredText) => {
+  assert.match(engineCoreSource, new RegExp(requiredText), `engine-core UXDecisionEventDto는 필수 eventName '${requiredText}'를 포함해야 합니다.`);
 });
 [
   "FIXED_PROMPT_SET_ID",
   "listFixedPrompts",
   "replayFixedPrompt",
   "listGenerationResultLogs",
+  "recordUXDecisionEvent",
+  "listUXDecisionEvents",
+  "exportUXDecisionEventLog",
+  "actionEvent",
+  "correlationId",
   "generation_quality",
   "validation_model",
   "repair_ux",
@@ -275,7 +301,10 @@ const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRe
 [
   "/api/events/fixed-prompts",
   "/api/events/fixed-prompts/replay",
-  "/api/events/generation-result-logs"
+  "/api/events/generation-result-logs",
+  "/api/events/ux/record",
+  "/api/events/ux/list",
+  "/api/events/ux/export"
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(serverHandlersSource, pattern, `Web API는 고정 프롬프트/결과 로그 route를 노출해야 합니다: ${requiredText}`);
@@ -283,9 +312,52 @@ const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRe
 [
   "fixed-prompts",
   "replay-fixed-prompt",
-  "generation-result-logs"
+  "generation-result-logs",
+  "record-ux-event",
+  "list-ux-events",
+  "export-ux-event-log"
 ].forEach((requiredText) => {
   assert.match(readText("packages/cli/src/index.ts"), new RegExp(requiredText), `CLI는 ${requiredText} command를 노출해야 합니다.`);
+});
+[
+  "export interface UXDecisionEvent",
+  "export interface ProjectActionEvent",
+  "eventLogId?: string",
+  "actionEvent?: ProjectActionEvent",
+  "uxDecisionEvents?: UXDecisionEvent[]"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectPageTypesSource, pattern, `projectPageTypes는 UX event/action envelope 타입 '${requiredText}'를 포함해야 합니다.`);
+});
+[
+  "recordUXDecisionEvent",
+  "/api/events/ux/record",
+  'eventName: "started"',
+  'eventName: "recipe_used"',
+  'eventName: "generated"',
+  'eventName: "added_choices"',
+  'eventName: "added_condition"',
+  'eventName: "help_opened"',
+  'eventName: "abandoned"',
+  "static_tutorial",
+  "inline_guide",
+  "automatic_repair_suggestion"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace는 UX event emission '${requiredText}'를 가져야 합니다.`);
+});
+[
+  "recordUXDecisionEvent",
+  "/api/events/ux/record",
+  'eventName: "repair_action_used"',
+  'eventName: "repaired"',
+  'eventName: "undo_used"',
+  'eventName: "previewed"',
+  'eventName: "validation_failed"',
+  "moderator_hint"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(projectDetailViewSource, pattern, `ProjectDetailView는 repair/preview UX event emission '${requiredText}'를 가져야 합니다.`);
 });
 assert.match(`${projectStartSource}\n${recentProjectListSource}`, /ContentList/, "프로젝트 목록 화면은 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(

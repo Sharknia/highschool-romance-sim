@@ -29,6 +29,8 @@ import {
   type EventExpansionValidationResult,
   type HeroineReuseRecord,
   type ProjectRevisionDto,
+  type UXDecisionEventDto,
+  type UXDecisionEventLogExportDto,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -415,6 +417,16 @@ interface GenerationResultLogRow {
   created_at: string;
 }
 
+interface UXDecisionEventRow {
+  id: string;
+  project_id: string;
+  event_log_id: string;
+  session_id: string;
+  event_name: string;
+  event_json: string;
+  created_at: string;
+}
+
 const migrations = [
   {
     id: 1,
@@ -651,6 +663,24 @@ CREATE TABLE IF NOT EXISTS generation_result_logs (
 
 CREATE INDEX IF NOT EXISTS idx_generation_result_logs_project_created ON generation_result_logs(project_id, created_at);
 `
+  },
+  {
+    id: 9,
+    name: "ux_decision_events",
+    sql: `
+CREATE TABLE IF NOT EXISTS ux_decision_events (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  event_log_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  event_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ux_decision_events_project_session_created ON ux_decision_events(project_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ux_decision_events_project_log_created ON ux_decision_events(project_id, event_log_id, created_at);
+`
   }
 ] as const;
 
@@ -812,6 +842,19 @@ function generationResultLogFromRow(row: GenerationResultLogRow): GenerationResu
     validationIssues: [],
     classification: "generation_quality",
     skippedReason: "generation result log payload missing"
+  });
+}
+
+function uxDecisionEventFromRow(row: UXDecisionEventRow): UXDecisionEventDto {
+  return parseJson<UXDecisionEventDto>(row.event_json, {
+    eventLogId: row.event_log_id,
+    eventId: row.id,
+    eventName: row.event_name as UXDecisionEventDto["eventName"],
+    timestamp: row.created_at,
+    sessionId: row.session_id,
+    projectId: row.project_id,
+    projectRevision: createProjectRevision(createStarterProject({ id: row.project_id }), row.created_at),
+    outcome: "failed"
   });
 }
 
@@ -1951,6 +1994,64 @@ WHERE project_id = ?
 ORDER BY created_at DESC, id DESC
 `).all(project.id) as GenerationResultLogRow[];
     return rows.map(generationResultLogFromRow);
+  }
+
+  recordUXDecisionEvent(event: UXDecisionEventDto): UXDecisionEventDto {
+    const project = this.requireProject();
+    this.db.prepare(`
+INSERT INTO ux_decision_events (
+  id, project_id, event_log_id, session_id, event_name, event_json, created_at
+)
+VALUES (
+  @id, @projectId, @eventLogId, @sessionId, @eventName, @eventJson, @createdAt
+)
+`).run({
+      id: event.eventId,
+      projectId: project.id,
+      eventLogId: event.eventLogId,
+      sessionId: event.sessionId,
+      eventName: event.eventName,
+      eventJson: json(event),
+      createdAt: event.timestamp
+    });
+    return event;
+  }
+
+  listUXDecisionEvents(input: { sessionId?: string; eventLogId?: string } = {}): UXDecisionEventDto[] {
+    const project = this.requireProject();
+    const filters: string[] = ["project_id = @projectId"];
+    const params: Record<string, string> = { projectId: project.id };
+    if (input.sessionId) {
+      filters.push("session_id = @sessionId");
+      params.sessionId = input.sessionId;
+    }
+    if (input.eventLogId) {
+      filters.push("event_log_id = @eventLogId");
+      params.eventLogId = input.eventLogId;
+    }
+    const rows = this.db.prepare(`
+SELECT id, project_id, event_log_id, session_id, event_name, event_json, created_at
+FROM ux_decision_events
+WHERE ${filters.join(" AND ")}
+ORDER BY created_at ASC, id ASC
+`).all(params) as UXDecisionEventRow[];
+    return rows.map(uxDecisionEventFromRow);
+  }
+
+  exportUXDecisionEventLog(input: { sessionId?: string; eventLogId?: string; exportedAt?: string } = {}): UXDecisionEventLogExportDto {
+    const project = this.requireProject();
+    const events = this.listUXDecisionEvents(input);
+    const firstEvent = events[0];
+    const sessionId = input.sessionId || firstEvent?.sessionId || "";
+    const eventLogId = input.eventLogId || firstEvent?.eventLogId || `uxlog-${project.id}-${sessionId || "default"}`;
+    return {
+      eventLogId,
+      sessionId,
+      projectId: project.id,
+      projectRevision: this.getProjectRevision(),
+      exportedAt: input.exportedAt || nowIso(),
+      events
+    };
   }
 
   undoPatchHistory(patchHistoryId: string): VnMakerProject {

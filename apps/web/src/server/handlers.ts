@@ -370,6 +370,18 @@ class ApiServices {
     return this.useCases.listGenerationResultLogs(body);
   }
 
+  recordUXDecisionEvent(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.recordUXDecisionEvent(body);
+  }
+
+  listUXDecisionEvents(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listUXDecisionEvents(body);
+  }
+
+  exportUXDecisionEventLog(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.exportUXDecisionEventLog(body);
+  }
+
   expandEvent(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.expandEvent(body);
   }
@@ -482,6 +494,9 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/events/fixed-prompts", (context) => jsonBodyRoute(context, (body) => services.listFixedPrompts(body), "listFixedPrompts"));
   app.post("/api/events/fixed-prompts/replay", (context) => jsonBodyRoute(context, (body) => services.replayFixedPrompt(body), "replayFixedPrompt"));
   app.post("/api/events/generation-result-logs", (context) => jsonBodyRoute(context, (body) => services.listGenerationResultLogs(body), "listGenerationResultLogs"));
+  app.post("/api/events/ux/record", (context) => jsonBodyRoute(context, (body) => services.recordUXDecisionEvent(body), "recordUXDecisionEvent"));
+  app.post("/api/events/ux/list", (context) => jsonBodyRoute(context, (body) => services.listUXDecisionEvents(body), "listUXDecisionEvents"));
+  app.post("/api/events/ux/export", (context) => jsonBodyRoute(context, (body) => services.exportUXDecisionEventLog(body), "exportUXDecisionEventLog"));
   app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body), "expandEvent"));
   app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body), "approveEvent"));
   app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));

@@ -392,6 +392,65 @@ export interface ProjectWorkflowSummary {
   }>;
 }
 
+export interface ProjectActionEvent {
+  eventName?: string;
+  timestamp?: string;
+  correlationId?: string;
+  requestId?: string;
+  action?: string;
+  eventLogId?: string;
+  projectId?: string;
+  routeId?: string;
+  sceneId?: string;
+  promptId?: string;
+  issueCode?: string;
+  repairActionId?: string;
+  outcome?: string;
+  projectRevision?: ProjectRevision;
+}
+
+export interface UXDecisionEvent {
+  eventLogId?: string;
+  eventId?: string;
+  eventName?: string;
+  timestamp?: string;
+  sessionId?: string;
+  participantIdHash?: string;
+  participantType?: string;
+  taskId?: string;
+  promptId?: string;
+  inputMode?: string;
+  projectId?: string;
+  routeId?: string;
+  sceneId?: string;
+  issueCode?: string;
+  issueCodesBefore?: string[];
+  issueCodesAfter?: string[];
+  repairActionId?: string;
+  helpChannel?: "static_tutorial" | "external_help" | "inline_guide" | "automatic_repair_suggestion" | "moderator_hint" | string;
+  hintLevel?: number;
+  elapsedMs?: number;
+  stallDurationMs?: number;
+  outcome?: string;
+  projectRevision?: ProjectRevision;
+  revisionBefore?: ProjectRevision;
+  revisionAfter?: ProjectRevision;
+  preflightResult?: Record<string, unknown>;
+  correlationId?: string;
+  action?: string;
+  resultId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UXDecisionEventLog {
+  eventLogId?: string;
+  sessionId?: string;
+  projectId?: string;
+  projectRevision?: ProjectRevision;
+  exportedAt?: string;
+  events?: UXDecisionEvent[];
+}
+
 export interface RecentProject {
   projectId: string;
   projectDirectory: string;
@@ -404,6 +463,8 @@ export interface RecentProject {
 
 export interface ProjectApiResult extends ApiResult {
   action?: string;
+  correlationId?: string;
+  actionEvent?: ProjectActionEvent;
   baseProjectHash?: string;
   code?: string;
   message?: string;
@@ -459,6 +520,12 @@ export interface ProjectApiResult extends ApiResult {
   generationResultId?: string;
   generationResultLog?: GenerationResultLog;
   generationResultLogs?: GenerationResultLog[];
+  eventLogId?: string;
+  event?: UXDecisionEvent;
+  uxDecisionEvent?: UXDecisionEvent;
+  uxDecisionEvents?: UXDecisionEvent[];
+  events?: UXDecisionEvent[];
+  eventLog?: UXDecisionEventLog;
   recentProject?: RecentProject;
   removedProject?: RecentProject;
   recentIndexRemoval?: {

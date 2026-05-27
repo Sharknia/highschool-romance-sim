@@ -82,6 +82,104 @@ export interface GenerationResultLogDto {
   skippedReason?: string;
 }
 
+export const UX_DECISION_EVENT_NAMES = [
+  "started",
+  "generated",
+  "added_choices",
+  "added_condition",
+  "validation_failed",
+  "repaired",
+  "previewed",
+  "abandoned",
+  "help_opened",
+  "hint_given",
+  "recipe_used",
+  "repair_action_used",
+  "undo_used",
+  "revert_used"
+] as const;
+
+export type UXDecisionEventName = typeof UX_DECISION_EVENT_NAMES[number];
+
+export const UX_DECISION_HELP_CHANNELS = [
+  "static_tutorial",
+  "external_help",
+  "inline_guide",
+  "automatic_repair_suggestion",
+  "moderator_hint"
+] as const;
+
+export type UXDecisionHelpChannel = typeof UX_DECISION_HELP_CHANNELS[number];
+export type UXDecisionInputMode = "fixed_prompt" | "free_input" | "manual" | "generated" | string;
+export type UXDecisionOutcome = "started" | "used" | "opened" | "given" | "success" | "failed" | "completed" | "blocked" | "abandoned" | "undone" | "reverted" | string;
+
+export interface UXDecisionPreflightResultDto {
+  canRun?: boolean;
+  disabledReason?: string | null;
+  blockers?: unknown[];
+  warnings?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ProjectActionEventDto {
+  eventName: UXDecisionEventName;
+  timestamp: string;
+  correlationId: string;
+  requestId: string;
+  action: string;
+  eventLogId?: string;
+  projectId?: string;
+  routeId?: string;
+  sceneId?: string;
+  promptId?: string;
+  issueCode?: string;
+  repairActionId?: string;
+  outcome?: UXDecisionOutcome;
+  projectRevision?: ProjectRevisionDto;
+}
+
+export interface UXDecisionEventDto {
+  eventLogId: string;
+  eventId: string;
+  eventName: UXDecisionEventName;
+  timestamp: string;
+  sessionId: string;
+  participantIdHash?: string;
+  participantType?: string;
+  taskId?: string;
+  promptId?: string;
+  inputMode?: UXDecisionInputMode;
+  projectId: string;
+  routeId?: string;
+  sceneId?: string;
+  issueCode?: string;
+  issueCodesBefore?: string[];
+  issueCodesAfter?: string[];
+  repairActionId?: string;
+  helpChannel?: UXDecisionHelpChannel;
+  hintLevel?: number;
+  elapsedMs?: number;
+  stallDurationMs?: number;
+  outcome?: UXDecisionOutcome;
+  projectRevision: ProjectRevisionDto;
+  revisionBefore?: ProjectRevisionDto;
+  revisionAfter?: ProjectRevisionDto;
+  preflightResult?: UXDecisionPreflightResultDto;
+  correlationId?: string;
+  action?: string;
+  resultId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UXDecisionEventLogExportDto {
+  eventLogId: string;
+  sessionId: string;
+  projectId: string;
+  projectRevision: ProjectRevisionDto;
+  exportedAt: string;
+  events: UXDecisionEventDto[];
+}
+
 export type ConditionRuntimeSupportFlag = "support_false";
 export type ConditionRuntimePreviewStatus = "not_evaluated";
 export type ConditionRuntimeEditorMode = "candidate_review_only";

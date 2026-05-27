@@ -386,6 +386,7 @@ export function StudioWorkspace({
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inspectorFirstFieldRef = useRef<HTMLElement | null>(null);
+  const uxSessionIdRef = useRef(`studio-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
 
   const projectId = project?.id || routeProjectId || "";
   const scenes = project?.scenes || [];
@@ -441,6 +442,33 @@ export function StudioWorkspace({
     });
     return ordered;
   }, [activeRoute?.entrySceneId, scenes]);
+
+  function recordUXDecisionEvent(event: Record<string, unknown>): void {
+    if (!projectDirectory) {
+      return;
+    }
+    void postJson("/api/events/ux/record", {
+      projectDirectory,
+      sessionId: uxSessionIdRef.current,
+      participantIdHash: "local-browser-session",
+      participantType: "local_operator",
+      taskId: "phase0-studio-decision-session",
+      projectId,
+      routeId: activeRoute?.id,
+      sceneId: selectedScene?.id,
+      projectRevision: localRevision || previewPreflight?.projectRevision || projectRevision || undefined,
+      ...event
+    }).catch(() => {
+      // Event capture must not interrupt authoring actions.
+    });
+  }
+
+  useEffect(() => {
+    if (!projectDirectory) {
+      return;
+    }
+    recordUXDecisionEvent({ eventName: "started", outcome: "started", inputMode: "manual" });
+  }, [projectDirectory, projectId]);
 
   useEffect(() => {
     setLocalIssues(preflightToIssues(previewPreflight));
@@ -524,6 +552,21 @@ export function StudioWorkspace({
 
   function setPanel(panel: StudioPanelId): void {
     updateQuery({ panel });
+    if (panel === "stats") {
+      recordUXDecisionEvent({
+        eventName: "added_condition",
+        helpChannel: "inline_guide",
+        issueCode: "conditional-choice-runtime-unsupported",
+        outcome: "blocked"
+      });
+    }
+    if (panel === "validation") {
+      recordUXDecisionEvent({
+        eventName: "help_opened",
+        helpChannel: "automatic_repair_suggestion",
+        outcome: "opened"
+      });
+    }
   }
 
   function updateLayout(nextLayout: Partial<StudioLayout>): void {
@@ -555,6 +598,12 @@ export function StudioWorkspace({
     }
     setGenerationBusy(true);
     setGenerationStatus(adapterMode === "actual" ? "actual 생성 경로로 replay 중입니다." : "mock replay 중입니다.");
+    recordUXDecisionEvent({
+      eventName: "recipe_used",
+      inputMode: "fixed_prompt",
+      outcome: "used",
+      promptId
+    });
     try {
       const result = await postJson("/api/events/fixed-prompts/replay", {
         projectDirectory,
@@ -562,6 +611,14 @@ export function StudioWorkspace({
         adapterMode
       });
       setGenerationLog(result.generationResultLog || null);
+      recordUXDecisionEvent({
+        eventName: "generated",
+        correlationId: result.correlationId,
+        inputMode: "fixed_prompt",
+        outcome: isApiFailure(result) ? "failed" : "success",
+        promptId,
+        resultId: result.generationResultId
+      });
       if (result.project) {
         onProjectResult(result);
       }
@@ -600,6 +657,7 @@ export function StudioWorkspace({
       };
       return { ...current, choices: [...(current.choices || []), nextChoice], next: "" };
     });
+    recordUXDecisionEvent({ eventName: "added_choices", outcome: "success" });
     setPanel("choices");
   }
 
@@ -679,6 +737,13 @@ export function StudioWorkspace({
         return null;
       }
       setStatusText(resultIssues(result).length > 0 ? "검증 stale: 문제 확인 결과가 갱신되었습니다." : "검증 완료. 문제 없음.");
+      if (resultIssues(result).some((issue) => issue.severity === "error")) {
+        recordUXDecisionEvent({
+          eventName: "validation_failed",
+          issueCodesBefore: resultIssues(result).map((issue) => issue.code || issue.path || "unknown"),
+          outcome: "failed"
+        });
+      }
       return nextRevision;
     } catch (error) {
       setSaveState("apiFailure");
@@ -853,6 +918,12 @@ export function StudioWorkspace({
   function handleProblemFocus(issue: ProjectIssue): void {
     const sceneId = findIssueSceneId(issue, project);
     const nextPanel = issuePanel(issue);
+    recordUXDecisionEvent({
+      eventName: "help_opened",
+      helpChannel: "static_tutorial",
+      issueCode: issue.code,
+      outcome: "opened"
+    });
     updateQuery({ panel: nextPanel, scene: sceneId || selectedScene?.id || "" });
     if (nextPanel === "scene") {
       focusLater(scriptTextareaRef);
@@ -878,10 +949,16 @@ export function StudioWorkspace({
           <p className="page-muted">현재 창: {viewport.width}x{viewport.height}</p>
         </div>
         <div className="button-row">
-          <Button icon={<Eye size={16} />} onClick={() => onNavigate(unsupportedProjectPath)} variant="primary">
+          <Button icon={<Eye size={16} />} onClick={() => {
+            recordUXDecisionEvent({ eventName: "abandoned", outcome: "abandoned" });
+            onNavigate(unsupportedProjectPath);
+          }} variant="primary">
             프로젝트 상세로 이동
           </Button>
-          <Button icon={<GitBranch size={16} />} onClick={() => onNavigate("/projects")} variant="ghost">
+          <Button icon={<GitBranch size={16} />} onClick={() => {
+            recordUXDecisionEvent({ eventName: "abandoned", outcome: "abandoned" });
+            onNavigate("/projects");
+          }} variant="ghost">
             프로젝트 목록
           </Button>
         </div>
