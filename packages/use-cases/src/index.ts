@@ -12,6 +12,7 @@ import {
   createHeroineProfile,
   createHeroinePortraitPrompt,
   createImageGenerationJob,
+  createPreviewPreflight,
   createProjectRevision,
   planExpressionAssetsForHeroine,
   createProjectFromHeroine,
@@ -34,6 +35,7 @@ import {
   type EventExpansionRequest,
   type EventExpansionValidationResult,
   type HeroineProfile,
+  type PreviewPreflightDto,
   type ProjectRevisionDto,
   type ValidationIssue,
   type VnMakerAsset,
@@ -172,6 +174,7 @@ export type MakerActionId =
   | "approveEvent"
   | "listGenerationJobs"
   | "runGenerationJobs"
+  | "previewPreflightProject"
   | "previewProject"
   | "exportProject";
 
@@ -297,6 +300,7 @@ export interface ProjectActionFailureDto {
   actualRevision?: ProjectRevisionDto;
   workflowSummary?: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
+  previewPreflight?: PreviewPreflightDto;
   exportPlan?: ProjectExportPlanDto;
   issues?: ValidationIssue[];
   retryable: boolean;
@@ -964,6 +968,7 @@ function withActionState<T extends JsonRecord>(
   action: MakerActionId;
   baseProjectHash?: string;
   projectRevision?: ProjectRevisionDto;
+  previewPreflight?: PreviewPreflightDto;
   workflowSummary: MakerWorkflowSummary;
   previewReadiness?: ProjectPreviewReadinessDto;
   exportPlan?: ProjectExportPlanDto;
@@ -971,13 +976,18 @@ function withActionState<T extends JsonRecord>(
   const project = options.project || (asRecord(body).project as VnMakerProject | undefined);
   const validation = options.validation || (asRecord(body).validation as { ok?: boolean; issues?: ValidationIssue[] } | undefined);
   const explicitPreviewReadiness = asRecord(body).previewReadiness as ProjectPreviewReadinessDto | undefined;
+  const explicitPreviewPreflight = asRecord(body).previewPreflight as PreviewPreflightDto | undefined;
   const explicitExportPlan = asRecord(body).exportPlan as ProjectExportPlanDto | undefined;
   const explicitProjectRevision = options.projectRevision || (asRecord(body).projectRevision as ProjectRevisionDto | undefined);
   const stateValidation = project ? validationForProjectState(project, validation) : validation;
   const projectHash = project ? hashProjectSnapshot(project) : undefined;
+  const projectRevision = explicitProjectRevision || (project ? createProjectRevision(project, new Date().toISOString()) : undefined);
   const previewReadiness = project
     ? explicitPreviewReadiness || previewReadinessFor(project, stateValidation || { ok: true, issues: [] })
     : explicitPreviewReadiness;
+  const previewPreflight = project && projectRevision
+    ? explicitPreviewPreflight || createPreviewPreflight(project, stateValidation || { ok: true, issues: [] }, projectRevision)
+    : explicitPreviewPreflight;
   const exportPlan = project
     ? explicitExportPlan || exportPlanFor(project, stateValidation || { ok: true, issues: [] })
     : explicitExportPlan;
@@ -987,9 +997,10 @@ function withActionState<T extends JsonRecord>(
     requestId: createRequestId(),
     action,
     baseProjectHash: projectHash,
-    projectRevision: explicitProjectRevision || (project ? createProjectRevision(project, new Date().toISOString()) : undefined),
+    projectRevision,
     workflowSummary: createWorkflowSummary(project, stateValidation),
     ...(previewReadiness ? { previewReadiness } : {}),
+    ...(previewPreflight ? { previewPreflight } : {}),
     ...(exportPlan ? { exportPlan } : {})
   };
 }
@@ -3005,15 +3016,17 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         const project = store.requireProject();
         const validation = store.validateAndStore();
         const initialReadiness = previewReadinessFor(project, validation);
-        if (!initialReadiness.canRun) {
+        const initialPreflight = createPreviewPreflight(project, validation, store.getProjectRevision());
+        if (!initialPreflight.canRun || !initialReadiness.canRun) {
           return withStoreActionState("previewProject", store, {
             ok: false,
             code: "PREVIEW_BLOCKED",
-            message: initialReadiness.failureCause,
-            error: initialReadiness.failureCause,
+            message: initialPreflight.disabledReason || initialReadiness.failureCause,
+            error: initialPreflight.disabledReason || initialReadiness.failureCause,
             projectDirectory: store.paths.projectDirectory,
             validation,
-            previewReadiness: initialReadiness
+            previewReadiness: initialReadiness,
+            previewPreflight: initialPreflight
           }, { project, validation });
         }
         let runtime;
@@ -3057,6 +3070,24 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           routeGraphAnalysis,
           previewReadiness
         }, { project, validation: runtime.validation });
+      } finally {
+        store.close();
+      }
+    },
+
+    async previewPreflightProject(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const validation = store.validateAndStore();
+        const previewReadiness = previewReadinessFor(project, validation);
+        const previewPreflight = createPreviewPreflight(project, validation, store.getProjectRevision());
+        return withStoreActionState("previewPreflightProject", store, {
+          projectDirectory: store.paths.projectDirectory,
+          validation,
+          previewReadiness,
+          previewPreflight
+        }, { project, validation });
       } finally {
         store.close();
       }

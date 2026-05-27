@@ -177,6 +177,30 @@ export interface ProjectPreviewReadiness {
   nextAction?: string;
 }
 
+export interface ProjectPreviewPreflightIssue {
+  issueCode?: string;
+  path?: string;
+  message?: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+  repairActionIds?: string[];
+}
+
+export interface ProjectPreviewPreflight {
+  canRun?: boolean;
+  blockers?: ProjectPreviewPreflightIssue[];
+  warnings?: ProjectPreviewPreflightIssue[];
+  disabledReason?: string | null;
+  nextAction?: string;
+  projectRevision?: ProjectRevision;
+  runtimeCapabilities?: {
+    choiceConditionFiltering?: boolean;
+    choiceEffects?: boolean;
+    conditionSemanticsVersion?: string;
+  };
+}
+
 export interface ProjectExportPlan {
   state?: "ready" | "blocked" | "running" | "complete" | "failed" | string;
   canExport?: boolean;
@@ -249,6 +273,7 @@ export interface ProjectApiResult extends ApiResult {
   actualRevision?: ProjectRevision;
   previousRevision?: ProjectRevision;
   projectRevision?: ProjectRevision;
+  previewPreflight?: ProjectPreviewPreflight;
   projects?: RecentProject[];
   count?: number;
   missingCount?: number;

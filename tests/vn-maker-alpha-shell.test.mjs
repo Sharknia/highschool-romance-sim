@@ -695,6 +695,7 @@ assert.match(
 assert.match(projectDetailViewSource, /severity === "error"/, "프리뷰 검증은 warning이 아니라 error severity만 차단해야 합니다.");
 assert.match(projectDetailViewSource, /result\.code === "PREVIEW_BLOCKED"/, "프리뷰 차단 응답은 failed가 아니라 blocked 상태로 표시해야 합니다.");
 assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 previewReadiness.canRun=true가 아닐 때 비활성화해야 합니다.");
+assert.match(projectDetailViewSource, /currentPreviewReadiness\.canRun !== true\s*\|\|\s*currentPreviewPreflight\?\.canRun === false/, "프리뷰 실행 버튼은 preflight canRun=false일 때도 비활성화해야 합니다.");
 assert.match(projectDetailViewSource, /lastResetProjectIdRef/, "ProjectDetailView는 프로젝트 id 변경 여부를 추적해 preview/export local state reset을 제한해야 합니다.");
 assert.doesNotMatch(projectDetailViewSource, /\}, \[currentProject\?\.id,\s*projectExportPlan,\s*projectPreviewReadiness\]\)/, "ProjectDetailView는 readiness/export DTO prop 갱신만으로 preview runtime과 export 결과를 reset하면 안 됩니다.");
 assert.match(projectDetailViewSource, /result\.ok === false\s*\?\s*\{[\s\S]{0,700}emptyPreviewReadiness[\s\S]{0,700}state:\s*"failed"/, "프리뷰 검증 API 실패 응답에 previewReadiness DTO가 없어도 stale readiness 대신 명시적인 failed fallback을 표시해야 합니다.");

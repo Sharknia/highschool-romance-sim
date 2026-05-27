@@ -20,6 +20,7 @@ import {
   type ProjectApiResult,
   type ProjectData,
   type ProjectExportPlan,
+  type ProjectPreviewPreflight,
   type ProjectPreviewReadiness,
   type ProjectWorkflowSummary,
   type RecentProject
@@ -161,6 +162,7 @@ export function ProjectStartPage() {
   const [currentProject, setCurrentProject] = useState<ProjectData | null>(null);
   const [workflowSummary, setWorkflowSummary] = useState<ProjectWorkflowSummary | null>(null);
   const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
+  const [previewPreflight, setPreviewPreflight] = useState<ProjectPreviewPreflight | null>(null);
   const [exportPlan, setExportPlan] = useState<ProjectExportPlan | null>(null);
   const [reconnectProjectId, setReconnectProjectId] = useState<string | null>(null);
   const [lastRestoredProjectId, setLastRestoredProjectId] = useState<string | null>(null);
@@ -222,6 +224,7 @@ export function ProjectStartPage() {
     setCurrentProject(nextProject);
     setWorkflowSummary(result.workflowSummary || null);
     setPreviewReadiness(result.previewReadiness || null);
+    setPreviewPreflight(result.previewPreflight || null);
     setExportPlan(result.exportPlan || null);
     setProjectDirectoryInput(nextDirectory);
     setShellState({
@@ -238,10 +241,12 @@ export function ProjectStartPage() {
     setReconnectProjectId(nextReconnectId);
     setStatus(`${label} 실패: ${message}`);
     setPreviewReadiness(result.previewReadiness || null);
+    setPreviewPreflight(result.previewPreflight || null);
     setExportPlan(result.exportPlan || null);
     if (projectId) {
       setCurrentProject(null);
       setWorkflowSummary(null);
+      setPreviewPreflight(null);
     }
   }
 
@@ -454,6 +459,7 @@ export function ProjectStartPage() {
       setCurrentProject(null);
       setWorkflowSummary(null);
       setPreviewReadiness(null);
+      setPreviewPreflight(null);
       setExportPlan(null);
     }
     if (tab && normalizeTab(tab) !== tab) {
@@ -487,6 +493,7 @@ export function ProjectStartPage() {
       projectId={projectId}
       projectDirectory={shellState.projectDirectory}
       projectExportPlan={exportPlan}
+      projectPreviewPreflight={previewPreflight}
       projectPreviewReadiness={previewReadiness}
       shellProjectTitle={shellState.projectTitle}
       workflowSummary={workflowSummary}

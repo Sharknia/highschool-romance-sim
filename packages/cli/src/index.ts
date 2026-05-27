@@ -156,6 +156,7 @@ function printCapabilities(): void {
       "build-html",
       "expand-event",
       "approve-event",
+      "preview-preflight",
       "preview",
       "export-web",
       "smoke-export",
@@ -193,6 +194,7 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "delete-project": "deleteProjectWorkspace",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
+    "preview-preflight": "previewPreflightProject",
     "preview": "previewProject",
     "export-web": "exportProject",
     "list-generation-jobs": "listGenerationJobs",
@@ -386,6 +388,11 @@ async function run(): Promise<void> {
 
   if (command === "approve-event") {
     writeJson(await useCases.approveEvent(input));
+    return;
+  }
+
+  if (command === "preview-preflight") {
+    writeJson(await useCases.previewPreflightProject(input));
     return;
   }
 

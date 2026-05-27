@@ -23,6 +23,10 @@ const branchEndingDirectory = join(tempRoot, "BranchEnding.vnmaker");
 const branchTerminalFailureDirectory = join(tempRoot, "BranchTerminalFailure.vnmaker");
 const branchCycleFailureDirectory = join(tempRoot, "BranchCycleFailure.vnmaker");
 const validationDtoParityDirectory = join(tempRoot, "ValidationDtoParity.vnmaker");
+const previewPreflightBlockedDirectory = join(tempRoot, "PreviewPreflightBlocked.vnmaker");
+const previewPreflightMissingBackgroundDirectory = join(tempRoot, "PreviewPreflightMissingBackground.vnmaker");
+const previewPreflightRouteGateDirectory = join(tempRoot, "PreviewPreflightRouteGate.vnmaker");
+const previewPreflightReadyDirectory = join(tempRoot, "PreviewPreflightReady.vnmaker");
 const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
@@ -114,6 +118,24 @@ const project = core.createStarterProject({
   title: "테스트 미연시",
   premise: "방과 후 엔진 제작 테스트"
 });
+
+function projectWithPreviewBackground(sourceProject, assetId) {
+  const backgroundAsset = {
+    id: assetId,
+    kind: "background",
+    label: "프리뷰 배경",
+    uri: "data:image/png;base64,",
+    source: "placeholder"
+  };
+  return {
+    ...sourceProject,
+    assets: [...sourceProject.assets.filter((asset) => asset.id !== assetId), backgroundAsset],
+    scenes: sourceProject.scenes.map((scene) => ({
+      ...scene,
+      backgroundAssetId: assetId
+    }))
+  };
+}
 
 assert.equal(project.version, "vn-maker/v1");
 assert.equal(project.characters.length >= 1, true);
@@ -333,6 +355,204 @@ assert.deepEqual(
     targetSceneId: validationDtoApiIssue.targetSceneId
   }
 );
+
+const previewPreflightBaseProject = core.createStarterProject({
+  id: "preview-preflight-blocked",
+  title: "Preview Preflight Blocked",
+  premise: "프리뷰 preflight가 validation blocker를 runtime 실행 전에 반환한다."
+});
+const previewPreflightEntrySceneId = previewPreflightBaseProject.routes[0].entrySceneId;
+const previewPreflightBlockedProject = projectWithPreviewBackground({
+  ...previewPreflightBaseProject,
+  scenes: previewPreflightBaseProject.scenes.map((scene) => scene.id === previewPreflightEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{ id: "choice-preflight-missing", text: "없는 타깃으로 간다", next: "scene-preflight-missing" }]
+      }
+    : scene)
+}, "asset-preview-preflight-blocked-background");
+const previewPreflightBlockedStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightBlockedDirectory,
+  project: previewPreflightBlockedProject
+});
+previewPreflightBlockedStore.close();
+
+const previewPreflightBlockedApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightBlockedDirectory }
+});
+assert.equal(previewPreflightBlockedApi.status, 409);
+assert.equal(previewPreflightBlockedApi.body.code, "PREVIEW_BLOCKED");
+assert.equal(previewPreflightBlockedApi.body.runtime, undefined);
+assert.equal(previewPreflightBlockedApi.body.previewPreflight.canRun, false);
+assert.match(previewPreflightBlockedApi.body.previewPreflight.disabledReason, /문제 확인|없는 타깃|target/);
+const previewPreflightMissingTargetBlocker = previewPreflightBlockedApi.body.previewPreflight.blockers.find((blocker) => blocker.issueCode === "missing-target");
+assert.ok(previewPreflightMissingTargetBlocker, "Preview preflight must expose missing-target as a stable blocker");
+assert.equal(previewPreflightMissingTargetBlocker.path, "scenes.0.choices.0");
+assert.deepEqual(previewPreflightMissingTargetBlocker.sceneIds, [previewPreflightEntrySceneId]);
+assert.deepEqual(previewPreflightMissingTargetBlocker.choiceIds, ["choice-preflight-missing"]);
+assert.equal(previewPreflightMissingTargetBlocker.repairActionIds.includes("create-target-scene"), true);
+assert.match(previewPreflightBlockedApi.body.previewPreflight.nextAction, /target|타깃|문제/);
+
+const previewPreflightBlockedCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightBlockedDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightBlockedCli.previewPreflight.canRun, false);
+assert.equal(previewPreflightBlockedCli.previewPreflight.blockers[0].issueCode, previewPreflightBlockedApi.body.previewPreflight.blockers[0].issueCode);
+assert.equal(previewPreflightBlockedCli.previewPreflight.nextAction, previewPreflightBlockedApi.body.previewPreflight.nextAction);
+assert.equal(previewPreflightBlockedCli.runtime, undefined);
+
+const previewPreflightMissingBackgroundBaseProject = core.createStarterProject({
+  id: "preview-preflight-missing-background",
+  title: "Preview Preflight Missing Background",
+  premise: "프리뷰 preflight가 필수 런타임 데이터 blocker도 canRun에 반영한다."
+});
+const previewPreflightMissingBackgroundProject = {
+  ...previewPreflightMissingBackgroundBaseProject,
+  assets: previewPreflightMissingBackgroundBaseProject.assets.filter((asset) => asset.kind !== "background"),
+  scenes: previewPreflightMissingBackgroundBaseProject.scenes.map((scene) => ({
+    ...scene,
+    backgroundAssetId: undefined
+  }))
+};
+const previewPreflightMissingBackgroundStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightMissingBackgroundDirectory,
+  project: previewPreflightMissingBackgroundProject
+});
+previewPreflightMissingBackgroundStore.close();
+
+const previewPreflightMissingBackgroundApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightMissingBackgroundDirectory }
+});
+assert.equal(previewPreflightMissingBackgroundApi.status, 409);
+assert.equal(previewPreflightMissingBackgroundApi.body.code, "PREVIEW_BLOCKED");
+assert.equal(previewPreflightMissingBackgroundApi.body.runtime, undefined);
+assert.equal(previewPreflightMissingBackgroundApi.body.previewReadiness.canRun, false);
+assert.equal(previewPreflightMissingBackgroundApi.body.previewPreflight.canRun, false);
+const previewPreflightBackgroundBlocker = previewPreflightMissingBackgroundApi.body.previewPreflight.blockers.find((blocker) => blocker.issueCode === "background-required");
+assert.ok(previewPreflightBackgroundBlocker, "Preview preflight must expose required background blockers");
+assert.equal(previewPreflightBackgroundBlocker.path, "assets");
+assert.equal(previewPreflightBackgroundBlocker.repairActionIds.includes("generate-background"), true);
+assert.match(previewPreflightMissingBackgroundApi.body.previewPreflight.disabledReason, /배경/);
+
+const previewPreflightMissingBackgroundCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightMissingBackgroundDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightMissingBackgroundCli.previewPreflight.canRun, false);
+assert.equal(previewPreflightMissingBackgroundCli.previewPreflight.blockers[0].issueCode, previewPreflightMissingBackgroundApi.body.previewPreflight.blockers[0].issueCode);
+assert.equal(previewPreflightMissingBackgroundCli.runtime, undefined);
+
+const previewPreflightRouteGateBaseProject = core.createStarterProject({
+  id: "preview-preflight-route-gate",
+  title: "Preview Preflight Route Gate",
+  premise: "프리뷰 preflight 전용 blocker가 runtime 실행을 막는다."
+});
+const previewPreflightRouteGateProject = projectWithPreviewBackground({
+  ...previewPreflightRouteGateBaseProject,
+  routes: [],
+  settings: {
+    ...previewPreflightRouteGateBaseProject.settings,
+    defaultRouteId: ""
+  }
+}, "asset-preview-preflight-route-gate-background");
+const previewPreflightRouteGateStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightRouteGateDirectory,
+  project: previewPreflightRouteGateProject
+});
+previewPreflightRouteGateStore.close();
+
+const previewPreflightRouteGatePreflightApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview/preflight",
+  body: { projectDirectory: previewPreflightRouteGateDirectory }
+});
+assert.equal(previewPreflightRouteGatePreflightApi.status, 200);
+assert.equal(previewPreflightRouteGatePreflightApi.body.runtime, undefined);
+assert.equal(previewPreflightRouteGatePreflightApi.body.previewPreflight.canRun, false);
+assert.equal(previewPreflightRouteGatePreflightApi.body.previewPreflight.blockers[0].issueCode, "route-required");
+assert.equal(previewPreflightRouteGatePreflightApi.body.previewPreflight.blockers[0].path, "routes");
+assert.match(previewPreflightRouteGatePreflightApi.body.previewPreflight.disabledReason, /루트/);
+
+const previewPreflightRouteGateCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview-preflight"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightRouteGateDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightRouteGateCli.runtime, undefined);
+assert.equal(previewPreflightRouteGateCli.previewPreflight.canRun, false);
+assert.equal(previewPreflightRouteGateCli.previewPreflight.blockers[0].issueCode, previewPreflightRouteGatePreflightApi.body.previewPreflight.blockers[0].issueCode);
+
+const previewPreflightRouteGatePreviewApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightRouteGateDirectory }
+});
+assert.equal(previewPreflightRouteGatePreviewApi.status, 409);
+assert.equal(previewPreflightRouteGatePreviewApi.body.code, "PREVIEW_BLOCKED");
+assert.equal(previewPreflightRouteGatePreviewApi.body.runtime, undefined);
+assert.equal(previewPreflightRouteGatePreviewApi.body.previewPreflight.canRun, false);
+assert.equal(previewPreflightRouteGatePreviewApi.body.previewPreflight.blockers[0].issueCode, "route-required");
+
+const previewPreflightReadyBaseProject = core.createStarterProject({
+  id: "preview-preflight-ready",
+  title: "Preview Preflight Ready",
+  premise: "조건 runtime 미지원은 실제 preview 가능 여부와 분리된다."
+});
+const previewPreflightReadyEntrySceneId = previewPreflightReadyBaseProject.routes[0].entrySceneId;
+const previewPreflightReadyTargetSceneId = previewPreflightReadyBaseProject.scenes.find((scene) => scene.id !== previewPreflightReadyEntrySceneId).id;
+const previewPreflightReadyProject = projectWithPreviewBackground({
+  ...previewPreflightReadyBaseProject,
+  scenes: previewPreflightReadyBaseProject.scenes.map((scene) => scene.id === previewPreflightReadyEntrySceneId
+    ? {
+        ...scene,
+        next: undefined,
+        choices: [{
+          id: "choice-preflight-conditioned",
+          text: "믿고 따라간다",
+          next: previewPreflightReadyTargetSceneId,
+          condition: { flags: ["trusted-haru"] },
+          effects: { flags: ["previewed-conditioned-choice"] }
+        }]
+      }
+    : scene)
+}, "asset-preview-preflight-ready-background");
+const previewPreflightReadyStore = await projectStore.createProjectWorkspace({
+  projectDirectory: previewPreflightReadyDirectory,
+  project: previewPreflightReadyProject
+});
+previewPreflightReadyStore.close();
+
+const previewPreflightReadyApi = await webHandlers.handleApiRequest({
+  method: "POST",
+  path: "/api/project/preview",
+  body: { projectDirectory: previewPreflightReadyDirectory }
+});
+assert.equal(previewPreflightReadyApi.status, 200);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.canRun, true);
+assert.deepEqual(previewPreflightReadyApi.body.previewPreflight.blockers, []);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.disabledReason, null);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.choiceConditionFiltering, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.choiceEffects, false);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.runtimeCapabilities.conditionSemanticsVersion, "unsupported");
+assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings.some((warning) => warning.issueCode === "conditional-choice-runtime-unsupported"), true);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings.some((warning) => /condition preview not evaluated/.test(warning.message)), true);
+assert.equal(previewPreflightReadyApi.body.previewPreflight.warnings[0].path, "runtimeCapabilities");
+assert.ok(previewPreflightReadyApi.body.runtime, "condition runtime unsupported must not block actual preview when validation blockers are absent");
+
+const previewPreflightReadyCli = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "preview"], {
+  input: JSON.stringify({ projectDirectory: previewPreflightReadyDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(previewPreflightReadyCli.previewPreflight.canRun, true);
+assert.equal(previewPreflightReadyCli.previewPreflight.disabledReason, null);
+assert.equal(previewPreflightReadyCli.previewPreflight.runtimeCapabilities.choiceConditionFiltering, false);
+assert.equal(previewPreflightReadyCli.previewPreflight.warnings[0].issueCode, previewPreflightReadyApi.body.previewPreflight.warnings[0].issueCode);
+assert.ok(previewPreflightReadyCli.runtime);
 
 const revisionGuardProject = core.createStarterProject({
   id: "revision-guard",

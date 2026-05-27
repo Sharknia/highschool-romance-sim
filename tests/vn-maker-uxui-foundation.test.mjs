@@ -157,6 +157,7 @@ assert.doesNotMatch(projectDetailSource, /생성 어댑터|setBackgroundStatus\(
 assert.match(projectDetailSource, /배경 교체 생성/, "기존 배경이 있는 상태의 생성 버튼은 교체 동작을 명확히 말해야 합니다.");
 assert.match(projectDetailSource, /previewResolutionActions/, "프리뷰 누락 항목은 nextActions가 없어도 missingItems의 tab으로 해결 이동 버튼을 만들어야 합니다.");
 assert.match(projectDetailSource, /currentPreviewReadiness\.canRun !== true/, "프리뷰 실행 버튼은 use-case/API previewReadiness DTO의 canRun만 실행 가능 조건으로 삼아야 합니다.");
+assert.match(projectDetailSource, /currentPreviewReadiness\.canRun !== true\s*\|\|\s*currentPreviewPreflight\?\.canRun === false/, "프리뷰 실행 버튼은 preflight canRun=false도 실행 차단 조건으로 삼아야 합니다.");
 assert.match(projectDetailSource, /currentExportPlan\.canExport === true/, "내보내기 실행 버튼은 use-case/API exportPlan DTO의 canExport만 실행 가능 조건으로 삼아야 합니다.");
 assert.doesNotMatch(projectDetailSource, /fallbackPreviewCanRun/, "ProjectDetailView는 workflow summary로 preview readiness를 fallback 재계산하면 안 됩니다.");
 assert.match(projectDetailSource, /lastResetProjectIdRef/, "ProjectDetailView는 project id 변경이 아닌 DTO prop 갱신만으로 화면 실행 상태를 초기화하면 안 됩니다.");

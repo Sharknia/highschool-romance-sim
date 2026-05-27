@@ -370,6 +370,10 @@ class ApiServices {
     return this.useCases.previewProject(body);
   }
 
+  previewPreflightProject(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.previewPreflightProject(body);
+  }
+
   exportProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.exportProject(body);
   }
@@ -448,6 +452,7 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body), "validateProject"));
   app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
   app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));
+  app.post("/api/project/preview/preflight", (context) => jsonBodyRoute(context, (body) => services.previewPreflightProject(body), "previewPreflightProject"));
   app.post("/api/project/preview", (context) => jsonBodyRoute(context, (body) => services.previewProject(body), "previewProject"));
   app.post("/api/project/export", (context) => jsonBodyRoute(context, (body) => services.exportProject(body), "exportProject"));
   app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body), "expandEvent"));

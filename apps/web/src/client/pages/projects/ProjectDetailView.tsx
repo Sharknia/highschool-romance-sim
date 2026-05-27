@@ -14,6 +14,7 @@ import {
   type ProjectExportResult,
   type ProjectGenerationJob,
   type ProjectIssue,
+  type ProjectPreviewPreflight,
   type ProjectPreviewReadiness,
   type ProjectRuntime,
   type ProjectRuntimeScene,
@@ -52,6 +53,7 @@ interface ProjectDetailViewProps {
   projectDirectory: string;
   projectExportPlan: ProjectExportPlan | null;
   projectId?: string;
+  projectPreviewPreflight: ProjectPreviewPreflight | null;
   projectPreviewReadiness: ProjectPreviewReadiness | null;
   shellProjectTitle: string;
   workflowSummary: ProjectWorkflowSummary | null;
@@ -310,10 +312,41 @@ function previewReadinessStateLabel(value?: string): string {
   return value || "확인 전";
 }
 
+function previewPreflightStatusText(preflight: ProjectPreviewPreflight | null): string {
+  if (!preflight) {
+    return "확인 전";
+  }
+  return preflight.canRun ? "실행 가능" : preflight.disabledReason || "차단 항목 확인 필요";
+}
+
+function previewPreflightCapabilityText(preflight: ProjectPreviewPreflight | null): string {
+  if (!preflight) {
+    return "확인 전";
+  }
+  const capabilities = preflight.runtimeCapabilities;
+  if (capabilities?.choiceConditionFiltering && capabilities?.choiceEffects) {
+    return "조건과 효과 반영";
+  }
+  const conditionWarning = preflight.warnings?.find((warning) => warning.issueCode === "conditional-choice-runtime-unsupported");
+  return conditionWarning ? "조건/효과는 아직 미리보기 판정에 반영하지 않습니다." : "조건 미리보기 미지원";
+}
+
+function previewPreflightIssueText(issue: NonNullable<ProjectPreviewPreflight["blockers"]>[number]): string {
+  if (issue.issueCode === "conditional-choice-runtime-unsupported") {
+    const choiceCount = issue.choiceIds?.length ? ` · 선택지 ${issue.choiceIds.length}개` : "";
+    return `조건/효과는 아직 미리보기 판정에 반영하지 않습니다.${choiceCount}`;
+  }
+  const code = issue.issueCode ? `[${issue.issueCode}] ` : "";
+  const path = issue.path ? `${issue.path}: ` : "";
+  const repairs = issue.repairActionIds?.length ? ` · 해결 경로 ${issue.repairActionIds.join(", ")}` : "";
+  return `${code}${path}${issue.message || "확인이 필요합니다."}${repairs}`;
+}
+
 function requiredDataNameLabel(name: string): string {
   if (name === "heroine") return "히로인";
   if (name === "background") return "배경";
   if (name === "event") return "장면";
+  if (name === "scenes") return "장면";
   if (name === "validation") return "검증";
   if (name === "generationJobs") return "이미지 작업";
   return name;
@@ -322,6 +355,8 @@ function requiredDataNameLabel(name: string): string {
 function requiredDataValueLabel(value?: string): string {
   if (value === "ready" || value === "valid" || value === "completed") return "준비됨";
   if (value === "missing") return "필요";
+  if (value === "pending") return "진행 중";
+  if (value === "invalid") return "확인 필요";
   if (value === "waiting" || value === "planned" || value === "running") return "진행 중";
   if (value === "error" || value === "failed" || value === "blocked") return "확인 필요";
   if (value === "empty" || value === "unknown") return "확인 전";
@@ -397,6 +432,7 @@ export function ProjectDetailView({
   projectDirectory,
   projectExportPlan,
   projectId,
+  projectPreviewPreflight,
   projectPreviewReadiness,
   shellProjectTitle,
   workflowSummary
@@ -431,6 +467,7 @@ export function ProjectDetailView({
   const [previewSceneId, setPreviewSceneId] = useState("");
   const [previewIssues, setPreviewIssues] = useState<string[]>([]);
   const [previewReadiness, setPreviewReadiness] = useState<ProjectPreviewReadiness | null>(null);
+  const [previewPreflight, setPreviewPreflight] = useState<ProjectPreviewPreflight | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
@@ -488,7 +525,8 @@ export function ProjectDetailView({
   const showHeaderPrimaryAction = Boolean(detailProjectId) && !tabsWithLocalPrimaryAction.has(activeTab);
   const currentPreviewScene = runtimeScene(previewRuntime, previewSceneId);
   const currentPreviewReadiness = previewReadiness || projectPreviewReadiness || emptyPreviewReadiness;
-  const previewRunBlocked = currentPreviewReadiness.canRun !== true;
+  const currentPreviewPreflight = previewPreflight || projectPreviewPreflight || null;
+  const previewRunBlocked = currentPreviewReadiness.canRun !== true || currentPreviewPreflight?.canRun === false;
   const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
   const dummyImageAssets = collectDummyImageAssets(currentProject, currentExportPlan, previewRuntime);
   const dummyImageJobs = imageJobs.filter(isDummyGenerationJob);
@@ -605,6 +643,7 @@ export function ProjectDetailView({
 
   function resetPreviewAndExportState(input: {
     exportPlan?: ProjectExportPlan | null;
+    previewPreflight?: ProjectPreviewPreflight | null;
     previewReadiness?: ProjectPreviewReadiness | null;
     previewStatus?: string;
     project?: ProjectData | null;
@@ -619,6 +658,7 @@ export function ProjectDetailView({
     setPreviewSceneId("");
     setPreviewIssues([]);
     setPreviewReadiness(input.previewReadiness || null);
+    setPreviewPreflight(input.previewPreflight || null);
     setPreviewState(nextState.previewState);
     setPreviewStatus(nextState.previewStatus);
     setExportResult(null);
@@ -640,6 +680,7 @@ export function ProjectDetailView({
     setDummyActionStatus("");
     resetPreviewAndExportState({
       exportPlan: projectExportPlan,
+      previewPreflight: projectPreviewPreflight,
       previewReadiness: projectPreviewReadiness
     });
   }, [currentProject?.id]);
@@ -670,6 +711,7 @@ export function ProjectDetailView({
       onProjectResult(result);
       resetPreviewAndExportState({
         exportPlan: result.exportPlan || null,
+        previewPreflight: result.previewPreflight || null,
         previewReadiness: result.previewReadiness || null,
         previewStatus: "히로인 변경으로 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
@@ -794,6 +836,7 @@ export function ProjectDetailView({
       onProjectResult(result);
       resetPreviewAndExportState({
         exportPlan: result.exportPlan || null,
+        previewPreflight: result.previewPreflight || null,
         previewReadiness: result.previewReadiness || null,
         previewStatus: "프로젝트 이벤트가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
         project: result.project,
@@ -901,6 +944,7 @@ export function ProjectDetailView({
         onProjectResult(run);
         resetPreviewAndExportState({
           exportPlan: run.exportPlan || null,
+          previewPreflight: run.previewPreflight || null,
           previewReadiness: run.previewReadiness || null,
           previewStatus: "배경 화면이 생성되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: run.project,
@@ -952,6 +996,7 @@ export function ProjectDetailView({
         onProjectResult(result);
         resetPreviewAndExportState({
           exportPlan: result.exportPlan || null,
+          previewPreflight: result.previewPreflight || null,
           previewReadiness: result.previewReadiness || null,
           previewStatus: "배경 화면 작업이 추가되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
@@ -990,6 +1035,7 @@ export function ProjectDetailView({
         onProjectResult(result);
         resetPreviewAndExportState({
           exportPlan: result.exportPlan || null,
+          previewPreflight: result.previewPreflight || null,
           previewReadiness: result.previewReadiness || null,
           previewStatus: "이미지 결과가 변경되어 프리뷰와 내보내기를 다시 확인해야 합니다.",
           project: result.project,
@@ -1037,25 +1083,27 @@ export function ProjectDetailView({
       retryable: result.retryable ?? false,
       nextAction: "다음 작업: 문제 확인 결과를 해결한 뒤 다시 실행하세요."
     } : currentPreviewReadiness);
+    setPreviewPreflight(result.previewPreflight || null);
     setExportPlan(result.exportPlan || null);
     if (result.ok === false || hasBlockingPreviewErrors(issues)) {
-      setPreviewState("failed");
+      const blocked = result.previewPreflight?.canRun === false || hasBlockingPreviewErrors(issues);
+      setPreviewState(blocked ? "blocked" : "failed");
       setPreviewRuntime(null);
       setPreviewSceneId("");
       setPreviewIssues(messages);
       setPreviewReadiness(nextReadiness);
-      setPreviewStatus(result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
+      setPreviewStatus(result.previewPreflight?.disabledReason || result.error || "검증 실행 결과 문제가 있어 프리뷰를 생성하지 않았습니다.");
       return false;
     }
     setPreviewIssues(messages);
     setPreviewReadiness(nextReadiness);
-    if (nextReadiness.canRun !== true) {
+    if (nextReadiness.canRun !== true || result.previewPreflight?.canRun === false) {
       setPreviewState("blocked");
-      setPreviewStatus(nextReadiness.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다.");
+      setPreviewStatus(result.previewPreflight?.disabledReason || nextReadiness.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다.");
       return false;
     }
     setPreviewState("ready");
-    setPreviewStatus(nextReadiness.nextAction || "프리뷰를 실행할 수 있습니다.");
+    setPreviewStatus(result.previewPreflight?.nextAction || nextReadiness.nextAction || "프리뷰를 실행할 수 있습니다.");
     return true;
   }
 
@@ -1074,19 +1122,20 @@ export function ProjectDetailView({
         startSceneId
       });
       if (result.ok === false) {
-        const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false;
+        const blocked = result.code === "PREVIEW_BLOCKED" || result.previewReadiness?.canRun === false || result.previewPreflight?.canRun === false;
         setPreviewState(blocked ? "blocked" : "failed");
         setPreviewRuntime(null);
         setPreviewSceneId("");
         setExportPlan(result.exportPlan || null);
+        setPreviewPreflight(result.previewPreflight || null);
         setPreviewReadiness(result.previewReadiness || {
           ...currentPreviewReadiness,
           state: blocked ? "blocked" : "failed",
           availableState: blocked ? "blocked" : "failed",
-          failureCause: result.message || result.error || "프리뷰 생성에 실패했습니다.",
+          failureCause: result.previewPreflight?.disabledReason || result.message || result.error || "프리뷰 생성에 실패했습니다.",
           retryable: result.retryable
         });
-        setPreviewStatus(result.message || result.error || "프리뷰 생성에 실패했습니다.");
+        setPreviewStatus(result.previewPreflight?.disabledReason || result.message || result.error || "프리뷰 생성에 실패했습니다.");
         setPreviewIssues(validationMessages(result));
         return;
       }
@@ -1095,16 +1144,19 @@ export function ProjectDetailView({
       setPreviewSceneId(startSceneId || nextRuntime?.startSceneId || "");
       setPreviewIssues(validationMessages(result));
       const nextReadiness = result.previewReadiness || null;
-      const blocked = nextReadiness?.canRun === false;
+      const nextPreflight = result.previewPreflight || null;
+      const blocked = nextReadiness?.canRun === false || nextPreflight?.canRun === false;
       setPreviewReadiness(nextReadiness);
+      setPreviewPreflight(nextPreflight);
       setExportPlan(result.exportPlan || null);
       setPreviewState(blocked ? "blocked" : result.validation?.ok === false || result.runtime?.validation?.ok === false ? "failed" : "ready");
-      setPreviewStatus(blocked ? nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
+      setPreviewStatus(blocked ? nextPreflight?.disabledReason || nextReadiness?.failureCause || "필수 데이터가 준비되지 않아 프리뷰가 차단되었습니다." : result.validation?.ok === false ? "검증 문제가 있어 프리뷰가 ready 상태가 아닙니다." : "프리뷰 생성 완료");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPreviewState("failed");
       setPreviewRuntime(null);
       setPreviewSceneId("");
+      setPreviewPreflight(null);
       setPreviewReadiness({
         ...currentPreviewReadiness,
         state: "failed",
@@ -1569,11 +1621,29 @@ export function ProjectDetailView({
               <p className="page-muted">공통 헤더와 탭 바는 유지됩니다. 현재 상태: {previewReadinessStateLabel(currentPreviewReadiness.availableState || currentPreviewReadiness.state)}</p>
               <dl className="summary-list">
                 <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
+                <div><dt>사전 점검</dt><dd>{previewPreflightStatusText(currentPreviewPreflight)}</dd></div>
+                <div><dt>조건 처리</dt><dd>{previewPreflightCapabilityText(currentPreviewPreflight)}</dd></div>
                 <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${requiredDataNameLabel(name)}: ${requiredDataValueLabel(value)}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>
                 <div><dt>다음 작업</dt><dd>{currentPreviewReadiness.nextAction || "프리뷰를 실행하세요."}</dd></div>
               </dl>
+              {currentPreviewPreflight?.blockers?.length ? (
+                <div>
+                  <h4>사전 점검 차단 항목</h4>
+                  <ul className="compact-list">
+                    {currentPreviewPreflight.blockers.map((blocker, index) => <li key={`${blocker.issueCode || "blocker"}-${blocker.path || index}`}>{previewPreflightIssueText(blocker)}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {currentPreviewPreflight?.warnings?.length ? (
+                <div>
+                  <h4>사전 점검 참고 항목</h4>
+                  <ul className="compact-list">
+                    {currentPreviewPreflight.warnings.map((warning, index) => <li key={`${warning.issueCode || "warning"}-${warning.path || index}`}>{previewPreflightIssueText(warning)}</li>)}
+                  </ul>
+                </div>
+              ) : null}
               {currentPreviewReadiness.missingItems?.length ? (
                 <div>
                   <h4>누락 항목</h4>

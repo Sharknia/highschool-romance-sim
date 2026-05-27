@@ -39,6 +39,32 @@ export interface ProjectRevisionDto {
   createdAt: string;
 }
 
+export interface RuntimeCapabilitiesDto {
+  choiceConditionFiltering: boolean;
+  choiceEffects: boolean;
+  conditionSemanticsVersion: string;
+}
+
+export interface PreflightBlockerDto {
+  issueCode: string;
+  path: string;
+  message: string;
+  sceneIds?: string[];
+  choiceIds?: string[];
+  targetSceneId?: string;
+  repairActionIds: string[];
+}
+
+export interface PreviewPreflightDto {
+  canRun: boolean;
+  blockers: PreflightBlockerDto[];
+  warnings: PreflightBlockerDto[];
+  disabledReason: string | null;
+  nextAction: string;
+  projectRevision: ProjectRevisionDto;
+  runtimeCapabilities: RuntimeCapabilitiesDto;
+}
+
 export interface VnMakerProjectSettings {
   defaultRouteId: string;
   outputFileName: string;
@@ -1057,6 +1083,194 @@ export function createProjectRevision(project: VnMakerProject, createdAt: string
     revision: hashProjectSnapshot(project),
     hashAlgorithm: PROJECT_REVISION_HASH_ALGORITHM,
     createdAt
+  };
+}
+
+const PREVIEW_REPAIR_ACTION_IDS: Record<string, string[]> = {
+  "heroine-required": ["assign-heroine-snapshot"],
+  "background-required": ["generate-background"],
+  "route-required": ["open-studio"],
+  "event-scenes-required": ["open-studio"],
+  "image-generation-incomplete": ["run-generation-jobs"],
+  "missing-target": ["create-target-scene", "connect-existing-scene"],
+  "ending-has-outgoing": ["remove-outgoing", "clear-ending"],
+  "mixed-outgoing": ["remove-next", "edit-choices"],
+  "uncovered-terminal": ["set-scene-ending", "add-choice-target"],
+  "cycle-without-ending-path": ["connect-ending-path", "set-scene-ending"],
+  "duplicate-choice-id": ["rename-choice-id"],
+  "empty-choice-text": ["edit-choice-text"],
+  "orphan-scene": ["connect-existing-scene", "delete-orphan-scene"],
+  "duplicate-ending-id": ["rename-ending-id"],
+  "invalid-ending": ["edit-ending"]
+};
+
+function previewRepairActionIds(issueCode: string | undefined): string[] {
+  return issueCode ? [...(PREVIEW_REPAIR_ACTION_IDS[issueCode] || [])] : [];
+}
+
+function preflightIssueFromValidationIssue(issue: ValidationIssue): PreflightBlockerDto {
+  return {
+    issueCode: issue.code || "validation-issue",
+    path: issue.path,
+    message: issue.message,
+    sceneIds: issue.sceneIds ? [...issue.sceneIds] : undefined,
+    choiceIds: issue.choiceIds ? [...issue.choiceIds] : undefined,
+    targetSceneId: issue.targetSceneId,
+    repairActionIds: previewRepairActionIds(issue.code)
+  };
+}
+
+function previewRequiredDataBlockers(project: VnMakerProject): PreflightBlockerDto[] {
+  const blockers: PreflightBlockerDto[] = [];
+  const hasHeroine = project.characters.length > 0;
+  const backgroundJobs = project.generationJobs.filter((job) => job.kind === "background" && job.status !== "completed");
+  const incompletePreviewImageJobs = project.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed");
+  const incompleteNonBackgroundJobs = incompletePreviewImageJobs.filter((job) => job.kind !== "background");
+  const hasBackgroundAsset = project.assets.some((asset) => asset.kind === "background");
+  const scenesMissingBackground = project.scenes.filter((scene) => !scene.backgroundAssetId);
+  const hasRoute = project.routes.length > 0;
+  const hasEventScenes = project.scenes.length > 1;
+
+  if (!hasHeroine) {
+    blockers.push({
+      issueCode: "heroine-required",
+      path: "characters",
+      message: "히로인 1명을 먼저 선택해야 프리뷰를 실행할 수 있습니다.",
+      repairActionIds: previewRepairActionIds("heroine-required")
+    });
+  }
+  if (!hasBackgroundAsset || scenesMissingBackground.length > 0 || backgroundJobs.length > 0) {
+    blockers.push({
+      issueCode: "background-required",
+      path: !hasBackgroundAsset ? "assets" : scenesMissingBackground.length > 0 ? "scenes" : "generationJobs",
+      message: backgroundJobs.length > 0
+        ? `완료되지 않은 배경 화면 작업이 있습니다: ${backgroundJobs.map((job) => job.id).join(", ")}`
+        : hasBackgroundAsset && scenesMissingBackground.length > 0
+          ? "모든 제작 씬에 배경 화면 연결이 필요합니다."
+          : "배경 화면 생성이 필요합니다.",
+      sceneIds: scenesMissingBackground.length > 0 ? scenesMissingBackground.map((scene) => scene.id) : undefined,
+      repairActionIds: previewRepairActionIds("background-required")
+    });
+  }
+  if (!hasRoute) {
+    blockers.push({
+      issueCode: "route-required",
+      path: "routes",
+      message: "프리뷰 시작 루트가 필요합니다.",
+      repairActionIds: previewRepairActionIds("route-required")
+    });
+  }
+  if (!hasEventScenes) {
+    blockers.push({
+      issueCode: "event-scenes-required",
+      path: "scenes",
+      message: "제작 탭에서 이벤트와 씬을 준비해야 합니다.",
+      repairActionIds: previewRepairActionIds("event-scenes-required")
+    });
+  }
+  if (incompleteNonBackgroundJobs.length > 0) {
+    blockers.push({
+      issueCode: "image-generation-incomplete",
+      path: "generationJobs",
+      message: `완료되지 않은 이미지 작업이 있습니다: ${incompleteNonBackgroundJobs.map((job) => job.id).join(", ")}`,
+      repairActionIds: previewRepairActionIds("image-generation-incomplete")
+    });
+  }
+
+  return blockers;
+}
+
+function conditionalChoiceRuntimeWarning(project: VnMakerProject): PreflightBlockerDto | null {
+  const sceneIds: string[] = [];
+  const choiceIds: string[] = [];
+  project.scenes.forEach((scene) => {
+    scene.choices.forEach((choice) => {
+      if (choice.condition || choice.effects) {
+        sceneIds.push(scene.id);
+        choiceIds.push(choice.id);
+      }
+    });
+  });
+  if (choiceIds.length === 0) {
+    return null;
+  }
+  return {
+    issueCode: "conditional-choice-runtime-unsupported",
+    path: "runtimeCapabilities",
+    message: "condition preview not evaluated: 조건/효과 runtime semantics는 아직 strict preview 성공으로 계산하지 않습니다.",
+    sceneIds,
+    choiceIds,
+    repairActionIds: []
+  };
+}
+
+export function runtimeCapabilitiesForProject(): RuntimeCapabilitiesDto {
+  return {
+    choiceConditionFiltering: false,
+    choiceEffects: false,
+    conditionSemanticsVersion: "unsupported"
+  };
+}
+
+function previewDisabledReason(blocker: PreflightBlockerDto | undefined): string | null {
+  if (!blocker) {
+    return null;
+  }
+  if (blocker.issueCode.endsWith("-required") || blocker.issueCode === "image-generation-incomplete") {
+    return blocker.message;
+  }
+  return `문제 확인 결과를 먼저 해결해야 합니다. ${blocker.message}`;
+}
+
+function previewNextAction(blocker: PreflightBlockerDto | undefined): string {
+  if (!blocker) {
+    return "프리뷰를 실행할 수 있습니다.";
+  }
+  if (blocker.issueCode === "heroine-required") {
+    return "히로인 탭에서 히로인 스냅샷을 배정하세요.";
+  }
+  if (blocker.issueCode === "background-required") {
+    return "배경 화면 생성 탭에서 배경을 준비하세요.";
+  }
+  if (blocker.issueCode === "route-required") {
+    return "제작 탭에서 프리뷰 시작 루트를 준비하세요.";
+  }
+  if (blocker.issueCode === "event-scenes-required") {
+    return "제작 탭에서 이벤트와 씬을 준비하세요.";
+  }
+  if (blocker.issueCode === "image-generation-incomplete") {
+    return "배경 화면 생성 탭에서 남은 이미지 작업을 완료하세요.";
+  }
+  return blocker.repairActionIds.length > 0
+    ? `문제 패널에서 ${blocker.repairActionIds[0]} repair path를 선택하세요.`
+    : "문제 패널에서 blocker를 확인하세요.";
+}
+
+export function createPreviewPreflight(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  projectRevision: ProjectRevisionDto
+): PreviewPreflightDto {
+  const validationBlockers = (validation.issues || [])
+    .filter((issue) => issue.severity === "error")
+    .map(preflightIssueFromValidationIssue);
+  const blockers = [
+    ...previewRequiredDataBlockers(project),
+    ...validationBlockers
+  ];
+  const validationWarnings = (validation.issues || [])
+    .filter((issue) => issue.severity !== "error")
+    .map(preflightIssueFromValidationIssue);
+  const conditionWarning = conditionalChoiceRuntimeWarning(project);
+  const warnings = conditionWarning ? [...validationWarnings, conditionWarning] : validationWarnings;
+  return {
+    canRun: blockers.length === 0,
+    blockers,
+    warnings,
+    disabledReason: previewDisabledReason(blockers[0]),
+    nextAction: previewNextAction(blockers[0]),
+    projectRevision,
+    runtimeCapabilities: runtimeCapabilitiesForProject()
   };
 }
 
