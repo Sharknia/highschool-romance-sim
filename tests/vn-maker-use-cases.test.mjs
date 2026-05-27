@@ -759,6 +759,10 @@ assert.equal(
   starterBackgroundGenerated.project.scenes.every((scene) => scene.backgroundAssetId === "asset-starter-background-replacement"),
   true
 );
+const exportAfterStarterBackgroundReplacement = await useCases.exportProject({ projectDirectory: starterBackgroundProjectDirectory });
+assert.equal(exportAfterStarterBackgroundReplacement.ok, true);
+assert.equal(exportAfterStarterBackgroundReplacement.smoke.ok, true);
+assert.equal(exportAfterStarterBackgroundReplacement.smoke.checks.cg, true);
 
 const blankProject = await useCases.createProject({
   projectDirectory: blankProjectDirectory,

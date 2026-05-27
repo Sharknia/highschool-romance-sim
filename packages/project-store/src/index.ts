@@ -1882,7 +1882,8 @@ export async function smokeTestWebExport(outputDirectory: string): Promise<WebEx
     checks.portrait = Boolean(firstScene?.characters.some((character) => character.asset?.kind === "portrait" && character.asset.uri));
 
     for (const scene of scenes) {
-      if (scene.cgAsset?.uri) {
+      // The legacy smoke key is named cg, but Alpha exports are valid with a generated background-only visual pass.
+      if (scene.cgAsset?.uri || scene.backgroundAsset?.uri) {
         checks.cg = true;
       }
       for (const choice of scene.choices) {
