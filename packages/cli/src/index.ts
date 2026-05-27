@@ -49,6 +49,8 @@ interface CliInput {
   request?: unknown;
   plan?: unknown;
   patchHistoryId?: string;
+  promptId?: string;
+  adapterMode?: "mock" | "actual";
   userEvent?: string;
   routeId?: string;
   afterSceneId?: string;
@@ -153,6 +155,9 @@ function printCapabilities(): void {
       "validate",
       "manifest",
       "build-html",
+      "fixed-prompts",
+      "replay-fixed-prompt",
+      "generation-result-logs",
       "expand-event",
       "approve-event",
       "preview-preflight",
@@ -194,6 +199,9 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "remove-recent-project": "removeRecentProject",
     "restore-recent-project": "restoreRecentProject",
     "delete-project": "deleteProjectWorkspace",
+    "fixed-prompts": "listFixedPrompts",
+    "replay-fixed-prompt": "replayFixedPrompt",
+    "generation-result-logs": "listGenerationResultLogs",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
     "preview-preflight": "previewPreflightProject",
@@ -382,6 +390,21 @@ async function run(): Promise<void> {
       }
     }
     writeJson(result);
+    return;
+  }
+
+  if (command === "fixed-prompts") {
+    writeJson(await useCases.listFixedPrompts(input));
+    return;
+  }
+
+  if (command === "replay-fixed-prompt") {
+    writeJson(await useCases.replayFixedPrompt(input));
+    return;
+  }
+
+  if (command === "generation-result-logs") {
+    writeJson(await useCases.listGenerationResultLogs(input));
     return;
   }
 

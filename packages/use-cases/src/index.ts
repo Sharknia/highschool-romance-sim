@@ -38,10 +38,16 @@ import {
   type EventExpansionPlan,
   type EventExpansionRequest,
   type EventExpansionValidationResult,
+  type GenerationFailureClassification,
+  type GenerationResultClassification,
+  type GenerationResultLogDto,
+  type GenerationResultSourceType,
   type HeroineProfile,
   type PreviewPreflightDto,
   type ProjectPatchDescription,
   type ProjectRevisionDto,
+  type TestPromptFixtureDto,
+  type TestPromptSetDto,
   type ValidationIssue,
   type VnMakerAsset,
   type VnMakerCharacter,
@@ -163,6 +169,40 @@ export interface ProjectImageGenerationAdapter {
   generateImageAsset(input: ProjectImageGenerationInput): Promise<ProjectImageGenerationResult>;
 }
 
+export const FIXED_PROMPT_SET_ID = "phase0-studio-fixed-prompts-v1";
+
+const FIXED_PROMPT_SET_VERSION = "1.0.0";
+export const GENERATION_FAILURE_CLASSIFICATIONS: GenerationFailureClassification[] = [
+  "generation_quality",
+  "validation_model",
+  "repair_ux",
+  "preview_runtime",
+  "participant_understanding"
+];
+const FIXED_PROMPT_FIXTURES: TestPromptFixtureDto[] = [
+  {
+    promptSetId: FIXED_PROMPT_SET_ID,
+    promptId: "library-hands-overlap-normal-ending",
+    promptText: "도서관에서 책을 줍다가 손이 겹치고 둘 다 당황하지만, 마지막에는 서로 웃으며 노멀 엔딩으로 끝나는 짧은 이벤트를 만들어줘. 씬은 3개, 선택지는 1개, CG는 1개만 사용해줘.",
+    expectedElements: ["도서관", "손이 겹침", "당황", "노멀 엔딩", "CG 1개"],
+    allowedVariation: ["장면 라벨", "대사 표현", "선택지 문구", "CG 프롬프트 세부 묘사"]
+  },
+  {
+    promptSetId: FIXED_PROMPT_SET_ID,
+    promptId: "rainy-classroom-shared-umbrella",
+    promptText: "비 오는 방과 후 교실에서 우산을 같이 쓰기로 약속하고, 짧은 선택 뒤 노멀 엔딩으로 끝나는 설레는 이벤트를 만들어줘. 씬은 3개, 선택지는 1개, CG는 1개만 사용해줘.",
+    expectedElements: ["비 오는 방과 후", "교실", "우산 약속", "선택지 1개", "노멀 엔딩"],
+    allowedVariation: ["날씨 묘사", "교실 소품", "선택지 문구", "엔딩 제목"]
+  },
+  {
+    promptSetId: FIXED_PROMPT_SET_ID,
+    promptId: "festival-cleanup-confession",
+    promptText: "문화제 정리 시간에 둘만 남아 고마움을 전하고, 가벼운 고백 직전의 여운으로 노멀 엔딩에 도달하는 이벤트를 만들어줘. 씬은 3개, 선택지는 1개, CG는 1개만 사용해줘.",
+    expectedElements: ["문화제 정리", "둘만 남음", "고마움", "고백 직전의 여운", "노멀 엔딩"],
+    allowedVariation: ["문화제 부스 종류", "대사 톤", "감정선 속도", "CG 연출"]
+  }
+];
+
 export type MakerActionId =
   | "createProject"
   | "createProjectFromHeroine"
@@ -179,6 +219,9 @@ export type MakerActionId =
   | "validateProject"
   | "expandEvent"
   | "approveEvent"
+  | "listFixedPrompts"
+  | "replayFixedPrompt"
+  | "listGenerationResultLogs"
   | "listGenerationJobs"
   | "runGenerationJobs"
   | "previewPreflightProject"
@@ -636,6 +679,47 @@ const reservedProjectIds = new Set(["new", "open", "settings", "delete", "create
 
 function createRequestId(): string {
   return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function cloneFixedPromptFixture(fixture: TestPromptFixtureDto): TestPromptFixtureDto {
+  return {
+    ...fixture,
+    expectedElements: [...fixture.expectedElements],
+    allowedVariation: [...fixture.allowedVariation]
+  };
+}
+
+function fixedPromptSetDto(): TestPromptSetDto {
+  return {
+    id: FIXED_PROMPT_SET_ID,
+    version: FIXED_PROMPT_SET_VERSION,
+    label: "Studio Phase 0 fixed prompt set",
+    fixtures: FIXED_PROMPT_FIXTURES.map(cloneFixedPromptFixture)
+  };
+}
+
+function fixedPromptById(promptId: unknown): TestPromptFixtureDto {
+  const id = typeof promptId === "string" && promptId.trim()
+    ? promptId.trim()
+    : FIXED_PROMPT_FIXTURES[0].promptId;
+  const fixture = FIXED_PROMPT_FIXTURES.find((item) => item.promptId === id);
+  if (!fixture) {
+    throw new InputValidationError("fixed prompt를 찾을 수 없습니다.", [{
+      severity: "error",
+      path: "promptId",
+      message: `지원하지 않는 fixed prompt입니다: ${id}`
+    }]);
+  }
+  return cloneFixedPromptFixture(fixture);
+}
+
+function fixedPromptAdapterMode(input: unknown): "mock" | "actual" {
+  const mode = asRecord(input).adapterMode;
+  return mode === "actual" ? "actual" : "mock";
+}
+
+function createGenerationResultId(): string {
+  return `generation-result-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 }
 
 function explicitProjectId(input: unknown): string | undefined {
@@ -2608,6 +2692,108 @@ function eventTextErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function eventTextFailureClassification(attempts: EventTextGenerationAttempt[]): GenerationFailureClassification {
+  if (attempts.some((attempt) => attempt.failureKind === "quality_rule_failed")) {
+    return "generation_quality";
+  }
+  if (attempts.some((attempt) => attempt.failureKind === "schema_invalid" || attempt.failureKind === "engine_validation_failed")) {
+    return "validation_model";
+  }
+  return "generation_quality";
+}
+
+function eventTextResultClassification(result: ExpandNaturalLanguageEventResult): GenerationResultClassification {
+  return result.ok ? "passed" : eventTextFailureClassification(result.attempts);
+}
+
+function rawOutputMetadata(rawOutput: unknown): JsonRecord {
+  return asRecord(asRecord(rawOutput).metadata);
+}
+
+function generationSourceFromRawOutput(
+  rawOutput: unknown,
+  fallbackSourceType: GenerationResultSourceType,
+  fallbackAdapter: string
+): { adapter: string; sourceType: GenerationResultSourceType } {
+  const metadata = rawOutputMetadata(rawOutput);
+  const adapter = typeof metadata.adapter === "string" && metadata.adapter.trim()
+    ? metadata.adapter.trim()
+    : fallbackAdapter;
+  const provenance = typeof metadata.provenance === "string" ? metadata.provenance : "";
+  const sourceType = adapter.includes("mock") || provenance.includes("alpha-sandbox")
+    ? "mock"
+    : fallbackSourceType;
+  return { adapter, sourceType };
+}
+
+function fixedPromptEventRequest(project: VnMakerProject, store: ProjectStore, input: unknown, fixture: TestPromptFixtureDto): EventExpansionRequest {
+  const record = asRecord(input);
+  const route = project.routes.find((item) => item.id === record.routeId) || project.routes[0];
+  if (!route) {
+    throw new Error("fixed prompt replay를 실행할 루트가 없습니다.");
+  }
+  const afterSceneId = typeof record.afterSceneId === "string" && record.afterSceneId ? record.afterSceneId : route.entrySceneId;
+  const heroineId = typeof record.heroineId === "string" && record.heroineId ? record.heroineId : route.heroineId;
+  return createEventExpansionRequest(project, {
+    projectDirectory: store.paths.projectDirectory,
+    routeId: route.id,
+    afterSceneId,
+    heroineId,
+    userEvent: fixture.promptText,
+    constraints: record.constraints && typeof record.constraints === "object"
+      ? record.constraints as Partial<EventExpansionRequest["constraints"]>
+      : undefined
+  });
+}
+
+function validationIssuesForGenerationResult(result: ExpandNaturalLanguageEventResult): ValidationIssue[] {
+  if (result.validation) {
+    return result.validation.issues;
+  }
+  if (!result.ok) {
+    return [{ severity: "error", path: "eventText", message: result.error }];
+  }
+  return [];
+}
+
+function generationOutputSummary(result: ExpandNaturalLanguageEventResult): string {
+  return result.ok ? result.plan.summary : result.error;
+}
+
+function createGenerationResultLog(input: {
+  resultId: string;
+  fixture: TestPromptFixtureDto;
+  adapter: string;
+  sourceType: GenerationResultSourceType;
+  generatedAt: string;
+  projectRevision: ProjectRevisionDto;
+  outputSummary: string;
+  validationIssues: ValidationIssue[];
+  classification: GenerationResultClassification;
+  patchHistoryId?: string;
+  skippedReason?: string;
+}): GenerationResultLogDto {
+  const failureClassification = input.classification === "passed" ? undefined : input.classification;
+  return {
+    resultId: input.resultId,
+    promptSetId: input.fixture.promptSetId,
+    promptId: input.fixture.promptId,
+    promptText: input.fixture.promptText,
+    expectedElements: [...input.fixture.expectedElements],
+    allowedVariation: [...input.fixture.allowedVariation],
+    adapter: input.adapter,
+    sourceType: input.sourceType,
+    generatedAt: input.generatedAt,
+    projectRevision: input.projectRevision,
+    outputSummary: input.outputSummary,
+    validationIssues: input.validationIssues,
+    classification: input.classification,
+    ...(failureClassification ? { failureClassification } : {}),
+    ...(input.patchHistoryId ? { patchHistoryId: input.patchHistoryId } : {}),
+    ...(input.skippedReason ? { skippedReason: input.skippedReason } : {})
+  };
+}
+
 export async function expandNaturalLanguageEvent(
   input: ExpandNaturalLanguageEventInput
 ): Promise<ExpandNaturalLanguageEventResult> {
@@ -3497,6 +3683,204 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           projectDirectory: store.paths.projectDirectory,
           artifact: buildProjectHtml(store.requireProject())
         };
+      } finally {
+        store.close();
+      }
+    },
+
+    async listFixedPrompts(_input: unknown = {}) {
+      const fixedPromptSet = fixedPromptSetDto();
+      return {
+        ok: true,
+        fixedPromptSetId: fixedPromptSet.id,
+        fixedPromptSet,
+        fixtures: fixedPromptSet.fixtures
+      };
+    },
+
+    async replayFixedPrompt(input: unknown) {
+      const record = asRecord(input);
+      const fixture = fixedPromptById(record.promptId);
+      const adapterMode = fixedPromptAdapterMode(input);
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const projectRevision = store.getProjectRevision();
+        const request = fixedPromptEventRequest(project, store, input, fixture);
+        const generatedAt = new Date().toISOString();
+        const resultId = createGenerationResultId();
+        const fixedPromptSet = fixedPromptSetDto();
+
+        if (adapterMode === "actual" && !options.eventText) {
+          const skippedReason = "actual event text adapter unavailable";
+          const validationIssues: ValidationIssue[] = [{
+            severity: "error",
+            path: "adapterMode",
+            message: skippedReason
+          }];
+          const generationResultLog = store.recordGenerationResultLog(createGenerationResultLog({
+            resultId,
+            fixture,
+            adapter: "codex-event-text-adapter",
+            sourceType: "unavailable",
+            generatedAt,
+            projectRevision,
+            outputSummary: skippedReason,
+            validationIssues,
+            classification: "generation_quality",
+            skippedReason
+          }));
+          return withStoreActionState("replayFixedPrompt", store, {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            fixedPromptSetId: fixedPromptSet.id,
+            fixedPromptSet,
+            fixedPrompt: fixture,
+            generationResultId: resultId,
+            generationResultLog,
+            request,
+            error: skippedReason,
+            validation: { ok: false, issues: validationIssues }
+          }, { project, validation: { ok: false, issues: validationIssues }, projectRevision });
+        }
+
+        let result: ExpandNaturalLanguageEventResult;
+        try {
+          result = await expandNaturalLanguageEvent({
+            project,
+            request,
+            adapter: adapterMode === "actual" ? options.eventText : undefined
+          });
+        } catch (error) {
+          const skippedReason = eventTextErrorMessage(error);
+          const validationIssues: ValidationIssue[] = [{
+            severity: "error",
+            path: "eventText",
+            message: skippedReason
+          }];
+          const source = adapterMode === "actual"
+            ? { adapter: "codex-event-text-adapter", sourceType: "unavailable" as const }
+            : { adapter: "deterministic-fixture-adapter", sourceType: "mock" as const };
+          const generationResultLog = store.recordGenerationResultLog(createGenerationResultLog({
+            resultId,
+            fixture,
+            adapter: source.adapter,
+            sourceType: source.sourceType,
+            generatedAt,
+            projectRevision,
+            outputSummary: skippedReason,
+            validationIssues,
+            classification: "generation_quality",
+            skippedReason
+          }));
+          return withStoreActionState("replayFixedPrompt", store, {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            fixedPromptSetId: fixedPromptSet.id,
+            fixedPromptSet,
+            fixedPrompt: fixture,
+            generationResultId: resultId,
+            generationResultLog,
+            request,
+            error: skippedReason,
+            validation: { ok: false, issues: validationIssues }
+          }, { project, validation: { ok: false, issues: validationIssues }, projectRevision });
+        }
+        const validation = result.ok
+          ? result.validation
+          : result.validation || {
+              ok: false,
+              issues: [{ severity: "error" as const, path: "eventText", message: result.error }]
+            };
+        const patchHistoryEntry = result.ok
+          ? store.recordPatchHistory({
+              status: "proposed",
+              summary: result.plan.summary,
+              request,
+              plan: result.plan,
+              rawOutput: result.rawOutput,
+              attempts: result.attempts,
+              validation: result.validation,
+              diff: result.validation.diff,
+              beforeProject: project,
+              afterProject: result.validation.appliedProject
+            })
+          : store.recordPatchHistory({
+              status: "failed",
+              summary: "fixed prompt replay 실패",
+              request,
+              rawOutput: result.rawOutput,
+              attempts: result.attempts,
+              validation
+            });
+        const source = adapterMode === "actual"
+          ? generationSourceFromRawOutput(result.rawOutput, "actual", "codex-event-text-adapter")
+          : { adapter: "deterministic-fixture-adapter", sourceType: "mock" as const };
+        const generationResultLog = store.recordGenerationResultLog(createGenerationResultLog({
+          resultId,
+          fixture,
+          adapter: source.adapter,
+          sourceType: source.sourceType,
+          generatedAt,
+          projectRevision,
+          outputSummary: generationOutputSummary(result),
+          validationIssues: validationIssuesForGenerationResult(result),
+          classification: eventTextResultClassification(result),
+          patchHistoryId: patchHistoryEntry.id
+        }));
+
+        if (!result.ok) {
+          return withStoreActionState("replayFixedPrompt", store, {
+            ok: false,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            fixedPromptSetId: fixedPromptSet.id,
+            fixedPromptSet,
+            fixedPrompt: fixture,
+            generationResultId: resultId,
+            generationResultLog,
+            request,
+            attempts: result.attempts,
+            rawOutput: result.rawOutput,
+            error: result.error,
+            validation,
+            patchHistoryEntry
+          }, { project, validation });
+        }
+
+        return withStoreActionState("replayFixedPrompt", store, {
+          projectDirectory: store.paths.projectDirectory,
+          project,
+          fixedPromptSetId: fixedPromptSet.id,
+          fixedPromptSet,
+          fixedPrompt: fixture,
+          generationResultId: resultId,
+          generationResultLog,
+          request,
+          plan: result.plan,
+          validation: result.validation,
+          diff: result.validation.diff,
+          attempts: result.attempts,
+          rawOutput: result.rawOutput,
+          patchHistoryEntry
+        }, { project, validation: result.validation });
+      } finally {
+        store.close();
+      }
+    },
+
+    async listGenerationResultLogs(input: unknown) {
+      const store = await ensureProjectStore(input, defaultProjectDirectory);
+      try {
+        const project = store.requireProject();
+        const generationResultLogs = store.listGenerationResultLogs();
+        return withStoreActionState("listGenerationResultLogs", store, {
+          projectDirectory: store.paths.projectDirectory,
+          generationResultLogs,
+          count: generationResultLogs.length
+        }, { project });
       } finally {
         store.close();
       }

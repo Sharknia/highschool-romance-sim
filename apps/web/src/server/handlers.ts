@@ -358,6 +358,18 @@ class ApiServices {
     return this.useCases.buildProject(body);
   }
 
+  listFixedPrompts(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listFixedPrompts(body);
+  }
+
+  replayFixedPrompt(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.replayFixedPrompt(body);
+  }
+
+  listGenerationResultLogs(body: unknown): Promise<Record<string, unknown>> {
+    return this.useCases.listGenerationResultLogs(body);
+  }
+
   expandEvent(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.expandEvent(body);
   }
@@ -467,6 +479,9 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/preview/preflight", (context) => jsonBodyRoute(context, (body) => services.previewPreflightProject(body), "previewPreflightProject"));
   app.post("/api/project/preview", (context) => jsonBodyRoute(context, (body) => services.previewProject(body), "previewProject"));
   app.post("/api/project/export", (context) => jsonBodyRoute(context, (body) => services.exportProject(body), "exportProject"));
+  app.post("/api/events/fixed-prompts", (context) => jsonBodyRoute(context, (body) => services.listFixedPrompts(body), "listFixedPrompts"));
+  app.post("/api/events/fixed-prompts/replay", (context) => jsonBodyRoute(context, (body) => services.replayFixedPrompt(body), "replayFixedPrompt"));
+  app.post("/api/events/generation-result-logs", (context) => jsonBodyRoute(context, (body) => services.listGenerationResultLogs(body), "listGenerationResultLogs"));
   app.post("/api/events/expand", (context) => jsonBodyRoute(context, (body) => services.expandEvent(body), "expandEvent"));
   app.post("/api/events/approve", (context) => jsonBodyRoute(context, (body) => services.approveEvent(body), "approveEvent"));
   app.post("/api/events/history", (context) => jsonBodyRoute(context, (body) => services.listPatchHistory(body)));

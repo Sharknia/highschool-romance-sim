@@ -216,6 +216,7 @@ const projectPageTypesSource = readText("apps/web/src/client/pages/projects/proj
 const projectDisplayTextSource = readText("apps/web/src/client/pages/projects/projectDisplayText.ts");
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
+const engineCoreSource = readText("packages/engine-core/src/index.ts");
 const useCasesSource = readText("packages/use-cases/src/index.ts");
 const serverHandlersSource = readText("apps/web/src/server/handlers.ts");
 const clientStylesSource = readText("apps/web/src/client/styles.css");
@@ -250,6 +251,42 @@ const applyRepairResultStateEnd = applyRepairResultStateStart >= 0 ? projectDeta
 const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRepairResultStateEnd > applyRepairResultStateStart
   ? projectDetailViewSource.slice(applyRepairResultStateStart, applyRepairResultStateEnd)
   : "";
+[
+  "TestPromptFixtureDto",
+  "GenerationResultLogDto",
+  "GenerationFailureClassification",
+  "GenerationResultClassification"
+].forEach((requiredText) => {
+  assert.match(engineCoreSource, new RegExp(requiredText), `engine-core는 ${requiredText} DTO 계약을 소유해야 합니다.`);
+});
+[
+  "FIXED_PROMPT_SET_ID",
+  "listFixedPrompts",
+  "replayFixedPrompt",
+  "listGenerationResultLogs",
+  "generation_quality",
+  "validation_model",
+  "repair_ux",
+  "preview_runtime",
+  "participant_understanding"
+].forEach((requiredText) => {
+  assert.match(useCasesSource, new RegExp(requiredText), `use-cases는 고정 프롬프트 선택/분류 정책을 소유해야 합니다: ${requiredText}`);
+});
+[
+  "/api/events/fixed-prompts",
+  "/api/events/fixed-prompts/replay",
+  "/api/events/generation-result-logs"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(serverHandlersSource, pattern, `Web API는 고정 프롬프트/결과 로그 route를 노출해야 합니다: ${requiredText}`);
+});
+[
+  "fixed-prompts",
+  "replay-fixed-prompt",
+  "generation-result-logs"
+].forEach((requiredText) => {
+  assert.match(readText("packages/cli/src/index.ts"), new RegExp(requiredText), `CLI는 ${requiredText} command를 노출해야 합니다.`);
+});
 assert.match(`${projectStartSource}\n${recentProjectListSource}`, /ContentList/, "프로젝트 목록 화면은 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(
   projectStartSource.includes('type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";'),

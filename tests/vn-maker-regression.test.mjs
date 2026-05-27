@@ -39,6 +39,8 @@ const repairCliParityDirectory = join(tempRoot, "RepairCliParity.vnmaker");
 const repairRouteMissingTargetDirectory = join(tempRoot, "RepairRouteMissingTarget.vnmaker");
 const repairLastUndoDirectory = join(tempRoot, "RepairLastUndo.vnmaker");
 const revisionGuardDirectory = join(tempRoot, "RevisionGuard.vnmaker");
+const fixedPromptApiCliDirectory = join(tempRoot, "FixedPromptApiCli.vnmaker");
+const fixedPromptCliDirectory = join(tempRoot, "FixedPromptCli.vnmaker");
 const heroineApiContractDirectory = join(tempRoot, "HeroineApiContract.vnmaker");
 const heroineApiProjectDirectory = join(tempRoot, "HeroineApiProject.vnmaker");
 const heroineCliContractDirectory = join(tempRoot, "HeroineCliContract.vnmaker");
@@ -1692,6 +1694,95 @@ const mockCodex = {
 };
 
 const mockApi = webHandlers.createApiRequestHandler({ codex: mockCodex, recentProjectIndexFile: apiRecentProjectIndexFile });
+const fixedPromptApiCliHeroine = core.createHeroineProfile({
+  id: "fixed-prompt-haru",
+  name: "하루",
+  description: "고정 프롬프트 API/CLI parity 테스트 히로인.",
+  personality: "차분하지만 중요한 순간에는 솔직하다.",
+  speechStyle: "짧고 담백한 말투.",
+  appearance: "단정한 교복과 연분홍 머리핀."
+});
+const fixedPromptApiCliProject = core.createProjectFromHeroine({
+  id: "fixed-prompt-api-cli",
+  title: "Fixed Prompt API CLI",
+  premise: "고정 프롬프트 replay와 결과 로그 API/CLI 계약을 검증한다.",
+  heroine: fixedPromptApiCliHeroine
+});
+const fixedPromptApiCliStore = await projectStore.createProjectWorkspace({
+  projectDirectory: fixedPromptApiCliDirectory,
+  project: fixedPromptApiCliProject
+});
+fixedPromptApiCliStore.close();
+const fixedPromptApiList = await mockApi({
+  method: "POST",
+  path: "/api/events/fixed-prompts",
+  body: { projectDirectory: fixedPromptApiCliDirectory }
+});
+assert.equal(fixedPromptApiList.status, 200);
+assert.equal(fixedPromptApiList.body.ok, true);
+assert.equal(typeof fixedPromptApiList.body.fixedPromptSetId, "string");
+assert.equal(fixedPromptApiList.body.fixedPromptSet.id, fixedPromptApiList.body.fixedPromptSetId);
+assert.equal(fixedPromptApiList.body.fixtures.length >= 3, true);
+const fixedPromptApiReplay = await mockApi({
+  method: "POST",
+  path: "/api/events/fixed-prompts/replay",
+  body: {
+    projectDirectory: fixedPromptApiCliDirectory,
+    promptId: fixedPromptApiList.body.fixtures[0].promptId,
+    adapterMode: "actual"
+  }
+});
+assert.equal(fixedPromptApiReplay.status, 200);
+assert.equal(fixedPromptApiReplay.body.ok, true);
+assert.equal(fixedPromptApiReplay.body.fixedPromptSetId, fixedPromptApiList.body.fixedPromptSetId);
+assert.equal(fixedPromptApiReplay.body.generationResultId, fixedPromptApiReplay.body.generationResultLog.resultId);
+assert.equal(fixedPromptApiReplay.body.generationResultLog.promptText, fixedPromptApiList.body.fixtures[0].promptText);
+assert.equal(fixedPromptApiReplay.body.generationResultLog.sourceType, "actual");
+assert.equal(fixedPromptApiReplay.body.generationResultLog.adapter, "codex-event-text-adapter");
+assert.equal(fixedPromptApiReplay.body.generationResultLog.classification, "passed");
+assert.equal(fixedPromptApiReplay.body.generationResultLog.patchHistoryId, fixedPromptApiReplay.body.patchHistoryEntry.id);
+assert.equal(fixedPromptApiReplay.body.patchHistoryEntry.status, "proposed");
+const fixedPromptApiLogs = await mockApi({
+  method: "POST",
+  path: "/api/events/generation-result-logs",
+  body: { projectDirectory: fixedPromptApiCliDirectory }
+});
+assert.equal(fixedPromptApiLogs.status, 200);
+assert.equal(fixedPromptApiLogs.body.generationResultLogs.some((log) => log.resultId === fixedPromptApiReplay.body.generationResultId), true);
+
+const fixedPromptCliList = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "fixed-prompts"], {
+  input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(fixedPromptCliList.ok, true);
+assert.equal(fixedPromptCliList.fixedPromptSetId, fixedPromptApiList.body.fixedPromptSetId);
+assert.equal(fixedPromptCliList.fixtures.length >= 3, true);
+const fixedPromptCliReplay = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "replay-fixed-prompt"], {
+  input: JSON.stringify({
+    projectDirectory: fixedPromptCliDirectory,
+    project: {
+      ...fixedPromptApiCliProject,
+      id: "fixed-prompt-cli"
+    },
+    promptId: fixedPromptCliList.fixtures[1].promptId,
+    adapterMode: "mock"
+  }),
+  encoding: "utf8"
+}));
+assert.equal(fixedPromptCliReplay.ok, true);
+assert.equal(fixedPromptCliReplay.fixedPromptSetId, fixedPromptApiReplay.body.fixedPromptSetId);
+assert.equal(fixedPromptCliReplay.generationResultId, fixedPromptCliReplay.generationResultLog.resultId);
+assert.equal(fixedPromptCliReplay.generationResultLog.sourceType, "mock");
+assert.equal(fixedPromptCliReplay.generationResultLog.adapter, "deterministic-fixture-adapter");
+assert.equal(fixedPromptCliReplay.generationResultLog.classification, "passed");
+const fixedPromptCliLogs = JSON.parse(execFileSync(process.execPath, ["packages/cli/dist/index.js", "generation-result-logs"], {
+  input: JSON.stringify({ projectDirectory: fixedPromptCliDirectory }),
+  encoding: "utf8"
+}));
+assert.equal(fixedPromptCliLogs.ok, true);
+assert.equal(fixedPromptCliLogs.generationResultLogs.some((log) => log.resultId === fixedPromptCliReplay.generationResultId), true);
+mockCodexTextCalls = 0;
+
 const apiServerFailure = await mockApi({
   method: "POST",
   path: "/api/project/open",

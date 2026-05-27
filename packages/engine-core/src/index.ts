@@ -39,6 +39,49 @@ export interface ProjectRevisionDto {
   createdAt: string;
 }
 
+export type GenerationFailureClassification =
+  | "generation_quality"
+  | "validation_model"
+  | "repair_ux"
+  | "preview_runtime"
+  | "participant_understanding";
+export type GenerationResultClassification = "passed" | GenerationFailureClassification;
+export type GenerationResultSourceType = "mock" | "actual" | "unavailable";
+
+export interface TestPromptFixtureDto {
+  promptSetId: string;
+  promptId: string;
+  promptText: string;
+  expectedElements: string[];
+  allowedVariation: string[];
+}
+
+export interface TestPromptSetDto {
+  id: string;
+  version: string;
+  label: string;
+  fixtures: TestPromptFixtureDto[];
+}
+
+export interface GenerationResultLogDto {
+  resultId: string;
+  promptSetId: string;
+  promptId: string;
+  promptText: string;
+  expectedElements: string[];
+  allowedVariation: string[];
+  adapter: string;
+  sourceType: GenerationResultSourceType;
+  generatedAt: string;
+  projectRevision: ProjectRevisionDto;
+  outputSummary: string;
+  validationIssues: ValidationIssue[];
+  classification: GenerationResultClassification;
+  failureClassification?: GenerationFailureClassification;
+  patchHistoryId?: string;
+  skippedReason?: string;
+}
+
 export type ConditionRuntimeSupportFlag = "support_false";
 export type ConditionRuntimePreviewStatus = "not_evaluated";
 export type ConditionRuntimeEditorMode = "candidate_review_only";

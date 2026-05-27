@@ -15,6 +15,8 @@ const manualProjectDirectory = join(tempRoot, "ManualScenes.vnmaker");
 const blankStartSceneProjectDirectory = join(tempRoot, "BlankStartScene.vnmaker");
 const noRouteStartSceneProjectDirectory = join(tempRoot, "NoRouteStartScene.vnmaker");
 const preserveNextProjectDirectory = join(tempRoot, "PreserveNext.vnmaker");
+const fixedPromptDirectory = join(tempRoot, "FixedPrompt.vnmaker");
+const fixedPromptUnavailableDirectory = join(tempRoot, "FixedPromptUnavailable.vnmaker");
 const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
 const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
 const heroineContractDirectory = join(tempRoot, "HeroineContract.vnmaker");
@@ -1212,6 +1214,83 @@ const expanded = await useCases.expandEvent({
 });
 assert.equal(expanded.ok, true);
 assert.equal(expanded.plan.decision.sceneCount, 3);
+
+const fixedPromptProject = core.createProjectFromHeroine({
+  id: "fixed-prompt-use-case",
+  title: "Fixed Prompt Use Case",
+  premise: "고정 프롬프트 replay와 결과 로그 저장을 검증한다.",
+  heroine
+});
+const fixedPromptStore = await projectStoreModule.createProjectWorkspace({
+  projectDirectory: fixedPromptDirectory,
+  project: fixedPromptProject
+});
+fixedPromptStore.close();
+const fixedPromptSet = await useCases.listFixedPrompts({ projectDirectory: fixedPromptDirectory });
+assert.equal(fixedPromptSet.ok, true);
+assert.equal(typeof fixedPromptSet.fixedPromptSetId, "string");
+assert.equal(fixedPromptSet.fixedPromptSet.id, fixedPromptSet.fixedPromptSetId);
+assert.equal(fixedPromptSet.fixtures.length >= 3, true);
+assert.equal(fixedPromptSet.fixtures.every((fixture) => fixture.promptId && fixture.promptText), true);
+assert.equal(fixedPromptSet.fixtures.every((fixture) => Array.isArray(fixture.expectedElements)), true);
+assert.equal(fixedPromptSet.fixtures.every((fixture) => Array.isArray(fixture.allowedVariation)), true);
+
+const fixedPromptReplay = await useCases.replayFixedPrompt({
+  projectDirectory: fixedPromptDirectory,
+  promptId: fixedPromptSet.fixtures[0].promptId,
+  adapterMode: "mock"
+});
+assert.equal(fixedPromptReplay.ok, true);
+assert.equal(fixedPromptReplay.fixedPromptSetId, fixedPromptSet.fixedPromptSetId);
+assert.equal(fixedPromptReplay.generationResultId, fixedPromptReplay.generationResultLog.resultId);
+assert.equal(fixedPromptReplay.generationResultLog.promptId, fixedPromptSet.fixtures[0].promptId);
+assert.equal(fixedPromptReplay.generationResultLog.promptText, fixedPromptSet.fixtures[0].promptText);
+assert.equal(fixedPromptReplay.generationResultLog.adapter, "deterministic-fixture-adapter");
+assert.equal(fixedPromptReplay.generationResultLog.sourceType, "mock");
+assert.equal(fixedPromptReplay.generationResultLog.classification, "passed");
+assert.equal(fixedPromptReplay.generationResultLog.patchHistoryId, fixedPromptReplay.patchHistoryEntry.id);
+assert.equal(fixedPromptReplay.patchHistoryEntry.status, "proposed");
+assert.equal(Array.isArray(fixedPromptReplay.generationResultLog.validationIssues), true);
+assert.equal(typeof fixedPromptReplay.generationResultLog.projectRevision.revision, "string");
+const fixedPromptLogs = await useCases.listGenerationResultLogs({ projectDirectory: fixedPromptDirectory });
+assert.equal(fixedPromptLogs.ok, true);
+assert.equal(fixedPromptLogs.generationResultLogs.some((log) => log.resultId === fixedPromptReplay.generationResultId), true);
+
+const noEventTextUseCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile: join(tempRoot, "fixed-prompt-unavailable-recent.json")
+});
+const fixedPromptUnavailable = await noEventTextUseCases.replayFixedPrompt({
+  projectDirectory: fixedPromptUnavailableDirectory,
+  project: fixedPromptProject,
+  promptId: fixedPromptSet.fixtures[1].promptId,
+  adapterMode: "actual"
+});
+assert.equal(fixedPromptUnavailable.ok, false);
+assert.equal(fixedPromptUnavailable.fixedPromptSetId, fixedPromptSet.fixedPromptSetId);
+assert.equal(fixedPromptUnavailable.generationResultId, fixedPromptUnavailable.generationResultLog.resultId);
+assert.equal(fixedPromptUnavailable.generationResultLog.sourceType, "unavailable");
+assert.equal(fixedPromptUnavailable.generationResultLog.classification, "generation_quality");
+assert.match(fixedPromptUnavailable.generationResultLog.skippedReason, /adapter unavailable/);
+assert.equal(fixedPromptUnavailable.generationResultLog.patchHistoryId, undefined);
+
+const throwingEventTextUseCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile: join(tempRoot, "fixed-prompt-throwing-recent.json"),
+  eventText: {
+    async generateEventExpansionPlan() {
+      throw new Error("Codex ChatGPT OAuth 로그인이 필요합니다.");
+    }
+  }
+});
+const fixedPromptActualBlocked = await throwingEventTextUseCases.replayFixedPrompt({
+  projectDirectory: fixedPromptUnavailableDirectory,
+  promptId: fixedPromptSet.fixtures[2].promptId,
+  adapterMode: "actual"
+});
+assert.equal(fixedPromptActualBlocked.ok, false);
+assert.equal(fixedPromptActualBlocked.generationResultLog.sourceType, "unavailable");
+assert.equal(fixedPromptActualBlocked.generationResultLog.adapter, "codex-event-text-adapter");
+assert.match(fixedPromptActualBlocked.generationResultLog.skippedReason, /OAuth/);
+assert.equal(fixedPromptActualBlocked.generationResultLog.patchHistoryId, undefined);
 
 const approved = await useCases.approveEvent({
   projectDirectory,

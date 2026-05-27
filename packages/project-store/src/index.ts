@@ -21,6 +21,7 @@ import {
   validateProject,
   type EventExpansionPlan,
   type EventExpansionRequest,
+  type GenerationResultLogDto,
   type HeroineProfile,
   type PlayerRuntimeData,
   type ProjectPatchDescription,
@@ -405,6 +406,15 @@ interface PatchHistoryRow {
   reverted_at: string | null;
 }
 
+interface GenerationResultLogRow {
+  id: string;
+  project_id: string;
+  prompt_set_id: string;
+  prompt_id: string;
+  log_json: string;
+  created_at: string;
+}
+
 const migrations = [
   {
     id: 1,
@@ -625,6 +635,22 @@ ALTER TABLE validation_issues ADD COLUMN scene_ids_json TEXT;
 ALTER TABLE validation_issues ADD COLUMN choice_ids_json TEXT;
 ALTER TABLE validation_issues ADD COLUMN target_scene_id TEXT;
 `
+  },
+  {
+    id: 8,
+    name: "generation_result_logs",
+    sql: `
+CREATE TABLE IF NOT EXISTS generation_result_logs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  prompt_set_id TEXT NOT NULL,
+  prompt_id TEXT NOT NULL,
+  log_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_generation_result_logs_project_created ON generation_result_logs(project_id, created_at);
+`
   }
 ] as const;
 
@@ -768,6 +794,25 @@ function patchHistoryEntryFromRow(row: PatchHistoryRow): PatchHistoryEntry {
     createdAt: row.created_at,
     revertedAt: row.reverted_at || undefined
   };
+}
+
+function generationResultLogFromRow(row: GenerationResultLogRow): GenerationResultLogDto {
+  return parseJson<GenerationResultLogDto>(row.log_json, {
+    resultId: row.id,
+    promptSetId: row.prompt_set_id,
+    promptId: row.prompt_id,
+    promptText: "",
+    expectedElements: [],
+    allowedVariation: [],
+    adapter: "unknown",
+    sourceType: "unavailable",
+    generatedAt: row.created_at,
+    projectRevision: createProjectRevision(createStarterProject({ id: row.project_id }), row.created_at),
+    outputSummary: "",
+    validationIssues: [],
+    classification: "generation_quality",
+    skippedReason: "generation result log payload missing"
+  });
 }
 
 function statementList(sql: string): string[] {
@@ -1875,6 +1920,37 @@ VALUES (
       createdAt
     });
     return this.listPatchHistory().find((entry) => entry.id === id)!;
+  }
+
+  recordGenerationResultLog(log: GenerationResultLogDto): GenerationResultLogDto {
+    const project = this.requireProject();
+    this.db.prepare(`
+INSERT INTO generation_result_logs (
+  id, project_id, prompt_set_id, prompt_id, log_json, created_at
+)
+VALUES (
+  @id, @projectId, @promptSetId, @promptId, @logJson, @createdAt
+)
+`).run({
+      id: log.resultId,
+      projectId: project.id,
+      promptSetId: log.promptSetId,
+      promptId: log.promptId,
+      logJson: json(log),
+      createdAt: log.generatedAt
+    });
+    return log;
+  }
+
+  listGenerationResultLogs(): GenerationResultLogDto[] {
+    const project = this.requireProject();
+    const rows = this.db.prepare(`
+SELECT id, project_id, prompt_set_id, prompt_id, log_json, created_at
+FROM generation_result_logs
+WHERE project_id = ?
+ORDER BY created_at DESC, id DESC
+`).all(project.id) as GenerationResultLogRow[];
+    return rows.map(generationResultLogFromRow);
   }
 
   undoPatchHistory(patchHistoryId: string): VnMakerProject {

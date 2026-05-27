@@ -135,6 +135,40 @@ export interface ProjectPatchHistoryEntry {
   summary?: string;
 }
 
+export interface TestPromptFixture {
+  promptSetId?: string;
+  promptId?: string;
+  promptText?: string;
+  expectedElements?: string[];
+  allowedVariation?: string[];
+}
+
+export interface TestPromptSet {
+  id?: string;
+  version?: string;
+  label?: string;
+  fixtures?: TestPromptFixture[];
+}
+
+export interface GenerationResultLog {
+  resultId?: string;
+  promptSetId?: string;
+  promptId?: string;
+  promptText?: string;
+  expectedElements?: string[];
+  allowedVariation?: string[];
+  adapter?: string;
+  sourceType?: "mock" | "actual" | "unavailable" | string;
+  generatedAt?: string;
+  projectRevision?: ProjectRevision;
+  outputSummary?: string;
+  validationIssues?: ProjectIssue[];
+  classification?: "passed" | "generation_quality" | "validation_model" | "repair_ux" | "preview_runtime" | "participant_understanding" | string;
+  failureClassification?: string;
+  patchHistoryId?: string;
+  skippedReason?: string;
+}
+
 export interface ConditionRuntimeSupport {
   supportFlag?: "support_false" | string;
   supported?: boolean;
@@ -418,6 +452,13 @@ export interface ProjectApiResult extends ApiResult {
   repairHistoryEntry?: ProjectRepairHistoryEntry | null;
   repairHistory?: ProjectRepairHistoryEntry[];
   exportPlan?: ProjectExportPlan;
+  fixedPromptSetId?: string;
+  fixedPromptSet?: TestPromptSet;
+  fixtures?: TestPromptFixture[];
+  fixedPrompt?: TestPromptFixture;
+  generationResultId?: string;
+  generationResultLog?: GenerationResultLog;
+  generationResultLogs?: GenerationResultLog[];
   recentProject?: RecentProject;
   removedProject?: RecentProject;
   recentIndexRemoval?: {

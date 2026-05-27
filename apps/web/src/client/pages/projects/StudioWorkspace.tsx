@@ -25,7 +25,9 @@ import type {
   ProjectIssue,
   ProjectPreviewPreflight,
   ProjectRepairAction,
-  ProjectRevision
+  ProjectRevision,
+  GenerationResultLog,
+  TestPromptFixture
 } from "./projectPageTypes";
 
 export const STUDIO_MIN_WIDTH = 1280;
@@ -212,6 +214,20 @@ function issueTone(issue: ProjectIssue): "danger" | "warning" | "neutral" {
   return "neutral";
 }
 
+function generationClassificationTone(classification?: string): "success" | "warning" | "danger" | "neutral" {
+  if (classification === "passed") return "success";
+  if (classification === "generation_quality" || classification === "validation_model") return "warning";
+  if (classification) return "danger";
+  return "neutral";
+}
+
+function generationSourceText(log: GenerationResultLog | null): string {
+  if (!log) return "결과 없음";
+  if (log.sourceType === "actual") return `actual · ${log.adapter || "adapter unknown"}`;
+  if (log.sourceType === "mock") return `mock · ${log.adapter || "adapter unknown"}`;
+  return `unavailable · ${log.skippedReason || "reason missing"}`;
+}
+
 function preflightToIssues(preflight: ProjectPreviewPreflight | null): ProjectIssue[] {
   const blockers = (preflight?.blockers || []).map<ProjectIssue>((issue) => ({
     code: issue.issueCode,
@@ -361,6 +377,11 @@ export function StudioWorkspace({
   const [draftScene, setDraftScene] = useState<ProjectScene | null>(null);
   const [saveState, setSaveState] = useState<StudioSaveState>("idle");
   const [statusText, setStatusText] = useState("수동 제작 워크스페이스를 불러왔습니다.");
+  const [fixedPrompts, setFixedPrompts] = useState<TestPromptFixture[]>([]);
+  const [selectedFixedPromptId, setSelectedFixedPromptId] = useState("");
+  const [generationLog, setGenerationLog] = useState<GenerationResultLog | null>(null);
+  const [generationStatus, setGenerationStatus] = useState("고정 프롬프트 세트를 불러오는 중입니다.");
+  const [generationBusy, setGenerationBusy] = useState(false);
   const [localIssues, setLocalIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -433,6 +454,16 @@ export function StudioWorkspace({
   }, [projectRevision, previewPreflight?.projectRevision]);
 
   useEffect(() => {
+    if (!projectDirectory) {
+      setFixedPrompts([]);
+      setSelectedFixedPromptId("");
+      setGenerationStatus("프로젝트 저장 위치가 없어 고정 프롬프트를 불러올 수 없습니다.");
+      return;
+    }
+    void loadFixedPrompts();
+  }, [projectDirectory]);
+
+  useEffect(() => {
     if (!projectId) {
       setLayoutStorageReadyKey("");
       return;
@@ -497,6 +528,53 @@ export function StudioWorkspace({
 
   function updateLayout(nextLayout: Partial<StudioLayout>): void {
     setLayout((current) => clampStudioLayout({ ...current, ...nextLayout }));
+  }
+
+  async function loadFixedPrompts(): Promise<void> {
+    setGenerationStatus("고정 프롬프트 세트를 불러오는 중입니다.");
+    try {
+      const result = await postJson("/api/events/fixed-prompts", { projectDirectory });
+      if (isApiFailure(result)) {
+        setGenerationStatus(result.message || result.error || "고정 프롬프트 세트를 불러오지 못했습니다.");
+        return;
+      }
+      const prompts = result.fixtures || result.fixedPromptSet?.fixtures || [];
+      setFixedPrompts(prompts);
+      setSelectedFixedPromptId((current) => current || prompts[0]?.promptId || "");
+      setGenerationStatus(prompts.length ? "고정 프롬프트 세트를 불러왔습니다." : "표시할 고정 프롬프트가 없습니다.");
+    } catch (error) {
+      setGenerationStatus(`고정 프롬프트 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function replayFixedPrompt(adapterMode: "mock" | "actual"): Promise<void> {
+    const promptId = selectedFixedPromptId || fixedPrompts[0]?.promptId;
+    if (!promptId) {
+      setGenerationStatus("실행할 고정 프롬프트가 없습니다.");
+      return;
+    }
+    setGenerationBusy(true);
+    setGenerationStatus(adapterMode === "actual" ? "actual 생성 경로로 replay 중입니다." : "mock replay 중입니다.");
+    try {
+      const result = await postJson("/api/events/fixed-prompts/replay", {
+        projectDirectory,
+        promptId,
+        adapterMode
+      });
+      setGenerationLog(result.generationResultLog || null);
+      if (result.project) {
+        onProjectResult(result);
+      }
+      if (isApiFailure(result)) {
+        setGenerationStatus(result.generationResultLog?.skippedReason || result.message || result.error || "고정 프롬프트 replay가 실패했습니다.");
+        return;
+      }
+      setGenerationStatus(result.generationResultLog?.outputSummary || "고정 프롬프트 replay 결과가 기록되었습니다.");
+    } catch (error) {
+      setGenerationStatus(`고정 프롬프트 replay 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setGenerationBusy(false);
+    }
   }
 
   function patchDraftScene(patch: Partial<ProjectScene>): void {
@@ -783,6 +861,7 @@ export function StudioWorkspace({
     }
   }
 
+  const selectedFixedPrompt = fixedPrompts.find((fixture) => fixture.promptId === selectedFixedPromptId) || fixedPrompts[0] || null;
   const rootStyle = {
     "--studio-inspector-width": `${layout.inspectorCollapsed ? 48 : layout.inspectorWidth}px`,
     "--studio-problems-height": `${layout.problemsCollapsed ? 38 : layout.problemsHeight}px`,
@@ -1172,6 +1251,30 @@ export function StudioWorkspace({
                           </li>
                         ))}
                       </ul>
+                      <h3>Generation result log</h3>
+                      <label className="field-row">
+                        <span>fixed prompt</span>
+                        <select onChange={(event) => setSelectedFixedPromptId(event.target.value)} value={selectedFixedPrompt?.promptId || ""}>
+                          {fixedPrompts.map((fixture) => (
+                            <option key={fixture.promptId} value={fixture.promptId}>{fixture.promptId}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="studio-disabled-note">{selectedFixedPrompt?.promptText || generationStatus}</p>
+                      <div className="button-row">
+                        <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<Play size={16} />} onClick={() => void replayFixedPrompt("actual")} variant="primary">
+                          actual replay
+                        </Button>
+                        <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<RefreshCw size={16} />} onClick={() => void replayFixedPrompt("mock")}>
+                          mock replay
+                        </Button>
+                      </div>
+                      <dl className="summary-list">
+                        <div><dt>상태</dt><dd>{generationStatus}</dd></div>
+                        <div><dt>classification</dt><dd><StatusChip tone={generationClassificationTone(generationLog?.classification)}>{generationLog?.classification || "not run"}</StatusChip></dd></div>
+                        <div><dt>source</dt><dd>{generationSourceText(generationLog)}</dd></div>
+                        <div><dt>resultId</dt><dd>{generationLog?.resultId || "기록 없음"}</dd></div>
+                      </dl>
                     </section>
                   ) : null}
                 </div>
