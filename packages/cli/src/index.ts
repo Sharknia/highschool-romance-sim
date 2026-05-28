@@ -55,6 +55,8 @@ interface CliInput {
   routeId?: string;
   afterSceneId?: string;
   startSceneId?: string;
+  problemId?: string;
+  operations?: unknown[];
   jobIds?: string[];
   retryFailed?: boolean;
   replaceCompleted?: boolean;
@@ -151,6 +153,8 @@ function printCapabilities(): void {
       "insert-scene",
       "link-scene",
       "set-scene-ending",
+      "studio-context",
+      "studio-mutate",
       "validate-store",
       "validate",
       "manifest",
@@ -212,6 +216,8 @@ function actionForCommand(command: string): MakerActionId | undefined {
     "phase0-decision-report": "createPhase0DecisionReport",
     "expand-event": "expandEvent",
     "approve-event": "approveEvent",
+    "studio-context": "getStudioContext",
+    "studio-mutate": "applyStudioMutation",
     "preview-preflight": "previewPreflightProject",
     "preview": "previewProject",
     "export-web": "exportProject",
@@ -362,6 +368,16 @@ async function run(): Promise<void> {
 
   if (command === "set-scene-ending") {
     writeJson(await useCases.setSceneEnding(input));
+    return;
+  }
+
+  if (command === "studio-context") {
+    writeJson(await useCases.getStudioContext(input));
+    return;
+  }
+
+  if (command === "studio-mutate") {
+    writeJson(await useCases.applyStudioMutation(input));
     return;
   }
 

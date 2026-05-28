@@ -346,6 +346,14 @@ class ApiServices {
     return this.useCases.setSceneEnding(body);
   }
 
+  getStudioContext(body: unknown): Promise<unknown> {
+    return this.useCases.getStudioContext(body);
+  }
+
+  applyStudioMutation(body: unknown): Promise<unknown> {
+    return this.useCases.applyStudioMutation(body);
+  }
+
   validateProject(body: unknown): Promise<Record<string, unknown>> {
     return this.useCases.validateProject(body);
   }
@@ -489,6 +497,8 @@ export function createApiApp(options: ApiHandlerOptions = {}): Hono {
   app.post("/api/project/scenes/insert", (context) => jsonBodyRoute(context, (body) => services.insertManualScene(body)));
   app.post("/api/project/scenes/link", (context) => jsonBodyRoute(context, (body) => services.linkManualScene(body)));
   app.post("/api/project/scenes/ending", (context) => jsonBodyRoute(context, (body) => services.setSceneEnding(body)));
+  app.post("/api/project/studio/context", (context) => jsonBodyRoute(context, (body) => services.getStudioContext(body), "getStudioContext"));
+  app.post("/api/project/studio/mutate", (context) => jsonBodyRoute(context, (body) => services.applyStudioMutation(body), "applyStudioMutation"));
   app.post("/api/project/validate", (context) => jsonBodyRoute(context, (body) => services.validateProject(body), "validateProject"));
   app.post("/api/project/manifest", (context) => jsonBodyRoute(context, (body) => services.createManifest(body)));
   app.post("/api/project/build", (context) => jsonBodyRoute(context, (body) => services.buildProject(body)));

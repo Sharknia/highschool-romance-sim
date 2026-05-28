@@ -377,6 +377,108 @@ export interface PreviewPreflightDto {
   conditionEvaluationTrace: ConditionEvaluationTraceDto;
 }
 
+export type StudioInspectorPanelId = "scene" | "choices" | "stats" | "assets" | "validation";
+export type StudioRouteGraphEdgeKind = "route-entry" | "next" | "choice";
+export type StudioIssueDefaultAction = "focus" | "repair" | "preview-blocker" | "none";
+
+export interface StudioRouteGraphNodeDto {
+  id: string;
+  label: string;
+  summary: string;
+  routeId?: string;
+  entry: boolean;
+  reachable: boolean;
+  unreachable: boolean;
+  ending: boolean;
+  problemSeverity?: ValidationSeverity;
+}
+
+export interface StudioRouteGraphEdgeDto {
+  id: string;
+  kind: StudioRouteGraphEdgeKind;
+  sourceSceneId?: string;
+  targetSceneId: string;
+  choiceId?: string;
+  label?: string;
+  missingTarget: boolean;
+}
+
+export interface StudioRouteGraphViewDto {
+  routeId: string;
+  routeTitle: string;
+  entrySceneId: string;
+  selectedSceneId?: string;
+  nodes: StudioRouteGraphNodeDto[];
+  edges: StudioRouteGraphEdgeDto[];
+  markers: {
+    unreachableSceneIds: string[];
+    missingTargetSceneIds: string[];
+    problemSceneIds: string[];
+    problemChoiceIds: string[];
+    reachableEndingIds: string[];
+    uncoveredTerminalSceneIds: string[];
+  };
+}
+
+export interface StudioRouteSelectionDto {
+  routeId: string;
+  routeTitle: string;
+  entrySceneId: string;
+  selectedSceneId: string;
+  selectedProblemId?: string;
+  deepLinkQuery: {
+    route: string;
+    scene?: string;
+    panel?: StudioInspectorPanelId;
+    problem?: string;
+  };
+  availableRoutes: Array<{
+    routeId: string;
+    routeTitle: string;
+    entrySceneId: string;
+    heroineId: string;
+  }>;
+}
+
+export interface StudioIssueFocusDto {
+  issueId: string;
+  severity: ValidationSeverity;
+  issueCode: string;
+  path: string;
+  message: string;
+  routeId?: string;
+  sceneId?: string;
+  choiceId?: string;
+  field?: string;
+  inspectorPanel: StudioInspectorPanelId;
+  scriptBlockId?: string;
+  defaultAction: StudioIssueDefaultAction;
+  targetSceneId?: string;
+  repairActionIds: string[];
+}
+
+export interface StudioPreviewPreflightViewDto {
+  canRun: boolean;
+  disabledReason: string | null;
+  nextAction: string;
+  projectRevision: ProjectRevisionDto;
+  blockers: StudioIssueFocusDto[];
+  warnings: StudioIssueFocusDto[];
+  runtimeCapabilities: RuntimeCapabilitiesDto;
+  conditionRuntimeSupport: ConditionRuntimeSupportDto;
+  conditionEvaluationTrace: ConditionEvaluationTraceDto;
+}
+
+export interface StudioViewModelDto {
+  projectId: string;
+  projectRevision: ProjectRevisionDto;
+  routeSelection: StudioRouteSelectionDto;
+  routeGraph: StudioRouteGraphViewDto;
+  issues: StudioIssueFocusDto[];
+  previewPreflight: StudioPreviewPreflightViewDto;
+  generatedAt: string;
+}
+
 export interface VnMakerProjectSettings {
   defaultRouteId: string;
   outputFileName: string;
@@ -1645,6 +1747,277 @@ export function createPreviewPreflight(
     runtimeCapabilities: runtimeCapabilitiesForProject(project, { previewPreflightSuccess: canRun }),
     conditionRuntimeSupport,
     conditionEvaluationTrace: conditionEvaluationTraceForProject(project)
+  };
+}
+
+function studioIssueId(issue: Pick<ValidationIssue, "severity" | "code" | "path" | "message">): string {
+  return `${issue.severity}:${issue.code || "validation-issue"}:${issue.path}:${issue.message}`;
+}
+
+function fieldFromIssuePath(path: string): string | undefined {
+  const normalized = path.replace(/\]/g, "");
+  const parts = normalized.split(/[.[\]]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : undefined;
+}
+
+function sceneIdFromIssuePath(project: VnMakerProject, path: string): string | undefined {
+  const indexMatch = path.match(/^scenes(?:\.|\[)(\d+)(?:\]|\.)?/);
+  if (indexMatch) {
+    return project.scenes[Number(indexMatch[1])]?.id;
+  }
+  const idMatch = path.match(/^scenes(?:\.|\[)([A-Za-z0-9_-]+)(?:\]|\.)?/);
+  return idMatch ? idMatch[1] : undefined;
+}
+
+function choiceIdFromIssuePath(project: VnMakerProject, sceneId: string | undefined, path: string): string | undefined {
+  if (!sceneId) {
+    return undefined;
+  }
+  const scene = project.scenes.find((item) => item.id === sceneId);
+  const indexMatch = path.match(/choices(?:\.|\[)(\d+)(?:\]|\.)?/);
+  if (indexMatch) {
+    return scene?.choices[Number(indexMatch[1])]?.id;
+  }
+  const idMatch = path.match(/choices(?:\.|\[)([A-Za-z0-9_-]+)(?:\]|\.)?/);
+  return idMatch ? idMatch[1] : undefined;
+}
+
+function studioPanelForIssue(issue: Pick<ValidationIssue, "path" | "choiceIds"> & { code?: string }): StudioInspectorPanelId {
+  const path = issue.path || "";
+  if (issue.code === CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE || path.includes("condition") || path.includes("effects")) {
+    return "stats";
+  }
+  if (path.includes("choices") || (issue.choiceIds || []).length > 0) {
+    return "choices";
+  }
+  if (path.includes("background") || path.includes("cgAssetId") || path.includes("characters")) {
+    return "assets";
+  }
+  if (path.includes("ending") || path.includes("next")) {
+    return "choices";
+  }
+  return "scene";
+}
+
+function issueRepairActionIds(issue: ValidationIssue | PreflightBlockerDto): string[] {
+  return "repairActionIds" in issue ? [...issue.repairActionIds] : [];
+}
+
+function issueCode(issue: ValidationIssue | PreflightBlockerDto): string {
+  return ("issueCode" in issue ? issue.issueCode : issue.code) || "validation-issue";
+}
+
+export function createStudioIssueFocus(
+  project: VnMakerProject,
+  issue: ValidationIssue | PreflightBlockerDto,
+  options: { routeId?: string; severity?: ValidationSeverity } = {}
+): StudioIssueFocusDto {
+  const severity = "severity" in issue ? issue.severity : options.severity || "error";
+  const code = issueCode(issue);
+  const pathSceneId = sceneIdFromIssuePath(project, issue.path);
+  const sceneId = issue.sceneIds?.[0] || pathSceneId;
+  const focusSceneId = sceneId;
+  const choiceId = issue.choiceIds?.[0] || choiceIdFromIssuePath(project, focusSceneId, issue.path);
+  const repairActionIds = issueRepairActionIds(issue);
+  const defaultAction: StudioIssueDefaultAction = repairActionIds.length > 0
+    ? "repair"
+    : severity === "error"
+      ? "preview-blocker"
+      : code === "validation-issue"
+        ? "none"
+        : "focus";
+
+  return {
+    issueId: studioIssueId({ severity, code: code as ValidationIssueCode, path: issue.path, message: issue.message }),
+    severity,
+    issueCode: code,
+    path: issue.path,
+    message: issue.message,
+    ...(options.routeId ? { routeId: options.routeId } : {}),
+    ...(sceneId ? { sceneId } : {}),
+    ...(choiceId ? { choiceId } : {}),
+    ...(fieldFromIssuePath(issue.path) ? { field: fieldFromIssuePath(issue.path) } : {}),
+    inspectorPanel: studioPanelForIssue({ path: issue.path, code, choiceIds: issue.choiceIds }),
+    ...(sceneId ? { scriptBlockId: `scene:${sceneId}` } : {}),
+    defaultAction,
+    ...(issue.targetSceneId ? { targetSceneId: issue.targetSceneId } : {}),
+    repairActionIds
+  };
+}
+
+function selectedRouteForStudio(project: VnMakerProject, routeId?: string): VnMakerRoute | undefined {
+  return project.routes.find((route) => route.id === routeId)
+    || project.routes.find((route) => route.id === project.settings.defaultRouteId)
+    || project.routes[0];
+}
+
+function studioSceneSummary(scene: VnMakerScene): string {
+  const speaker = scene.speaker.trim();
+  const text = scene.text.trim().replace(/\s+/g, " ");
+  if (speaker && text) {
+    return `${speaker} · ${text.slice(0, 48)}${text.length > 48 ? "..." : ""}`;
+  }
+  if (text) {
+    return text.slice(0, 56) + (text.length > 56 ? "..." : "");
+  }
+  if (scene.choices.length > 0) {
+    return `선택지 ${scene.choices.length}개`;
+  }
+  if (scene.ending) {
+    return `엔딩: ${scene.ending.title}`;
+  }
+  return "요약 없음";
+}
+
+function issueProblemSeverity(issues: StudioIssueFocusDto[], sceneId: string): ValidationSeverity | undefined {
+  const matching = issues.filter((issue) => issue.sceneId === sceneId || issue.targetSceneId === sceneId);
+  if (matching.some((issue) => issue.severity === "error")) {
+    return "error";
+  }
+  return matching.some((issue) => issue.severity === "warning") ? "warning" : undefined;
+}
+
+function edgeTargetExists(project: VnMakerProject, targetSceneId: string): boolean {
+  return project.scenes.some((scene) => scene.id === targetSceneId);
+}
+
+export function createStudioRouteGraphView(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  options: { routeId?: string; selectedSceneId?: string } = {}
+): StudioRouteGraphViewDto {
+  const route = selectedRouteForStudio(project, options.routeId);
+  const routeId = route?.id || "";
+  const analysis = route ? analyzeRouteGraph(project, route.id) : null;
+  const issueFocuses = (validation.issues || []).map((issue) => createStudioIssueFocus(project, issue, { routeId }));
+  const reachableSceneIds = new Set(analysis?.reachableSceneIds || []);
+  const entrySceneId = route?.entrySceneId || "";
+  const nodes = project.scenes.map((scene) => {
+    const reachable = reachableSceneIds.has(scene.id);
+    const problemSeverity = issueProblemSeverity(issueFocuses, scene.id);
+    return {
+      id: scene.id,
+      label: scene.label || scene.id,
+      summary: studioSceneSummary(scene),
+      ...(routeId && reachable ? { routeId } : {}),
+      entry: entrySceneId === scene.id,
+      reachable,
+      unreachable: !reachable,
+      ending: Boolean(scene.ending),
+      ...(problemSeverity ? { problemSeverity } : {})
+    };
+  });
+  const edges: StudioRouteGraphEdgeDto[] = [];
+  if (entrySceneId) {
+    edges.push({
+      id: `route:${routeId}:entry:${entrySceneId}`,
+      kind: "route-entry",
+      targetSceneId: entrySceneId,
+      label: route?.title || routeId,
+      missingTarget: !edgeTargetExists(project, entrySceneId)
+    });
+  }
+  project.scenes.forEach((scene) => {
+    if (scene.next) {
+      edges.push({
+        id: `scene:${scene.id}:next:${scene.next}`,
+        kind: "next",
+        sourceSceneId: scene.id,
+        targetSceneId: scene.next,
+        label: "next",
+        missingTarget: !edgeTargetExists(project, scene.next)
+      });
+    }
+    scene.choices.forEach((choice) => {
+      edges.push({
+        id: `scene:${scene.id}:choice:${choice.id}:${choice.next}`,
+        kind: "choice",
+        sourceSceneId: scene.id,
+        targetSceneId: choice.next,
+        choiceId: choice.id,
+        label: choice.text,
+        missingTarget: !edgeTargetExists(project, choice.next)
+      });
+    });
+  });
+  const missingTargetSceneIds = uniqueValues([
+    ...(analysis?.missingTargets || []).map((target) => target.targetSceneId),
+    ...edges.filter((edge) => edge.missingTarget).map((edge) => edge.targetSceneId)
+  ]);
+  const problemSceneIds = uniqueValues(issueFocuses.flatMap((issue) => [issue.sceneId || "", issue.targetSceneId || ""]));
+  const problemChoiceIds = uniqueValues(issueFocuses.map((issue) => issue.choiceId || ""));
+
+  return {
+    routeId,
+    routeTitle: route?.title || routeId || "루트 없음",
+    entrySceneId,
+    ...(options.selectedSceneId ? { selectedSceneId: options.selectedSceneId } : {}),
+    nodes,
+    edges,
+    markers: {
+      unreachableSceneIds: analysis?.orphanSceneIds || project.scenes.filter((scene) => !reachableSceneIds.has(scene.id)).map((scene) => scene.id),
+      missingTargetSceneIds,
+      problemSceneIds,
+      problemChoiceIds,
+      reachableEndingIds: analysis?.reachableEndingIds || [],
+      uncoveredTerminalSceneIds: analysis?.uncoveredTerminalSceneIds || []
+    }
+  };
+}
+
+export function createStudioViewModel(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  previewPreflight: PreviewPreflightDto,
+  projectRevision: ProjectRevisionDto,
+  options: { routeId?: string; selectedSceneId?: string; selectedProblemId?: string; panel?: StudioInspectorPanelId } = {}
+): StudioViewModelDto {
+  const route = selectedRouteForStudio(project, options.routeId);
+  const routeId = route?.id || "";
+  const selectedSceneId = options.selectedSceneId
+    || route?.entrySceneId
+    || project.scenes[0]?.id
+    || "";
+  const issueFocuses = (validation.issues || []).map((issue) => createStudioIssueFocus(project, issue, { routeId }));
+  return {
+    projectId: project.id,
+    projectRevision,
+    routeSelection: {
+      routeId,
+      routeTitle: route?.title || routeId || "루트 없음",
+      entrySceneId: route?.entrySceneId || "",
+      selectedSceneId,
+      ...(options.selectedProblemId ? { selectedProblemId: options.selectedProblemId } : {}),
+      deepLinkQuery: {
+        route: routeId,
+        ...(selectedSceneId ? { scene: selectedSceneId } : {}),
+        ...(options.panel ? { panel: options.panel } : {}),
+        ...(options.selectedProblemId ? { problem: options.selectedProblemId } : {})
+      },
+      availableRoutes: project.routes.map((item) => ({
+        routeId: item.id,
+        routeTitle: item.title,
+        entrySceneId: item.entrySceneId,
+        heroineId: item.heroineId
+      }))
+    },
+    routeGraph: createStudioRouteGraphView(project, validation, {
+      routeId,
+      selectedSceneId
+    }),
+    issues: issueFocuses,
+    previewPreflight: {
+      canRun: previewPreflight.canRun,
+      disabledReason: previewPreflight.disabledReason,
+      nextAction: previewPreflight.nextAction,
+      projectRevision: previewPreflight.projectRevision,
+      blockers: previewPreflight.blockers.map((issue) => createStudioIssueFocus(project, issue, { routeId, severity: "error" })),
+      warnings: previewPreflight.warnings.map((issue) => createStudioIssueFocus(project, issue, { routeId, severity: "warning" })),
+      runtimeCapabilities: previewPreflight.runtimeCapabilities,
+      conditionRuntimeSupport: previewPreflight.conditionRuntimeSupport,
+      conditionEvaluationTrace: previewPreflight.conditionEvaluationTrace
+    },
+    generatedAt: projectRevision.createdAt
   };
 }
 
