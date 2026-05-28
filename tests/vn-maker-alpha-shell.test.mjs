@@ -219,6 +219,9 @@ const projectDetailViewSource = readText(projectDetailViewPath);
 const studioWorkspaceSource = readText(studioWorkspacePath);
 const projectPageTypesSource = readText("apps/web/src/client/pages/projects/projectPageTypes.ts");
 const projectDisplayTextSource = readText("apps/web/src/client/pages/projects/projectDisplayText.ts");
+const projectRepairFlowPath = "apps/web/src/client/pages/projects/projectRepairFlow.ts";
+assert.ok(existsSync(join(root, projectRepairFlowPath)), "ProjectDetailView와 StudioWorkspace가 공유하는 repair flow helper가 있어야 합니다.");
+const projectRepairFlowSource = readText(projectRepairFlowPath);
 const projectNewPageSource = readText(projectNewPagePath);
 const projectApiSource = readText(projectApiPath);
 const engineCoreSource = readText("packages/engine-core/src/index.ts");
@@ -682,7 +685,6 @@ assert.doesNotMatch(studioWorkspaceSource, /scene:\s*draftScene/, "Studio generi
 assert.doesNotMatch(studioWorkspaceSource, /postJson\("\/api\/project\/scenes\/link"/, "Studio routing 저장은 inspector 전용 link API로 우회하면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /postJson\("\/api\/project\/scenes\/ending"/, "Studio ending 저장은 inspector 전용 ending API로 우회하면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /static_tutorial/, "문제 row focus는 정적 튜토리얼 사용으로 기록하면 안 됩니다.");
-assert.doesNotMatch(studioWorkspaceSource, /\/api\/project\/repair\/apply/, "Studio #113 수리 후보 UI는 repair apply endpoint를 호출하면 안 됩니다.");
 assert.match(studioWorkspaceSource, /problem:\s*row\.key/, "문제 row click은 ?problem query를 canonical Studio query에 기록해야 합니다.");
 assert.match(studioWorkspaceSource, /focusProblemTarget\(pending\.focus,\s*pending\.panel\)/, "문제 row click은 렌더 완료 후 DTO focus target으로 실제 필드를 focus해야 합니다.");
 assert.match(studioWorkspaceSource, /handleProblemFocus\(row,\s*action\)/, "수리 후보 chip click은 클릭한 action ID를 UX event에 기록할 수 있어야 합니다.");
@@ -690,6 +692,49 @@ assert.match(studioWorkspaceSource, /if \(layout\.inspectorCollapsed\)[\s\S]{0,1
 assert.match(studioWorkspaceSource, /clearWhenAbsent[\s\S]{0,120}setLocalStudioIssues\(\[\]\)/, "Studio DTO가 없는 validate 응답은 이전 StudioIssueFocus를 stale 상태로 남기면 안 됩니다.");
 assert.match(studioWorkspaceSource, /clearWhenAbsent[\s\S]{0,220}setLocalProblemActions\(\[\]\)/, "Studio DTO가 없는 validate 응답은 이전 problemActions를 stale 상태로 남기면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /selectScene\(sceneId\);[\s\S]{0,120}setPanel\(nextPanel\);/, "문제 row focus는 stale searchParams 기반 scene/panel 연속 업데이트로 query를 덮으면 안 됩니다.");
+[
+  "repairActionKey",
+  "repairRequestBody",
+  "repairResultMessage",
+  "activeRepairHistoryEntry",
+  "repairActionMetaText",
+  "repairInputDisplayLabel"
+].forEach((exportName) => {
+  assert.match(projectRepairFlowSource, new RegExp(`export function ${exportName}\\b`), `projectRepairFlow는 ${exportName} helper를 export해야 합니다.`);
+  assert.match(projectDetailViewSource, new RegExp(`import \\{[\\s\\S]*${exportName}`), `ProjectDetailView는 ${exportName} helper를 공유 모듈에서 import해야 합니다.`);
+  assert.match(studioWorkspaceSource, new RegExp(`import \\{[\\s\\S]*${exportName}`), `StudioWorkspace는 ${exportName} helper를 공유 모듈에서 import해야 합니다.`);
+});
+[
+  "ProjectRepairPreview",
+  "ProjectRepairHistoryEntry",
+  "localRepairActions",
+  "localPreflightIssues",
+  "studioRepairPreview",
+  "studioRepairHistoryEntry",
+  "studioRepairInputs",
+  "studioRepairStatus",
+  "previewStudioRepairAction",
+  "applyStudioRepairPreview",
+  "undoStudioRepair",
+  "/api/project/repair/preview",
+  "/api/project/repair/apply",
+  "/api/project/repair/undo",
+  'eventName: "repair_action_used"',
+  'eventName: "repaired"',
+  'eventName: "undo_used"',
+  "repairRequestBody(",
+  "renderStudioRepairPanel",
+  "actual project mutation",
+  "studio-repair-panel",
+  "studio-repair-diff-list"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace repair UX에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.match(studioWorkspaceSource, /setLocalPreflightIssues\(preflightToIssues\(result\.previewPreflight\)\)/, "repair apply/undo 결과의 최신 previewPreflight가 Studio 로컬 문제 목록을 갱신해야 합니다.");
+assert.doesNotMatch(studioWorkspaceSource, /const preflightIssues = useMemo\(\(\) => preflightToIssues\(previewPreflight\)/, "repair 적용 직후 stale previewPreflight prop을 다시 병합하는 preflightIssues 메모를 두면 안 됩니다.");
+assert.doesNotMatch(studioWorkspaceSource, /interface StudioRepair|type StudioRepair/, "StudioWorkspace는 별도 Studio repair DTO를 만들지 않고 공통 ProjectRepair DTO를 사용해야 합니다.");
+assert.doesNotMatch(projectDetailViewSource, /function repairActionKey|function repairRequestBody|function repairResultMessage|function activeRepairHistoryEntry/, "ProjectDetailView는 repair helper 구현을 로컬에 중복 보유하면 안 됩니다.");
 assert.match(projectDetailViewSource, /if \(activeTab === "studio"\)[\s\S]{0,220}return studioWorkspace/, "Studio 탭은 미지원 viewport에서 상세 shell chrome을 노출하지 않도록 workspace를 상위에서 바로 반환해야 합니다.");
 assert.doesNotMatch(studioWorkspaceSource, /conditionDraft|effectsDraft|setCondition|setEffects/, "조건/효과는 #105 전까지 프론트 임시 canonical 편집 모델을 만들면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /analyzeRouteGraph|routeGraphIssueToValidationIssue/, "StudioWorkspace는 route graph/domain 판단을 재구현하지 말고 API DTO를 표시해야 합니다.");

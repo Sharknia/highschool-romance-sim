@@ -2423,10 +2423,21 @@ a {
   padding-left: 8px;
 }
 
+.studio-repair-action-group {
+  min-width: min(100%, 280px);
+  width: min(100%, 320px);
+  max-width: 100%;
+  display: grid;
+  gap: 6px;
+}
+
 .studio-problem-action-chip {
   min-height: 30px;
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   border: 1px solid #6b5935;
@@ -2443,6 +2454,12 @@ a {
   background: #2a1414;
 }
 
+.studio-problem-action-chip.preview-ready {
+  border-color: var(--color-primary);
+  color: #dffbf7;
+  background: #102621;
+}
+
 .studio-problem-action-chip:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -2450,6 +2467,68 @@ a {
 
 .studio-problem-action-chip small {
   color: var(--color-text-muted);
+}
+
+.studio-problem-action-chip span,
+.studio-problem-action-chip small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-repair-panel {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--color-border);
+  padding: 10px;
+  background: var(--color-surface);
+  overflow: auto;
+}
+
+.studio-repair-panel.compact {
+  max-height: 360px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.studio-repair-status {
+  margin: 0;
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.studio-repair-inputs {
+  display: grid;
+  gap: 6px;
+}
+
+.studio-repair-inputs label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.studio-repair-diff-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.studio-repair-diff-list li {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--color-surface-muted);
+}
+
+.studio-repair-diff-list span,
+.studio-repair-diff-list small {
+  overflow-wrap: anywhere;
 }
 
 .asset-job-list {

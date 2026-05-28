@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Eye,
+  GitCompareArrows,
   GitBranch,
   ListChecks,
   PanelLeftClose,
@@ -13,7 +14,8 @@ import {
   RefreshCw,
   Save,
   Search,
-  Settings
+  Settings,
+  Undo2
 } from "lucide-react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +28,9 @@ import type {
   ProjectIssue,
   ProjectPreviewPreflight,
   ProjectRepairAction,
+  ProjectRepairActionRequiredInput,
+  ProjectRepairHistoryEntry,
+  ProjectRepairPreview,
   ProjectRevision,
   StudioIssueFocus,
   StudioProblemAction,
@@ -34,6 +39,16 @@ import type {
   TestPromptFixture,
   UXDecisionEventLog
 } from "./projectPageTypes";
+import { repairDiffOperationLabel, repairDiffValueText } from "./projectDisplayText";
+import {
+  activeRepairHistoryEntry,
+  repairActionKey,
+  repairActionMetaText,
+  repairInputDisplayLabel,
+  repairInputValue,
+  repairRequestBody,
+  repairResultMessage
+} from "./projectRepairFlow";
 
 export const STUDIO_MIN_WIDTH = 1280;
 export const STUDIO_MIN_HEIGHT = 720;
@@ -615,9 +630,17 @@ export function StudioWorkspace({
   const [phase0Report, setPhase0Report] = useState<Phase0DecisionReport | null>(null);
   const [phase0Status, setPhase0Status] = useState("Phase 0 decision report 생성 전입니다.");
   const [phase0Busy, setPhase0Busy] = useState(false);
-  const [localIssues, setLocalIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
+  const [localIssues, setLocalIssues] = useState<ProjectIssue[]>([]);
+  const [localPreflightIssues, setLocalPreflightIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
   const [localStudioIssues, setLocalStudioIssues] = useState<StudioIssueFocus[]>([]);
   const [localProblemActions, setLocalProblemActions] = useState<StudioProblemAction[]>([]);
+  const [localRepairActions, setLocalRepairActions] = useState<ProjectRepairAction[]>(repairActions);
+  const [studioRepairPreview, setStudioRepairPreview] = useState<ProjectRepairPreview | null>(null);
+  const [studioRepairHistoryEntry, setStudioRepairHistoryEntry] = useState<ProjectRepairHistoryEntry | null>(null);
+  const [studioRepairHistory, setStudioRepairHistory] = useState<ProjectRepairHistoryEntry[]>([]);
+  const [studioRepairInputs, setStudioRepairInputs] = useState<Record<string, Record<string, string>>>({});
+  const [studioRepairStatus, setStudioRepairStatus] = useState("수리 후보를 선택해 diff를 확인하세요.");
+  const [studioRepairBusy, setStudioRepairBusy] = useState(false);
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const [routeSearchTerm, setRouteSearchTerm] = useState("");
   const [focusedProblemId, setFocusedProblemId] = useState("");
@@ -654,8 +677,7 @@ export function StudioWorkspace({
   const contentDirty = useMemo(() => JSON.stringify(sceneContentSnapshot(draftScene)) !== JSON.stringify(sceneContentSnapshot(draftBaseScene)), [draftSceneJson, draftBaseSceneJson]);
   const routingDirty = useMemo(() => JSON.stringify(sceneRoutingSnapshot(draftScene)) !== JSON.stringify(sceneRoutingSnapshot(draftBaseScene)), [draftSceneJson, draftBaseSceneJson]);
   const dirty = contentDirty || routingDirty;
-  const preflightIssues = useMemo(() => preflightToIssues(previewPreflight), [previewPreflight]);
-  const fallbackIssues = useMemo(() => mergedStudioIssues(localIssues, preflightIssues), [localIssues, preflightIssues]);
+  const fallbackIssues = useMemo(() => mergedStudioIssues(localIssues, localPreflightIssues), [localIssues, localPreflightIssues]);
   const problemRows = useMemo(() => buildStudioProblemRows(localStudioIssues, fallbackIssues, localProblemActions), [fallbackIssues, localProblemActions, localStudioIssues]);
   const visibleIssues = useMemo(() => problemRows.map((row) => row.issue), [problemRows]);
   const conditionRuntimeSupport = previewPreflight?.conditionRuntimeSupport || previewPreflight?.runtimeCapabilities?.conditionRuntimeSupport || null;
@@ -665,6 +687,7 @@ export function StudioWorkspace({
     : "조건 판정 상태 확인 전";
   const problemCount = visibleIssues.length;
   const errorCount = visibleIssues.filter((issue) => issue.severity === "error").length;
+  const undoStudioRepairEntry = activeRepairHistoryEntry(studioRepairHistoryEntry);
   const previewDisabledReason = errorCount > 0
     ? `문제 ${errorCount}건을 먼저 해결해야 합니다.`
     : previewPreflight?.canRun === false
@@ -758,6 +781,14 @@ export function StudioWorkspace({
     } else if (options.clearWhenAbsent) {
       setLocalProblemActions([]);
     }
+    if (Array.isArray(result.repairActions)) {
+      setLocalRepairActions(result.repairActions);
+    }
+    if (result.previewPreflight) {
+      setLocalPreflightIssues(preflightToIssues(result.previewPreflight));
+    } else if (options.clearWhenAbsent) {
+      setLocalPreflightIssues([]);
+    }
   }
 
   function focusProblemTarget(focus: StudioIssueFocus | undefined, panel: StudioPanelId): void {
@@ -784,6 +815,10 @@ export function StudioWorkspace({
     }
     recordUXDecisionEvent({ eventName: "started", outcome: "started", inputMode: "manual" });
   }, [projectDirectory, projectId]);
+
+  useEffect(() => {
+    setLocalRepairActions(repairActions);
+  }, [repairActions]);
 
   useEffect(() => {
     if (!projectDirectory || !activeRoute?.id || dirty || saveState === "saving" || unsupported) {
@@ -821,7 +856,7 @@ export function StudioWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [activeRoute?.id, dirty, projectDirectory, saveState, selectedProblemQuery, selectedScene?.id, unsupported]);
+  }, [activeRoute?.id, dirty, localRevision?.revision, projectDirectory, saveState, selectedProblemQuery, selectedScene?.id, unsupported]);
 
   useEffect(() => {
     const pending = pendingProblemFocusRef.current;
@@ -844,7 +879,7 @@ export function StudioWorkspace({
   }, [draftScene?.id, focusRequestTick, layout.inspectorCollapsed, selectedPanel, selectedScene?.id]);
 
   useEffect(() => {
-    setLocalIssues(preflightToIssues(previewPreflight));
+    setLocalPreflightIssues(preflightToIssues(previewPreflight));
   }, [previewPreflight]);
 
   useEffect(() => {
@@ -1581,6 +1616,199 @@ export function StudioWorkspace({
     setStatusText(ending ? "엔딩 변경이 초안에 반영되었습니다." : "엔딩 해제가 초안에 반영되었습니다.");
   }
 
+  function repairActionMatchesProblemAction(action: ProjectRepairAction, problemAction: StudioProblemAction): boolean {
+    return action.actionId === problemAction.actionId
+      && action.issueCode === problemAction.issueCode
+      && action.targetPath === problemAction.targetPath;
+  }
+
+  function repairActionsForRow(row: StudioProblemRow): ProjectRepairAction[] {
+    const actions = localRepairActions.filter((action) =>
+      row.actions.some((problemAction) => repairActionMatchesProblemAction(action, problemAction))
+      || (action.issueCode === row.issue.code && action.targetPath === row.issue.path)
+    );
+    const seen = new Set<string>();
+    return actions.filter((action) => {
+      const key = repairActionKey(action);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function studioRepairActionInputValue(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput): string {
+    return repairInputValue(action, input, studioRepairInputs);
+  }
+
+  function updateStudioRepairInput(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput, value: string): void {
+    if (!input.name) {
+      return;
+    }
+    setStudioRepairInputs((current) => ({
+      ...current,
+      [repairActionKey(action)]: {
+        ...(current[repairActionKey(action)] || {}),
+        [input.name as string]: value
+      }
+    }));
+    setStudioRepairPreview(null);
+    setStudioRepairStatus("입력이 변경되었습니다. 수리 diff를 다시 확인하세요.");
+  }
+
+  function applyStudioRepairResultState(result: ProjectApiResult, status: string): void {
+    const nextRevision = revisionFromResult(result);
+    if (nextRevision) {
+      setLocalRevision(nextRevision);
+    }
+    applyStudioDtoState(result, { clearWhenAbsent: true });
+    setLocalIssues(resultIssues(result));
+    setStudioRepairPreview(null);
+    setStudioRepairHistoryEntry(result.repairHistoryEntry || null);
+    setStudioRepairHistory(result.repairHistory || []);
+    onProjectResult(result);
+    const currentSceneId = selectedScene?.id || draftScene?.id || "";
+    const nextScene = result.project?.scenes?.find((scene) => scene.id === currentSceneId) || null;
+    if (nextScene) {
+      setDraftScene(cloneScene(nextScene));
+      setDraftBaseScene(cloneScene(nextScene));
+    }
+    updateQuery({
+      panel: selectedPanel,
+      problem: selectedProblemQuery,
+      route: activeRoute?.id || "",
+      scene: currentSceneId
+    }, true);
+    setSaveState("saved");
+    setStatusText(status);
+    setStudioRepairStatus(status);
+  }
+
+  async function previewStudioRepairAction(action: ProjectRepairAction): Promise<void> {
+    if (!projectDirectory) {
+      setStudioRepairStatus("프로젝트 저장 위치가 필요합니다.");
+      return;
+    }
+    setStudioRepairBusy(true);
+    setStudioRepairStatus("수리 diff를 계산하는 중입니다.");
+    recordUXDecisionEvent({
+      eventName: "repair_action_used",
+      issueCode: action.issueCode,
+      repairActionId: action.actionId,
+      outcome: "used"
+    });
+    try {
+      const result = await postJson("/api/project/repair/preview", repairRequestBody(action, projectDirectory, studioRepairInputs, localRevision));
+      if (isApiFailure(result) || !result.repairPreview) {
+        setStudioRepairPreview(null);
+        applyStudioDtoState(result);
+        setStudioRepairStatus(repairResultMessage(result, "수리 diff를 계산하지 못했습니다."));
+        return;
+      }
+      const nextRevision = revisionFromResult(result);
+      if (nextRevision) {
+        setLocalRevision(nextRevision);
+      }
+      applyStudioDtoState(result);
+      setLocalIssues(resultIssues(result));
+      setStudioRepairPreview(result.repairPreview);
+      recordUXDecisionEvent({
+        eventName: "repair_action_used",
+        correlationId: result.correlationId,
+        issueCode: result.repairPreview.issueCode,
+        repairActionId: result.repairPreview.actionId,
+        outcome: "success"
+      });
+      setStudioRepairStatus("수리 diff를 확인한 뒤 변경 적용을 누르세요. actual project mutation 경로입니다.");
+    } catch (error) {
+      setStudioRepairPreview(null);
+      setStudioRepairStatus(`수리 diff 계산 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setStudioRepairBusy(false);
+    }
+  }
+
+  async function applyStudioRepairPreview(): Promise<void> {
+    if (!studioRepairPreview?.repairAction || !studioRepairPreview.beforeRevision || !studioRepairPreview.confirmToken) {
+      setStudioRepairStatus("먼저 수리 diff를 확인해야 합니다.");
+      return;
+    }
+    const destructive = (studioRepairPreview.destructiveWarnings || []).length > 0 || studioRepairPreview.repairAction.destructive;
+    if (destructive && !window.confirm("표시된 diff대로 수리 적용할까요?")) {
+      setStudioRepairStatus("수리 적용을 취소했습니다.");
+      return;
+    }
+    setStudioRepairBusy(true);
+    setStudioRepairStatus("수리를 적용하고 검증을 다시 계산하는 중입니다.");
+    try {
+      const result = await postJson("/api/project/repair/apply", {
+        ...repairRequestBody(studioRepairPreview.repairAction, projectDirectory, studioRepairInputs, studioRepairPreview.beforeRevision),
+        confirmToken: studioRepairPreview.confirmToken
+      });
+      if (isApiFailure(result)) {
+        setStudioRepairPreview(null);
+        applyStudioDtoState(result);
+        setStudioRepairStatus(`${repairResultMessage(result, "수리를 적용하지 못했습니다.")} 수리 diff를 다시 확인하세요.`);
+        return;
+      }
+      recordUXDecisionEvent({
+        eventName: "repaired",
+        correlationId: result.correlationId,
+        issueCode: result.repairHistoryEntry?.issueCode || studioRepairPreview.repairAction.issueCode,
+        issueCodesBefore: result.repairHistoryEntry?.issueCode ? [result.repairHistoryEntry.issueCode] : [],
+        issueCodesAfter: (result.previewPreflight?.blockers || []).map((blocker) => blocker.issueCode || blocker.path || "unknown"),
+        repairActionId: result.repairHistoryEntry?.actionId || studioRepairPreview.repairAction.actionId,
+        revisionBefore: result.previousRevision || studioRepairPreview.beforeRevision,
+        revisionAfter: result.projectRevision,
+        outcome: "success",
+        preflightResult: result.previewPreflight || undefined
+      });
+      applyStudioRepairResultState(result, "수리 적용 완료. 마지막 수리는 되돌릴 수 있습니다.");
+    } catch (error) {
+      setStudioRepairPreview(null);
+      setStudioRepairStatus(`수리 적용 실패: ${error instanceof Error ? error.message : String(error)} 수리 diff를 다시 확인하세요.`);
+    } finally {
+      setStudioRepairBusy(false);
+    }
+  }
+
+  async function undoStudioRepair(): Promise<void> {
+    if (!undoStudioRepairEntry?.id) {
+      setStudioRepairStatus("되돌릴 수리 이력이 없습니다.");
+      return;
+    }
+    if (!window.confirm("마지막 수리를 되돌리고 검증을 다시 계산할까요?")) {
+      setStudioRepairStatus("수리 되돌리기를 취소했습니다.");
+      return;
+    }
+    setStudioRepairBusy(true);
+    setStudioRepairStatus("마지막 수리를 되돌리고 검증을 다시 계산하는 중입니다.");
+    try {
+      const result = await postJson("/api/project/repair/undo", {
+        projectDirectory,
+        repairHistoryId: undoStudioRepairEntry.id
+      });
+      if (isApiFailure(result)) {
+        setStudioRepairStatus(repairResultMessage(result, "마지막 수리를 되돌리지 못했습니다."));
+        return;
+      }
+      recordUXDecisionEvent({
+        eventName: "undo_used",
+        correlationId: result.correlationId,
+        issueCode: result.repairHistoryEntry?.issueCode || undoStudioRepairEntry.issueCode,
+        repairActionId: result.repairHistoryEntry?.actionId || undoStudioRepairEntry.actionId,
+        revisionBefore: result.previousRevision,
+        revisionAfter: result.projectRevision,
+        outcome: "undone",
+        preflightResult: result.previewPreflight || undefined
+      });
+      applyStudioRepairResultState(result, "마지막 수리를 되돌렸습니다. 검증 결과와 사전 점검을 다시 확인하세요.");
+    } catch (error) {
+      setStudioRepairStatus(`수리 되돌리기 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setStudioRepairBusy(false);
+    }
+  }
+
   function handleProblemFocus(row: StudioProblemRow, selectedAction?: StudioProblemAction): void {
     const issue = row.issue;
     const focus = row.focus;
@@ -1625,34 +1853,122 @@ export function StudioWorkspace({
 
   function renderProblemRow(row: StudioProblemRow, compact = false) {
     const selected = row.key === selectedProblemQuery || row.key === focusedProblemId;
+    const fullRepairActions = repairActionsForRow(row);
     return (
       <li className={`studio-problem-row ${selected ? "selected" : ""}`} data-problem-id={row.key} key={row.key}>
         <button className="studio-problem-main" onClick={() => handleProblemFocus(row)} type="button">
           <StatusChip tone={issueTone(row.issue)}>{row.issue.severity || "info"}</StatusChip>
           <span>{issueText(row.issue)}</span>
-          <StatusChip tone={row.actions.length > 0 ? "warning" : "neutral"}>{row.defaultActionLabel}</StatusChip>
+          <StatusChip tone={fullRepairActions.length > 0 || row.actions.length > 0 ? "warning" : "neutral"}>{row.defaultActionLabel}</StatusChip>
         </button>
-        {!compact && row.actions.length > 0 ? (
+        {!compact && (fullRepairActions.length > 0 || row.actions.length > 0) ? (
           <div className="studio-problem-actions" aria-label="수리 후보">
-            {row.actions.map((action) => (
-              <button
-                className={`studio-problem-action-chip ${action.destructive ? "destructive" : ""}`}
-                data-repair-candidate-action={action.actionId || "repair-action"}
-                disabled={Boolean(action.disabledReason)}
-                key={`${row.key}-${action.actionId || action.label}`}
-                onClick={() => handleProblemFocus(row, action)}
-                title={action.disabledReason || action.label || action.actionId || "수리 후보"}
-                type="button"
-              >
-                <span>{action.label || action.actionId || "수리 후보"}</span>
-                {action.requiresPreflight ? <small>프리플라이트 필요</small> : null}
-                {action.destructive ? <small>확인 필요</small> : null}
-                {action.disabledReason ? <small>{action.disabledReason}</small> : null}
-              </button>
-            ))}
+            {fullRepairActions.length > 0 ? fullRepairActions.map((action) => (
+              <div className="studio-repair-action-group" key={`${row.key}-${repairActionKey(action)}`}>
+                <button
+                  className={`studio-problem-action-chip preview-ready ${action.destructive ? "destructive" : ""}`}
+                  data-repair-candidate-action={action.actionId || "repair-action"}
+                  disabled={studioRepairBusy || Boolean(action.disabledReason)}
+                  onClick={() => void previewStudioRepairAction(action)}
+                  title={action.disabledReason || action.label || action.actionId || "수리 후보"}
+                  type="button"
+                >
+                  <GitCompareArrows aria-hidden="true" size={14} />
+                  <span>{action.label || action.actionId || "수리 후보"} diff</span>
+                  <small>{repairActionMetaText(action)}</small>
+                  <small>actual project mutation</small>
+                  {action.destructive ? <small>확인 필요</small> : null}
+                  {action.disabledReason ? <small>{action.disabledReason}</small> : null}
+                </button>
+                {action.requiredInputs?.length ? (
+                  <div className="studio-repair-inputs">
+                    {action.requiredInputs.map((input) => (
+                      <label key={`${repairActionKey(action)}-${input.name || input.label}`}>
+                        <span>{repairInputDisplayLabel(input)}</span>
+                        {input.inputType === "select" ? (
+                          <select disabled={studioRepairBusy || Boolean(action.disabledReason)} onChange={(event) => updateStudioRepairInput(action, input, event.target.value)} value={studioRepairActionInputValue(action, input)}>
+                            {(input.options || []).map((option) => (
+                              <option key={option.value || option.label} value={option.value || ""}>{option.label || option.value || "선택"}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input disabled={studioRepairBusy || Boolean(action.disabledReason)} onChange={(event) => updateStudioRepairInput(action, input, event.target.value)} placeholder={repairInputDisplayLabel(input)} value={studioRepairActionInputValue(action, input)} />
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )) : row.actions.map((action) => (
+                <button
+                  className={`studio-problem-action-chip ${action.destructive ? "destructive" : ""}`}
+                  data-repair-candidate-action={action.actionId || "repair-action"}
+                  disabled={Boolean(action.disabledReason)}
+                  key={`${row.key}-${action.actionId || action.label}`}
+                  onClick={() => handleProblemFocus(row, action)}
+                  title={action.disabledReason || action.label || action.actionId || "수리 후보"}
+                  type="button"
+                >
+                  <span>{action.label || action.actionId || "수리 후보"}</span>
+                  {action.requiresPreflight ? <small>프리플라이트 필요</small> : null}
+                  {action.destructive ? <small>확인 필요</small> : null}
+                  {action.disabledReason ? <small>{action.disabledReason}</small> : null}
+                </button>
+              ))}
           </div>
         ) : null}
       </li>
+    );
+  }
+
+  function renderStudioRepairPanel(compact = false) {
+    if (!studioRepairPreview && !undoStudioRepairEntry && !studioRepairStatus) {
+      return null;
+    }
+    return (
+      <div className={`studio-repair-panel ${compact ? "compact" : ""}`}>
+        <p aria-live="polite" className="studio-repair-status">{studioRepairStatus}</p>
+        <small>actual project mutation 경로로 기존 repair preview/apply/undo contract를 사용합니다.</small>
+        {studioRepairPreview ? (
+          <>
+            <dl className="summary-list">
+              <div><dt>수리 액션</dt><dd>{studioRepairPreview.repairAction?.label || studioRepairPreview.actionId || "수리 후보"}</dd></div>
+              <div><dt>대상</dt><dd>{studioRepairPreview.targetPath || "대상 확인 필요"}</dd></div>
+              <div><dt>기준 revision</dt><dd>{studioRepairPreview.beforeRevision?.revision || "revision 확인 필요"}</dd></div>
+              <div><dt>확인 방식</dt><dd>{studioRepairPreview.repairAction?.requiresConfirmation || studioRepairPreview.destructiveWarnings?.length ? "diff 확인 후 적용" : "즉시 적용 가능"}</dd></div>
+            </dl>
+            <p className="page-muted">{studioRepairPreview.expectedAfterSummary || "표시된 변경 사항을 확인한 뒤 적용합니다."}</p>
+            {studioRepairPreview.destructiveWarnings?.length ? (
+              <ul className="compact-list">
+                {studioRepairPreview.destructiveWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+              </ul>
+            ) : null}
+            <ul className="studio-repair-diff-list">
+              {(studioRepairPreview.diff || []).map((entry, index) => (
+                <li key={`${entry.path || "diff"}-${entry.op || "op"}-${index}`}>
+                  <strong>{repairDiffOperationLabel(entry.op)} · {entry.path || "경로 확인 필요"}</strong>
+                  <span>{entry.humanLabel || "프로젝트 값을 변경합니다."}</span>
+                  <small>이전 {repairDiffValueText(entry.before)} → 이후 {repairDiffValueText(entry.after)}</small>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : undoStudioRepairEntry ? (
+          <p className="page-muted">마지막 수리 적용 이력이 있습니다. 필요하면 되돌릴 수 있습니다.</p>
+        ) : null}
+        <div className="button-row">
+          {studioRepairPreview ? (
+            <Button disabled={studioRepairBusy} icon={<CheckCircle2 size={16} />} onClick={() => void applyStudioRepairPreview()} variant={studioRepairPreview.destructiveWarnings?.length || studioRepairPreview.repairAction?.destructive ? "danger" : "primary"}>
+              변경 적용
+            </Button>
+          ) : null}
+          <Button disabled={studioRepairBusy || !undoStudioRepairEntry?.id} icon={<Undo2 size={16} />} onClick={() => void undoStudioRepair()} variant="ghost">
+            마지막 수리 되돌리기
+          </Button>
+        </div>
+        {studioRepairHistoryEntry?.appliedAt ? <small>마지막 적용 시각 {studioRepairHistoryEntry.appliedAt}</small> : null}
+        {studioRepairHistory.length > 0 ? <small>수리 이력 {studioRepairHistory.length}건</small> : null}
+      </div>
     );
   }
 
@@ -2069,7 +2385,7 @@ export function StudioWorkspace({
                             </li>
                           );
                         })}
-                        {repairActions.map((action, index) => (
+                        {localRepairActions.map((action, index) => (
                           <li key={`${action.actionId || "action"}-${index}`}>
                             <strong>{action.label || action.actionId || "수리 후보"}</strong>
                             <span>{action.disabledReason || action.description || action.targetPath || "검토 가능"}</span>
@@ -2141,6 +2457,7 @@ export function StudioWorkspace({
                       <ul className="studio-problem-list compact">
                         {problemRows.map((row) => renderProblemRow(row, true))}
                       </ul>
+                      {renderStudioRepairPanel(true)}
                       <h3>생성 결과 로그</h3>
                       <label className="field-row">
                         <span>고정 프롬프트</span>
@@ -2209,13 +2526,16 @@ export function StudioWorkspace({
           </div>
         </div>
         {layout.problemsCollapsed ? null : (
-          problemRows.length > 0 ? (
-            <ul className="studio-problem-list">
-              {problemRows.map((row) => renderProblemRow(row))}
-            </ul>
-          ) : (
-            <p className="page-muted">문제 없음. 저장 후 검증을 다시 실행하면 최신 상태가 표시됩니다.</p>
-          )
+          <>
+            {problemRows.length > 0 ? (
+              <ul className="studio-problem-list">
+                {problemRows.map((row) => renderProblemRow(row))}
+              </ul>
+            ) : (
+              <p className="page-muted">문제 없음. 저장 후 검증을 다시 실행하면 최신 상태가 표시됩니다.</p>
+            )}
+            {renderStudioRepairPanel()}
+          </>
         )}
       </section>
     </section>
