@@ -1,6 +1,6 @@
 import { ArrowRight, CheckCircle2, Copy, ExternalLink, GitCompareArrows, Heart, Image as ImageIcon, Play, RefreshCw, Settings, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { AssetStatePanel, Button, DiagnosticDrawer, EmptyState, ReadinessPanel, StatusChip, TabList, TabStatusList } from "../../components/ui";
 import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePageTypes";
@@ -497,6 +497,7 @@ export function ProjectDetailView({
 }: ProjectDetailViewProps) {
   const { postAuthedJson } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [heroines, setHeroines] = useState<HeroineDraft[]>([]);
   const [selectedHeroineId, setSelectedHeroineId] = useState("");
   const [heroineStatus, setHeroineStatus] = useState("히로인 라이브러리를 불러오는 중입니다.");
@@ -534,6 +535,7 @@ export function ProjectDetailView({
   const [repairStatus, setRepairStatus] = useState("수리 후보를 선택해 diff를 확인하세요.");
   const [repairBusy, setRepairBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSceneQuery = searchParams.get("scene") || "";
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
   const [exportResult, setExportResult] = useState<ProjectExportResult | null>(null);
@@ -569,6 +571,10 @@ export function ProjectDetailView({
     const routeEntryScene = projectScenes.find((scene) => scene.id === currentRoute?.entrySceneId);
     return projectScenes.find((scene) => scene.id === selectedSceneId) || routeEntryScene || projectScenes[0] || null;
   }, [currentRoute?.entrySceneId, projectScenes, selectedSceneId]);
+  const previewSceneFromQuery = useMemo(() => {
+    if (!previewSceneQuery) return null;
+    return projectScenes.find((scene) => scene.id === previewSceneQuery) || null;
+  }, [previewSceneQuery, projectScenes]);
   const pendingDiff = pendingPatch?.validation?.diff || pendingPatch?.diff;
   const visibleEventIssues = eventIssues.length > 0 ? eventIssues : pendingPatch?.validation?.issues || [];
   const imageJobs = useMemo(() => {
@@ -714,6 +720,14 @@ export function ProjectDetailView({
       setSelectedSceneId(nextScene.id);
     }
   }, [activeTab, currentProject, projectRoutes, projectScenes, selectedRouteId, selectedSceneId]);
+
+  useEffect(() => {
+    if (activeTab !== "preview" || !previewSceneFromQuery?.id || previewSceneId === previewSceneFromQuery.id) {
+      return;
+    }
+    setPreviewSceneId(previewSceneFromQuery.id);
+    setPreviewStatus(`Studio에서 선택한 씬 ${sceneLabel(previewSceneFromQuery)} 기준으로 프리뷰를 준비합니다.`);
+  }, [activeTab, previewSceneFromQuery, previewSceneId]);
 
   useEffect(() => {
     if (activeTab !== "studio") {
