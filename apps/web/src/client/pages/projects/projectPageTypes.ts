@@ -76,6 +76,7 @@ export interface ProjectData {
     choices?: Array<{ id?: string; text?: string; next?: string; condition?: Record<string, unknown>; effects?: Record<string, unknown> }>;
     next?: string;
     ending?: { id?: string; title?: string; kind?: string };
+    memoryTags?: Record<string, string[]>;
   }>;
   assets?: ProjectAsset[];
   generationJobs?: ProjectGenerationJob[];

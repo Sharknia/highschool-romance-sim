@@ -78,6 +78,8 @@ type StudioCommandAddKind = "start" | "scene" | "choice";
 type StudioLayoutResizeTarget = "route" | "inspector" | "problems";
 type ProblemFilter = "all" | "errors" | "warnings" | "currentScene";
 type ValidationRunState = "idle" | "running" | "current" | "stale";
+type StagePreviewMode = "edit" | "play";
+type ScriptBlockKind = "SceneMetaStrip" | "DialogueBlock" | "NarrationBlock" | "StageDirectionBlock" | "ChoiceSummaryBlock" | "EndingBlock";
 type StudioStructuralOperation =
   | { type: "deleteScene"; sceneId: string; mode?: "failIfReferenced" | "unlinkReferences" }
   | { type: "duplicateScene"; sourceSceneId: string; newSceneId?: string; label?: string }
@@ -87,6 +89,16 @@ type StudioStructuralOperation =
   | { type: "clearChoiceTarget"; sceneId: string; choiceId: string }
   | { type: "unlinkSceneTarget"; sourceSceneId: string; targetSceneId: string; edgeType?: "next" | "choice" | "all" }
   | { type: "setRouteEntry"; routeId: string; sceneId: string };
+
+interface ScriptEditorBlock {
+  body: string;
+  focusField?: string;
+  id: string;
+  kind: ScriptBlockKind;
+  label: string;
+  markerCount: number;
+  panel?: StudioPanelId;
+}
 
 const dirtyDraftDiscardMessage = "저장하지 않은 씬 변경 사항이 있습니다. 변경 사항을 버리고 이동할까요?";
 
@@ -250,6 +262,101 @@ function choiceTargetText(choice: SceneChoice, project: ProjectData | null): str
   return target ? sceneTitle(target) : `missing target: ${choice.next}`;
 }
 
+function sceneValidationMarkers(scene: ProjectScene | null, issues: ProjectIssue[]): ProjectIssue[] {
+  if (!scene?.id) return [];
+  return issues.filter((issue) => (issue.sceneIds || []).includes(scene.id || "") || findIssueSceneId(issue, null) === scene.id || issue.path?.includes(scene.id || ""));
+}
+
+function formatMemoryTagsInput(memoryTags?: Record<string, string[]>): string {
+  return Object.entries(memoryTags || {})
+    .map(([key, values]) => `${key}: ${values.join(", ")}`)
+    .join("\n");
+}
+
+function parseMemoryTagsInput(value: string): Record<string, string[]> | undefined {
+  const entries = value.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [rawKey, ...rawValues] = line.split(":");
+      const key = rawKey.trim();
+      const values = rawValues.join(":").split(",").map((tag) => tag.trim()).filter(Boolean);
+      return key ? [key, values] as const : null;
+    })
+    .filter((entry): entry is readonly [string, string[]] => Boolean(entry));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function assetPreviewUrl(asset?: ProjectAsset | null): string {
+  const uri = asset?.uri || "";
+  if (/^(data:|https?:\/\/|\/)/.test(uri)) {
+    return uri;
+  }
+  return "";
+}
+
+function scriptEditorBlocks(scene: ProjectScene | null, activeRoute: ProjectRoute | null, issues: ProjectIssue[]): ScriptEditorBlock[] {
+  if (!scene) return [];
+  const markers = sceneValidationMarkers(scene, issues);
+  return [
+    {
+      body: `${sceneStructureModeText(scene, activeRoute)} · scene id ${scene.id || "없음"} · inline validation ${markers.length}`,
+      id: "SceneMetaStrip",
+      kind: "SceneMetaStrip",
+      label: "SceneMetaStrip",
+      markerCount: markers.length,
+      panel: "scene"
+    },
+    {
+      body: scene.speaker ? `${scene.speaker}: ${scene.text || "대사 없음"}` : scene.text || "대사 없음",
+      focusField: "text",
+      id: "DialogueBlock",
+      kind: "DialogueBlock",
+      label: "DialogueBlock",
+      markerCount: markers.filter((issue) => issue.path?.includes("text") || issue.path?.includes("speaker")).length,
+      panel: "scene"
+    },
+    {
+      body: scene.text ? scene.text.slice(0, 96) : "내레이션 후보 없음",
+      focusField: "text",
+      id: "NarrationBlock",
+      kind: "NarrationBlock",
+      label: "NarrationBlock",
+      markerCount: 0,
+      panel: "scene"
+    },
+    {
+      body: `background ${scene.backgroundAssetId || "missing"} · cg ${scene.cgAssetId || "none"} · characters ${(scene.characters || []).length}`,
+      focusField: "assets",
+      id: "StageDirectionBlock",
+      kind: "StageDirectionBlock",
+      label: "StageDirectionBlock",
+      markerCount: markers.filter((issue) => issue.path?.includes("background") || issue.path?.includes("cgAssetId") || issue.path?.includes("characters")).length,
+      panel: "assets"
+    },
+    {
+      body: (scene.choices || []).length > 0
+        ? (scene.choices || []).map((choice) => `${choice.text || choice.id || "선택지"} -> ${choice.next || "target 없음"}`).join(" / ")
+        : "선택지 없음",
+      focusField: "choiceTarget",
+      id: "ChoiceSummaryBlock",
+      kind: "ChoiceSummaryBlock",
+      label: "ChoiceSummaryBlock",
+      markerCount: markers.filter((issue) => issue.path?.includes("choices") || (issue.choiceIds || []).length > 0).length,
+      panel: "choices"
+    },
+    {
+      body: scene.ending ? `${scene.ending.title || "제목 없음"} · ${scene.ending.kind || "normal"}` : "엔딩 없음",
+      focusField: "ending",
+      id: "EndingBlock",
+      kind: "EndingBlock",
+      label: "EndingBlock",
+      markerCount: markers.filter((issue) => issue.path?.includes("ending")).length,
+      panel: "scene"
+    }
+  ];
+}
+
 function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -287,7 +394,8 @@ function cloneScene(scene: ProjectScene | null): ProjectScene | null {
       condition: choice.condition ? { ...choice.condition } : undefined,
       effects: choice.effects ? { ...choice.effects } : undefined
     })),
-    ending: scene.ending ? { ...scene.ending } : undefined
+    ending: scene.ending ? { ...scene.ending } : undefined,
+    memoryTags: scene.memoryTags ? Object.fromEntries(Object.entries(scene.memoryTags).map(([key, values]) => [key, [...values]])) : undefined
   };
 }
 
@@ -304,6 +412,7 @@ function sceneContentSnapshot(scene: ProjectScene | null): Record<string, unknow
     text: scene.text || "",
     backgroundAssetId: scene.backgroundAssetId || "",
     cgAssetId: scene.cgAssetId || "",
+    memoryTags: scene.memoryTags || {},
     characters: (scene.characters || []).map((character) => ({
       assetId: character.assetId || "",
       characterId: character.characterId || "",
@@ -335,7 +444,8 @@ function studioSceneSavePayload(draft: ProjectScene): ProjectScene {
       condition: choice.condition ? { ...choice.condition } : undefined,
       effects: choice.effects ? { ...choice.effects } : undefined
     })),
-    ending: draft.ending ? { ...draft.ending } : undefined
+    ending: draft.ending ? { ...draft.ending } : undefined,
+    memoryTags: draft.memoryTags ? Object.fromEntries(Object.entries(draft.memoryTags).map(([key, values]) => [key, [...values]])) : undefined
   };
 }
 
@@ -807,6 +917,7 @@ export function StudioWorkspace({
   const [routeSearchTerm, setRouteSearchTerm] = useState("");
   const [routeGraphZoom, setRouteGraphZoom] = useState(100);
   const [flowLegendCollapsed, setFlowLegendCollapsed] = useState(false);
+  const [stagePreviewMode, setStagePreviewMode] = useState<StagePreviewMode>("edit");
   const [problemFilter, setProblemFilter] = useState<ProblemFilter>("all");
   const [lastValidationAt, setLastValidationAt] = useState("");
   const [validationRunState, setValidationRunState] = useState<ValidationRunState>("idle");
@@ -893,6 +1004,27 @@ export function StudioWorkspace({
   const cgAssets = (project?.assets || []).filter((asset) => asset.kind === "cg");
   const sceneBackgroundAsset = backgroundAssets.find((asset) => asset.id === draftScene?.backgroundAssetId) || null;
   const sceneCgAsset = cgAssets.find((asset) => asset.id === draftScene?.cgAssetId) || null;
+  const backgroundPreviewAsset = sceneBackgroundAsset;
+  const backgroundPreviewUrl = assetPreviewUrl(backgroundPreviewAsset);
+  const cgPreviewUrl = assetPreviewUrl(sceneCgAsset);
+  const characterPreviewAssets = (draftScene?.characters || []).map((character, index) => {
+    const asset = (project?.assets || []).find((item) => item.id === character.assetId) || null;
+    return {
+      asset,
+      character,
+      index,
+      previewUrl: assetPreviewUrl(asset)
+    };
+  });
+  const stagePreviewMissingItems = [
+    draftScene?.backgroundAssetId && !backgroundPreviewAsset ? "background asset missing" : "",
+    backgroundPreviewAsset && !backgroundPreviewUrl ? "background preview uri missing" : "",
+    draftScene?.cgAssetId && !sceneCgAsset ? "CG asset missing" : "",
+    sceneCgAsset && !cgPreviewUrl ? "CG preview uri missing" : "",
+    ...characterPreviewAssets.map((item) => item.character.assetId && !item.asset ? `${item.character.assetId} character asset missing` : "")
+  ].filter(Boolean);
+  const currentSceneMarkers = sceneValidationMarkers(draftScene, visibleIssues);
+  const currentScriptEditorBlocks = useMemo(() => scriptEditorBlocks(draftScene, activeRoute, visibleIssues), [activeRoute, draftScene, visibleIssues]);
   const unsupportedProjectPath = projectId ? `/projects/${projectId}/overview` : "/projects";
   const projectOverviewPath = projectId ? `/projects/${projectId}/overview` : "/projects";
   const sceneTitleInput = draftScene?.label || "";
@@ -2371,6 +2503,32 @@ export function StudioWorkspace({
     );
   }
 
+  function renderScriptBlock(block: ScriptEditorBlock) {
+    return (
+      <button
+        className={`studio-script-block ${block.kind}`}
+        data-script-block={block.kind}
+        key={block.id}
+        onClick={() => {
+          if (block.panel) {
+            setPanel(block.panel);
+          }
+          if (block.focusField) {
+            setFocusedFieldKey(block.focusField);
+            setFocusRequestTick((current) => current + 1);
+          }
+        }}
+        type="button"
+      >
+        <span>
+          <strong>{block.label}</strong>
+          <small>{block.body}</small>
+        </span>
+        <StatusChip tone={block.markerCount > 0 ? "warning" : "neutral"}>{block.markerCount}</StatusChip>
+      </button>
+    );
+  }
+
   function renderFlowStatusLegend() {
     return (
       <section className={`studio-flow-legend ${flowLegendCollapsed ? "collapsed" : ""}`} aria-label="FlowStatusLegend">
@@ -2854,21 +3012,40 @@ export function StudioWorkspace({
             <div className="studio-stage-header">
               <div>
                 <strong>스테이지 미리보기</strong>
-                <span>{previewCommandDisabledReason || "프리뷰 이동 가능"} · 문제 {problemCount}건</span>
+                <span aria-label="preview startSceneId">{previewCommandDisabledReason || "프리뷰 이동 가능"} · 현재 씬 시작 {selectedScene?.id || "없음"} · 문제 {problemCount}건</span>
+              </div>
+              <div className="studio-stage-mode" role="tablist" aria-label="Stage Preview mode">
+                <button className={stagePreviewMode === "edit" ? "selected" : ""} onClick={() => setStagePreviewMode("edit")} role="tab" type="button">Edit Preview</button>
+                <button className={stagePreviewMode === "play" ? "selected" : ""} onClick={() => setStagePreviewMode("play")} role="tab" type="button">Play Preview</button>
               </div>
             </div>
-            <div className="studio-stage-frame">
+            <div className="studio-stage-frame" data-stage-preview-mode={stagePreviewMode}>
               <div className="studio-stage-backdrop">
-                <span>{assetLabel(sceneBackgroundAsset)}</span>
+                {backgroundPreviewUrl ? <img alt={assetLabel(backgroundPreviewAsset)} src={backgroundPreviewUrl} /> : <span className="studio-asset-missing">{assetLabel(backgroundPreviewAsset)} · asset missing</span>}
               </div>
-              {sceneCgAsset ? <div className="studio-stage-cg">{assetLabel(sceneCgAsset)}</div> : null}
+              {sceneCgAsset ? (
+                <div className="studio-stage-cg">
+                  {cgPreviewUrl ? <img alt={assetLabel(sceneCgAsset)} src={cgPreviewUrl} /> : <span className="studio-asset-missing">{assetLabel(sceneCgAsset)} · asset missing</span>}
+                </div>
+              ) : null}
               <div className="studio-stage-characters">
-                {(draftScene?.characters || []).map((character, index) => (
-                  <span className={`studio-character-pill ${character.position || "center"}`} key={`${character.characterId || "character"}-${index}`}>
-                    {characterLabel(project, character.characterId)}
-                  </span>
+                {characterPreviewAssets.map(({ asset, character, index, previewUrl }) => (
+                  previewUrl ? (
+                    <img alt={assetLabel(asset)} className={`studio-character-sprite ${character.position || "center"}`} key={`${character.characterId || "character"}-${index}`} src={previewUrl} />
+                  ) : (
+                    <span className={`studio-character-pill ${character.position || "center"} studio-asset-missing`} key={`${character.characterId || "character"}-${index}`}>
+                      {characterLabel(project, character.characterId)} · asset missing
+                    </span>
+                  )
                 ))}
               </div>
+              {stagePreviewMissingItems.length > 0 || dirty || problemPanelState === "stale" || previewCommandDisabledReason ? (
+                <div aria-label="StagePreviewOverlay" className="studio-stage-overlay">
+                  {dirty || problemPanelState === "stale" ? <StatusChip tone="warning">validation stale</StatusChip> : null}
+                  {previewCommandDisabledReason ? <StatusChip tone="danger">{previewCommandDisabledReason}</StatusChip> : null}
+                  {stagePreviewMissingItems.map((item) => <StatusChip key={item} tone="warning">{item}</StatusChip>)}
+                </div>
+              ) : null}
               <div className="studio-dialogue-box">
                 <strong>{draftScene?.speaker || "화자 없음"}</strong>
                 <p>{draftScene?.text || "대사를 입력하면 이 영역에서 장면 톤을 확인할 수 있습니다."}</p>
@@ -2878,6 +3055,7 @@ export function StudioWorkspace({
                   </div>
                 ) : null}
                 {draftScene?.ending ? <StatusChip tone="warning">엔딩 · {draftScene.ending.title || "제목 없음"}</StatusChip> : null}
+                {stagePreviewMode === "play" ? <Button disabled={Boolean(previewCommandDisabledReason)} icon={<Play size={16} />} onClick={openPreview}>현재 씬에서 플레이</Button> : null}
               </div>
             </div>
           </section>
@@ -2891,17 +3069,18 @@ export function StudioWorkspace({
               <StatusChip tone={dirty ? "warning" : "success"}>{dirty ? "변경됨" : "저장됨"}</StatusChip>
             </header>
             {draftScene ? (
-              <div className="studio-editor-grid">
-                <label className={`field-row${focusedClass("label", "scene:label")}`}>
-                  <span>라벨</span>
-                  <input onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => setFocusTargets(["label", "scene:label"], element)} value={draftScene.label || ""} />
-                </label>
-                <label className={`field-row${focusedClass("speaker", "scene:speaker")}`}>
-                  <span>화자</span>
-                  <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
-                </label>
+              <div className="studio-editor-grid block-aware">
+                <div className="studio-scene-meta-strip" aria-label="SceneMetaStrip">
+                  <StatusChip tone={activeRoute?.entrySceneId === draftScene.id ? "success" : draftScene.ending ? "warning" : "neutral"}>{sceneStructureModeText(draftScene, activeRoute)}</StatusChip>
+                  <span>scene id {draftScene.id || "없음"}</span>
+                  <span>route {activeRoute?.title || activeRoute?.id || "없음"}</span>
+                  <StatusChip tone={currentSceneMarkers.length > 0 ? "warning" : "success"}>inline validation {currentSceneMarkers.length}</StatusChip>
+                </div>
+                <div className="studio-script-block-list">
+                  {currentScriptEditorBlocks.map((block) => renderScriptBlock(block))}
+                </div>
                 <label className={`field-row studio-editor-text${focusedClass("text", `scene:${draftScene.id || ""}`)}`}>
-                  <span>본문</span>
+                  <span>DialogueBlock 본문</span>
                   <textarea
                     ref={(element) => {
                       scriptTextareaRef.current = element;
@@ -2911,6 +3090,24 @@ export function StudioWorkspace({
                     value={draftScene.text || ""}
                   />
                 </label>
+                <label className={`field-row${focusedClass("speaker", "scene:speaker")}`}>
+                  <span>화자</span>
+                  <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
+                </label>
+                <label className={`field-row${focusedClass("label", "scene:label")}`}>
+                  <span>라벨</span>
+                  <input onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => setFocusTargets(["label", "scene:label"], element)} value={draftScene.label || ""} />
+                </label>
+                <label className="field-row studio-editor-text">
+                  <span>memoryTags</span>
+                  <textarea
+                    aria-label="memoryTags"
+                    onChange={(event) => patchDraftScene({ memoryTags: parseMemoryTagsInput(event.target.value) })}
+                    placeholder="key: tag-a, tag-b"
+                    value={formatMemoryTagsInput(draftScene.memoryTags)}
+                  />
+                </label>
+                <p className="studio-disabled-note">notes/tags는 현재 scene schema-backed 필드가 아니므로 이 화면에서 저장 가능한 값처럼 제공하지 않습니다.</p>
               </div>
             ) : (
               <EmptyState title="선택된 씬이 없습니다." description="루트 맵에서 씬을 선택하거나 시작 씬을 만드세요." />

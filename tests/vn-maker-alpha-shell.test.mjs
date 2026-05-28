@@ -821,6 +821,40 @@ assert.match(studioWorkspaceSource, /setLocalRouteSelection\(result\.studio\.rou
   assert.match(studioWorkspaceSource, pattern, `StudioWorkspace 구조 편집 허브에 '${requiredText}' 흐름이 있어야 합니다.`);
 });
 [
+  "SceneMetaStrip",
+  "DialogueBlock",
+  "NarrationBlock",
+  "StageDirectionBlock",
+  "ChoiceSummaryBlock",
+  "EndingBlock",
+  "scriptEditorBlocks",
+  "renderScriptBlock",
+  "sceneValidationMarkers",
+  "memoryTags",
+  "formatMemoryTagsInput",
+  "parseMemoryTagsInput",
+  "notes/tags",
+  "schema-backed",
+  "stagePreviewMode",
+  "Edit Preview",
+  "Play Preview",
+  "StagePreviewOverlay",
+  "assetPreviewUrl",
+  "backgroundPreviewAsset",
+  "characterPreviewAssets",
+  "preview startSceneId",
+  "studio-scene-meta-strip",
+  "studio-script-block",
+  "studio-stage-overlay",
+  "studio-asset-missing",
+  "data-script-block",
+  "data-stage-preview-mode"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace Script Editor/Stage Preview 보강에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.doesNotMatch(studioWorkspaceSource, /blocks\s*:\s*\[/, "Script block UI는 core scene schema와 다른 canonical blocks[] 저장 모델을 만들면 안 됩니다.");
+[
   "conditionRuntimeSupport",
   "strictPreviewStatus",
   "strictPreviewSuccess",
