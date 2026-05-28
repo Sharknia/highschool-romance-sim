@@ -27,6 +27,10 @@ export function imageJobKindLabel(kind?: string): string {
   return "이미지";
 }
 
+export function isVisualImageJob(job?: ProjectGenerationJob | null): job is ProjectGenerationJob {
+  return Boolean(job && (job.kind === "background" || job.kind === "cg"));
+}
+
 export function jobStatusLabel(value?: string): string {
   if (value === "planned") return "작업 예정";
   if (value === "running") return "생성 중";

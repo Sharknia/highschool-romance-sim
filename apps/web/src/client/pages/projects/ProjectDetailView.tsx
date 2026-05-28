@@ -56,6 +56,7 @@ import {
   imageJobKindLabel,
   isDummyAsset,
   isDummyGenerationJob,
+  isVisualImageJob,
   jobStatusLabel,
   repairDiffOperationLabel,
   repairDiffValueText
@@ -186,10 +187,6 @@ function eventResultHasCg(result: ProjectApiResult, plan?: ProjectEventPlan): bo
     result.project?.generationJobs?.some((job) => job.kind === "cg" && job.status !== "completed")
     || (plan?.decision?.cgCount || 0) > 0
   );
-}
-
-function isVisualImageJob(job: ProjectGenerationJob): boolean {
-  return job.kind === "background" || job.kind === "cg";
 }
 
 function assetState(jobs: ProjectGenerationJob[]): AssetState {

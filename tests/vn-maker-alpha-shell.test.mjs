@@ -918,6 +918,33 @@ assert.match(studioWorkspaceSource, /<summary>기술 정보<\/summary>[\s\S]{0,2
 assert.match(studioWorkspaceSource, /function renderGenerationAssistDrawer\(\)[\s\S]*<h3>생성 결과 로그<\/h3>/, "생성 결과 로그는 검증 탭 본문이 아니라 생성 보조 drawer 내부에 있어야 합니다.");
 assert.doesNotMatch(studioWorkspaceSource, /\{renderProblemPanelState\(\)\}[\s\S]{0,1200}<h3>생성 결과 로그<\/h3>/, "검증 요약과 Problems Panel 흐름 아래에 생성 replay 컨트롤을 직접 섞으면 안 됩니다.");
 [
+  "StudioAssetJobLifecycle",
+  "loadStudioGenerationJobs",
+  "runStudioImageJobs",
+  "connectCompletedAssetToScene",
+  "studioAssetJobs",
+  "backgroundAssetJobs",
+  "cgAssetJobs",
+  "selectedSceneAssetJobs",
+  "studioAssetStatus",
+  "replaceCompleted",
+  "retryFailed",
+  "/api/generation/jobs/list",
+  "/api/generation/jobs/run",
+  "audio placeholder",
+  "Audio unsupported",
+  "data-studio-asset-job",
+  "data-asset-slot",
+  "mock/actual/dummy",
+  "Stage asset jobs",
+  "isVisualImageJob"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace CG/image job lifecycle에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.match(studioWorkspaceSource, /runStudioImageJobs\(failedStudioAssetJobIds,\s*true\)/, "Studio Assets 탭은 실패한 job retry action을 제공해야 합니다.");
+assert.match(studioWorkspaceSource, /runStudioImageJobs\(dummyStudioAssetJobIds,\s*true,\s*true\)/, "Studio Assets 탭은 목/더미 결과를 실제 이미지로 replace하는 action을 제공해야 합니다.");
+[
   "detail-tab-grid",
   "detail-card",
   "detail-card-wide",

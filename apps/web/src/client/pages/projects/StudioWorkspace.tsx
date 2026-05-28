@@ -36,6 +36,7 @@ import type {
   ProjectApiResult,
   ProjectAsset,
   ProjectData,
+  ProjectGenerationJob,
   ProjectIssue,
   ProjectPreviewPreflight,
   ProjectRepairAction,
@@ -54,7 +55,16 @@ import type {
   TestPromptFixture,
   UXDecisionEventLog
 } from "./projectPageTypes";
-import { repairDiffOperationLabel, repairDiffValueText } from "./projectDisplayText";
+import {
+  fallbackReasonText,
+  generationProviderText,
+  imageJobKindLabel,
+  isDummyGenerationJob,
+  isVisualImageJob,
+  jobStatusLabel,
+  repairDiffOperationLabel,
+  repairDiffValueText
+} from "./projectDisplayText";
 import {
   activeRepairHistoryEntry,
   repairActionKey,
@@ -529,6 +539,23 @@ function unavailableGenerationBadge(active: boolean) {
   );
 }
 
+function studioAssetJobStatusTone(status?: string): "success" | "warning" | "danger" | "neutral" {
+  if (status === "completed") return "success";
+  if (status === "failed") return "danger";
+  if (status === "planned" || status === "running") return "warning";
+  return "neutral";
+}
+
+function studioAssetJobSourceText(job: ProjectGenerationJob): string {
+  if (isDummyGenerationJob(job)) {
+    return `mock/actual/dummy · 목 이미지 · ${fallbackReasonText(job.fallbackReason || job.asset?.provenance?.fallbackReason)}`;
+  }
+  if (job.provider === "image-generation-adapter") {
+    return "mock/actual/dummy · 실제 생성 adapter";
+  }
+  return `mock/actual/dummy · ${generationProviderText(job.provider)}`;
+}
+
 function saveStateLabel(saveState: StudioSaveState, dirty: boolean): string {
   if (saveState === "saving") return "저장 중";
   if (saveState === "failed") return "저장 실패";
@@ -954,6 +981,10 @@ export function StudioWorkspace({
   const [phase0Report, setPhase0Report] = useState<Phase0DecisionReport | null>(null);
   const [phase0Status, setPhase0Status] = useState("Phase 0 decision report 생성 전입니다.");
   const [phase0Busy, setPhase0Busy] = useState(false);
+  const [studioAssetJobs, setStudioAssetJobs] = useState<ProjectGenerationJob[]>([]);
+  const [studioAssetStatus, setStudioAssetStatus] = useState("StudioAssetJobLifecycle: 이미지 작업 상태를 확인하세요.");
+  const [studioAssetErrors, setStudioAssetErrors] = useState<string[]>([]);
+  const [studioAssetBusy, setStudioAssetBusy] = useState(false);
   const [localIssues, setLocalIssues] = useState<ProjectIssue[]>([]);
   const [localPreflightIssues, setLocalPreflightIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
   const [localStudioIssues, setLocalStudioIssues] = useState<StudioIssueFocus[]>([]);
@@ -1056,6 +1087,18 @@ export function StudioWorkspace({
   const unsupported = viewport.width < STUDIO_MIN_WIDTH || viewport.height < STUDIO_MIN_HEIGHT;
   const backgroundAssets = (project?.assets || []).filter((asset) => asset.kind === "background");
   const cgAssets = (project?.assets || []).filter((asset) => asset.kind === "cg");
+  const visualAssetJobs = studioAssetJobs.length > 0 ? studioAssetJobs : (project?.generationJobs || []).filter(isVisualImageJob);
+  const backgroundAssetJobs = visualAssetJobs.filter((job) => job.kind === "background");
+  const cgAssetJobs = visualAssetJobs.filter((job) => job.kind === "cg");
+  const selectedSceneAssetJobs = visualAssetJobs.filter((job) =>
+    job.outputAssetId === draftScene?.backgroundAssetId
+    || job.outputAssetId === draftScene?.cgAssetId
+    || job.targetId === draftScene?.id
+    || job.targetId === selectedScene?.id
+  );
+  const plannedStudioAssetJobIds = visualAssetJobs.filter((job) => job.status === "planned" && job.id).map((job) => String(job.id));
+  const failedStudioAssetJobIds = visualAssetJobs.filter((job) => job.status === "failed" && job.id).map((job) => String(job.id));
+  const dummyStudioAssetJobIds = visualAssetJobs.filter((job) => job.status === "completed" && job.id && isDummyGenerationJob(job)).map((job) => String(job.id));
   const sceneBackgroundAsset = backgroundAssets.find((asset) => asset.id === draftScene?.backgroundAssetId) || null;
   const sceneCgAsset = cgAssets.find((asset) => asset.id === draftScene?.cgAssetId) || null;
   const backgroundPreviewAsset = sceneBackgroundAsset;
@@ -1289,6 +1332,10 @@ export function StudioWorkspace({
   useEffect(() => {
     setLocalRepairActions(repairActions);
   }, [repairActions]);
+
+  useEffect(() => {
+    setStudioAssetJobs((project?.generationJobs || []).filter(isVisualImageJob));
+  }, [project?.generationJobs]);
 
   useEffect(() => {
     if (dirty) {
@@ -1998,6 +2045,177 @@ export function StudioWorkspace({
           <GenerationDiagnosticsSurface />
         </section>
       </DiagnosticDrawer>
+    );
+  }
+
+  function studioAssetForJob(job: ProjectGenerationJob): ProjectAsset | null {
+    return job.asset || (project?.assets || []).find((asset) => asset.id === job.outputAssetId) || null;
+  }
+
+  function applyStudioAssetResult(result: ProjectApiResult, fallbackStatus: string): void {
+    const nextJobs = (result.project?.generationJobs || result.jobs || (result.job ? [result.job] : [])).filter(isVisualImageJob);
+    setStudioAssetJobs(nextJobs);
+    setStudioAssetErrors(result.errors || result.issues?.map(issueText) || []);
+    applyStudioDtoState(result);
+    const nextRevision = revisionFromResult(result);
+    if (nextRevision) {
+      setLocalRevision(nextRevision);
+    }
+    if (result.project || result.previewPreflight || result.previewReadiness || result.exportPlan) {
+      onProjectResult(result);
+      setValidationRunState(result.previewPreflight ? "current" : "stale");
+    }
+    setStudioAssetStatus(result.message || result.error || fallbackStatus);
+  }
+
+  async function loadStudioGenerationJobs(): Promise<void> {
+    setStudioAssetBusy(true);
+    setStudioAssetErrors([]);
+    setStudioAssetStatus("StudioAssetJobLifecycle: 이미지 작업을 불러오는 중입니다.");
+    try {
+      const result = await postJson("/api/generation/jobs/list", { projectDirectory });
+      if (isApiFailure(result)) {
+        applyStudioAssetResult(result, "이미지 작업을 불러오지 못했습니다.");
+        return;
+      }
+      applyStudioAssetResult(result, result.jobs?.length ? "Studio Assets tab에서 CG/background image job 상태를 확인했습니다." : "Studio Assets tab에 표시할 CG/background image job이 없습니다.");
+    } catch (error) {
+      setStudioAssetStatus(`이미지 작업 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setStudioAssetErrors([error instanceof Error ? error.message : String(error)]);
+    } finally {
+      setStudioAssetBusy(false);
+    }
+  }
+
+  async function runStudioImageJobs(jobIds: string[], retryFailed = false, replaceCompleted = false): Promise<void> {
+    if (jobIds.length === 0) {
+      setStudioAssetStatus(replaceCompleted ? "교체할 목/더미 이미지 작업이 없습니다." : retryFailed ? "재시도할 실패 이미지 작업이 없습니다." : "실행할 예정 이미지 작업이 없습니다.");
+      return;
+    }
+    setStudioAssetBusy(true);
+    setStudioAssetErrors([]);
+    setStudioAssetStatus(replaceCompleted ? "목/더미 이미지를 실제 이미지로 replaceCompleted 실행 중입니다." : retryFailed ? "실패 이미지 작업 retryFailed 실행 중입니다." : "예정 이미지 작업을 실행 중입니다.");
+    recordUXDecisionEvent({
+      eventName: "generated",
+      inputMode: "manual",
+      outcome: "started",
+      generationJobId: jobIds.join(","),
+      sourceGeneratedBy: replaceCompleted ? "actual-replace" : retryFailed ? "retryFailed" : "studio-assets"
+    });
+    try {
+      const result = await postJson("/api/generation/jobs/run", {
+        projectDirectory,
+        jobIds,
+        retryFailed,
+        replaceCompleted
+      });
+      applyStudioAssetResult(result, result.assets?.length ? "이미지 생성 결과가 프로젝트 에셋에 연결되었습니다." : "완료된 작업은 재생성하지 않고 기존 결과를 유지했습니다.");
+      recordUXDecisionEvent({
+        eventName: "generated",
+        inputMode: "manual",
+        outcome: isApiFailure(result) ? "failed" : "success",
+        generationJobId: jobIds.join(","),
+        sourceGeneratedBy: replaceCompleted ? "actual-replace" : retryFailed ? "retryFailed" : "studio-assets",
+        failureCause: result.message || result.error || result.errors?.join(" · ")
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStudioAssetStatus(`이미지 작업 실행 실패: ${message}`);
+      setStudioAssetErrors([message]);
+      recordUXDecisionEvent({
+        eventName: "generated",
+        inputMode: "manual",
+        outcome: "failed",
+        generationJobId: jobIds.join(","),
+        sourceGeneratedBy: replaceCompleted ? "actual-replace" : retryFailed ? "retryFailed" : "studio-assets",
+        failureCause: message
+      });
+    } finally {
+      setStudioAssetBusy(false);
+    }
+  }
+
+  function connectCompletedAssetToScene(job: ProjectGenerationJob): void {
+    const asset = studioAssetForJob(job);
+    const assetId = asset?.id || job.outputAssetId || "";
+    if (!assetId) {
+      setStudioAssetStatus("연결할 생성 결과 asset이 없습니다.");
+      return;
+    }
+    if (job.kind === "background") {
+      patchDraftScene({ backgroundAssetId: assetId });
+      setStudioAssetStatus("생성된 background asset을 현재 씬 backgroundAssetId에 연결했습니다. 저장하면 반영됩니다.");
+      return;
+    }
+    if (job.kind === "cg") {
+      patchDraftScene({ cgAssetId: assetId });
+      setStudioAssetStatus("생성된 CG asset을 현재 씬 cgAssetId에 연결했습니다. 저장하면 반영됩니다.");
+      return;
+    }
+    setStudioAssetStatus("background/CG 작업만 현재 씬 slot에 연결할 수 있습니다.");
+  }
+
+  function renderStudioAssetJob(job: ProjectGenerationJob) {
+    const asset = studioAssetForJob(job);
+    const canConnect = Boolean(asset?.id || job.outputAssetId) && (job.kind === "background" || job.kind === "cg");
+    return (
+      <li data-studio-asset-job={job.id || job.outputAssetId || "asset-job"} key={job.id || job.outputAssetId || `${job.kind}-${job.targetId}`}>
+        <strong>{imageJobKindLabel(job.kind)} · {job.id || job.outputAssetId || "작업 ID 없음"}</strong>
+        <span>{jobStatusLabel(job.status)} · {studioAssetJobSourceText(job)}</span>
+        <small>target {job.targetId || "확인 필요"} · outputAssetId {job.outputAssetId || "확인 필요"}</small>
+        {job.failureMessage ? <small>{job.failureMessage}</small> : null}
+        {asset?.uri ? <small>asset uri 연결됨</small> : <small>{job.status === "completed" ? "asset missing · 생성 결과 연결 확인 필요" : "asset 연결 대기"}</small>}
+        <div className="button-row">
+          <StatusChip tone={studioAssetJobStatusTone(job.status)}>{jobStatusLabel(job.status)}</StatusChip>
+          {isDummyGenerationJob(job) ? <StatusChip tone="warning">목/더미</StatusChip> : <StatusChip tone="neutral">실제/adapter</StatusChip>}
+          <Button disabled={!canConnect} icon={<CheckCircle2 size={16} />} onClick={() => connectCompletedAssetToScene(job)} variant="ghost">
+            현재 씬 slot 연결
+          </Button>
+        </div>
+      </li>
+    );
+  }
+
+  function StudioAssetJobLifecycle() {
+    return (
+      <section data-asset-slot="generationJobs">
+        <h3>이미지 작업</h3>
+        <p className="studio-disabled-note">StudioAssetJobLifecycle은 기존 generation job contract를 소비합니다. mock/actual/dummy 결과를 구분하고 completed job은 replaceCompleted가 아니면 재생성하지 않습니다.</p>
+        <div className="button-row">
+          <Button disabled={studioAssetBusy} icon={<RefreshCw size={16} />} onClick={() => void loadStudioGenerationJobs()}>
+            이미지 작업 새로고침
+          </Button>
+          <Button disabled={studioAssetBusy || plannedStudioAssetJobIds.length === 0} icon={<Play size={16} />} onClick={() => void runStudioImageJobs(plannedStudioAssetJobIds)}>
+            예정 작업 실행
+          </Button>
+          <Button disabled={studioAssetBusy || failedStudioAssetJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runStudioImageJobs(failedStudioAssetJobIds, true)}>
+            실패 retry
+          </Button>
+          <Button disabled={studioAssetBusy || dummyStudioAssetJobIds.length === 0} icon={<RefreshCw size={16} />} onClick={() => void runStudioImageJobs(dummyStudioAssetJobIds, true, true)} variant="primary">
+            목/더미 실제 이미지로 교체
+          </Button>
+        </div>
+        <dl className="summary-list">
+          <div><dt>상태</dt><dd>{studioAssetStatus}</dd></div>
+          <div><dt>background jobs</dt><dd>{backgroundAssetJobs.length}</dd></div>
+          <div><dt>CG jobs</dt><dd>{cgAssetJobs.length}</dd></div>
+          <div><dt>Stage asset jobs</dt><dd>{selectedSceneAssetJobs.length}</dd></div>
+        </dl>
+        {studioAssetErrors.length ? (
+          <ul className="studio-readonly-list">
+            {studioAssetErrors.map((error) => <li key={error}><strong>생성 오류</strong><span>{error}</span></li>)}
+          </ul>
+        ) : null}
+        <ul className="studio-readonly-list">
+          {visualAssetJobs.length ? visualAssetJobs.map((job) => renderStudioAssetJob(job)) : (
+            <li><strong>이미지 작업 없음</strong><span>ProjectDetailView 또는 생성 API에서 background/CG job을 준비하면 여기에 표시됩니다.</span></li>
+          )}
+        </ul>
+        <section data-asset-slot="audio">
+          <h3>Audio unsupported</h3>
+          <p className="studio-disabled-note">audio placeholder · Alpha에서는 audio generation/runtime playback을 구현하지 않으며 후속 범위로만 표시합니다.</p>
+        </section>
+      </section>
     );
   }
 
@@ -3201,10 +3419,11 @@ export function StudioWorkspace({
                   )
                 ))}
               </div>
-              {stagePreviewMissingItems.length > 0 || dirty || problemPanelState === "stale" || previewCommandDisabledReason ? (
+              {stagePreviewMissingItems.length > 0 || selectedSceneAssetJobs.length > 0 || dirty || problemPanelState === "stale" || previewCommandDisabledReason ? (
                 <div aria-label="StagePreviewOverlay" className="studio-stage-overlay">
                   {dirty || problemPanelState === "stale" ? <StatusChip tone="warning">validation stale</StatusChip> : null}
                   {previewCommandDisabledReason ? <StatusChip tone="danger">{previewCommandDisabledReason}</StatusChip> : null}
+                  {selectedSceneAssetJobs.length > 0 ? <StatusChip tone="neutral">Stage asset jobs {selectedSceneAssetJobs.map((job) => `${imageJobKindLabel(job.kind)} ${jobStatusLabel(job.status)}`).join(" · ")}</StatusChip> : null}
                   {stagePreviewMissingItems.map((item) => <StatusChip key={item} tone="warning">{item}</StatusChip>)}
                 </div>
               ) : null}
@@ -3515,6 +3734,7 @@ export function StudioWorkspace({
                           </li>
                         ))}
                       </ul>
+                      <StudioAssetJobLifecycle />
                     </section>
                   ) : null}
 
