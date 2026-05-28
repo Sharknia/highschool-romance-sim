@@ -12,9 +12,10 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Settings
 } from "lucide-react";
-import type { CSSProperties, RefObject } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button, DiagnosticDrawer, EmptyState, StatusChip } from "../../components/ui";
@@ -41,6 +42,8 @@ type ProjectScene = NonNullable<ProjectData["scenes"]>[number];
 type ProjectRoute = NonNullable<ProjectData["routes"]>[number];
 type SceneCharacter = NonNullable<ProjectScene["characters"]>[number];
 type SceneChoice = NonNullable<ProjectScene["choices"]>[number];
+type StudioCommandAddKind = "start" | "scene" | "choice";
+type StudioLayoutResizeTarget = "route" | "inspector" | "problems";
 
 const dirtyDraftDiscardMessage = "저장하지 않은 씬 변경 사항이 있습니다. 변경 사항을 버리고 이동할까요?";
 
@@ -64,6 +67,12 @@ interface StudioWorkspaceProps {
   projectId?: string;
   projectRevision?: ProjectRevision | null;
   repairActions: ProjectRepairAction[];
+}
+
+interface StudioCommandAddAction {
+  disabledReason?: string;
+  kind: StudioCommandAddKind;
+  label: string;
 }
 
 export function studioDefaultLayoutForViewport(viewportWidth = STUDIO_MIN_WIDTH, viewportHeight = STUDIO_MIN_HEIGHT): StudioLayout {
@@ -288,6 +297,36 @@ function saveStateLabel(saveState: StudioSaveState, dirty: boolean): string {
   return "저장됨";
 }
 
+function studioCommandAddAction(input: { draftScene: ProjectScene | null; hasScenes: boolean; saveState: StudioSaveState }): StudioCommandAddAction {
+  if (input.saveState === "saving") {
+    return { disabledReason: "저장 중에는 구조를 변경할 수 없습니다.", kind: "scene", label: "씬 추가" };
+  }
+  if (!input.hasScenes) {
+    return { kind: "start", label: "시작 씬 만들기" };
+  }
+  if (!input.draftScene) {
+    return { disabledReason: "먼저 씬을 선택하세요.", kind: "scene", label: "씬 추가" };
+  }
+  if (input.draftScene.ending) {
+    return { disabledReason: "엔딩 씬에는 다음 씬이나 분기 target을 추가할 수 없습니다.", kind: "scene", label: "씬 추가" };
+  }
+  if ((input.draftScene.choices || []).length > 0) {
+    return { kind: "choice", label: "분기 target 만들기" };
+  }
+  if (input.draftScene.next) {
+    return { disabledReason: "이미 다음 씬이 연결되어 있습니다.", kind: "scene", label: "씬 추가" };
+  }
+  return { kind: "scene", label: "씬 추가" };
+}
+
+function studioPreviewPath(projectId: string, routeId?: string, sceneId?: string): string {
+  const params = new URLSearchParams();
+  if (routeId) params.set("route", routeId);
+  if (sceneId) params.set("scene", sceneId);
+  const query = params.toString();
+  return `/projects/${projectId}/preview${query ? `?${query}` : ""}`;
+}
+
 function problemCountLabel(problemCount: number): string {
   return problemCount === 0 ? "문제 0건" : `문제 ${problemCount}건`;
 }
@@ -400,8 +439,12 @@ function issuePanel(issue: ProjectIssue): StudioPanelId {
   return "scene";
 }
 
-function canonicalStudioQuery(current: URLSearchParams, nextValues: { scene?: string; panel?: StudioPanelId }): URLSearchParams {
+function canonicalStudioQuery(current: URLSearchParams, nextValues: { route?: string; scene?: string; panel?: StudioPanelId }): URLSearchParams {
   const next = new URLSearchParams(current);
+  if (nextValues.route !== undefined) {
+    if (nextValues.route) next.set("route", nextValues.route);
+    else next.delete("route");
+  }
   if (nextValues.scene !== undefined) {
     if (nextValues.scene) next.set("scene", nextValues.scene);
     else next.delete("scene");
@@ -453,6 +496,8 @@ export function StudioWorkspace({
   const [phase0Busy, setPhase0Busy] = useState(false);
   const [localIssues, setLocalIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
+  const [routeSearchTerm, setRouteSearchTerm] = useState("");
+  const routeSearchRef = useRef<HTMLInputElement | null>(null);
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inspectorFirstFieldRef = useRef<HTMLElement | null>(null);
   const confirmedSceneChangeRef = useRef<string | null>(null);
@@ -461,7 +506,8 @@ export function StudioWorkspace({
   const projectId = project?.id || routeProjectId || "";
   const scenes = project?.scenes || [];
   const routes = project?.routes || [];
-  const activeRoute = routes[0] || null;
+  const activeRouteIdQuery = searchParams.get("route");
+  const activeRoute = routes.find((route) => route.id === activeRouteIdQuery) || routes[0] || null;
   const selectedSceneQuery = searchParams.get("scene");
   const selectedPanel = panelFromValue(searchParams.get("panel"));
   const selectedScene = useMemo(() => {
@@ -487,12 +533,18 @@ export function StudioWorkspace({
     : previewPreflight?.canRun === false
       ? previewPreflight.disabledReason || "프리뷰 실행 조건을 충족하지 못했습니다."
       : "";
+  const previewCommandDisabledReason = dirty ? "저장 후 프리뷰를 실행하세요." : previewDisabledReason;
   const unsupported = viewport.width < STUDIO_MIN_WIDTH || viewport.height < STUDIO_MIN_HEIGHT;
   const backgroundAssets = (project?.assets || []).filter((asset) => asset.kind === "background");
   const cgAssets = (project?.assets || []).filter((asset) => asset.kind === "cg");
   const sceneBackgroundAsset = backgroundAssets.find((asset) => asset.id === draftScene?.backgroundAssetId) || null;
   const sceneCgAsset = cgAssets.find((asset) => asset.id === draftScene?.cgAssetId) || null;
   const unsupportedProjectPath = projectId ? `/projects/${projectId}/overview` : "/projects";
+  const projectOverviewPath = projectId ? `/projects/${projectId}/overview` : "/projects";
+  const sceneTitleInput = draftScene?.label || "";
+  const canSaveDraftContent = Boolean(draftScene && saveState !== "saving" && contentDirty);
+  const commandAddAction = studioCommandAddAction({ draftScene, hasScenes: scenes.length > 0, saveState });
+  const previewPath = projectId ? studioPreviewPath(projectId, activeRoute?.id, selectedScene?.id) : "/projects";
   const routeMapScenes = useMemo(() => {
     if (!activeRoute?.entrySceneId) {
       return scenes;
@@ -512,6 +564,16 @@ export function StudioWorkspace({
     });
     return ordered;
   }, [activeRoute?.entrySceneId, scenes]);
+  const filteredRouteMapScenes = useMemo(() => {
+    const term = routeSearchTerm.trim().toLowerCase();
+    if (!term) {
+      return routeMapScenes;
+    }
+    return routeMapScenes.filter((scene) => {
+      const haystack = `${sceneTitle(scene)} ${sceneSummaryText(scene)} ${scene.id || ""}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [routeMapScenes, routeSearchTerm]);
 
   function recordUXDecisionEvent(event: Record<string, unknown>): void {
     if (!projectDirectory) {
@@ -631,16 +693,39 @@ export function StudioWorkspace({
   }, [dirty, saveState]);
 
   useEffect(() => {
+    function handleStudioShortcuts(event: KeyboardEvent): void {
+      const commandPressed = event.metaKey || event.ctrlKey;
+      if (!commandPressed) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "s") {
+        event.preventDefault();
+        runSaveCommand();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        openPreview();
+      } else if (key === "k") {
+        event.preventDefault();
+        focusRouteSearch();
+      }
+    }
+    window.addEventListener("keydown", handleStudioShortcuts);
+    return () => window.removeEventListener("keydown", handleStudioShortcuts);
+  }, [activeRoute?.id, contentDirty, dirty, draftScene, layout.routeCollapsed, previewCommandDisabledReason, previewPath, previewPreflight, projectId, routingDirty, saveState, selectedScene?.id]);
+
+  useEffect(() => {
     const next = canonicalStudioQuery(searchParams, {
       panel: selectedPanel,
+      route: activeRoute?.id || "",
       scene: selectedScene?.id || selectedSceneQuery || ""
     });
     if (next.toString() !== searchParams.toString()) {
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, selectedPanel, selectedScene?.id, selectedSceneQuery, setSearchParams]);
+  }, [activeRoute?.id, searchParams, selectedPanel, selectedScene?.id, selectedSceneQuery, setSearchParams]);
 
-  function updateQuery(nextValues: { scene?: string; panel?: StudioPanelId }, replace = false): void {
+  function updateQuery(nextValues: { route?: string; scene?: string; panel?: StudioPanelId }, replace = false): void {
     const next = canonicalStudioQuery(searchParams, nextValues);
     setSearchParams(next, { replace });
   }
@@ -667,6 +752,23 @@ export function StudioWorkspace({
     updateQuery({ scene: sceneId });
   }
 
+  function selectRoute(routeId: string): void {
+    const route = routes.find((item) => item.id === routeId);
+    if (!route) {
+      setStatusText("선택할 route를 찾을 수 없습니다.");
+      return;
+    }
+    const nextSceneId = route.entrySceneId || selectedScene?.id || "";
+    if (nextSceneId && nextSceneId !== selectedScene?.id && !confirmDiscardDirtyDraft()) {
+      return;
+    }
+    if (nextSceneId && nextSceneId !== selectedScene?.id) {
+      confirmedSceneChangeRef.current = nextSceneId;
+    }
+    updateQuery({ panel: selectedPanel, route: route.id, scene: nextSceneId });
+    setStatusText(`${route.title || route.id} route로 이동했습니다.`);
+  }
+
   function setPanel(panel: StudioPanelId): void {
     updateQuery({ panel });
     if (panel === "stats") {
@@ -688,6 +790,107 @@ export function StudioWorkspace({
 
   function updateLayout(nextLayout: Partial<StudioLayout>): void {
     setLayout((current) => clampStudioLayout({ ...current, ...nextLayout }, current, viewport.height));
+  }
+
+  function focusRouteSearch(): void {
+    if (layout.routeCollapsed) {
+      updateLayout({ routeCollapsed: false });
+      setStatusText("루트 맵을 펼치고 검색으로 이동했습니다.");
+    } else {
+      setStatusText("루트 맵 검색으로 이동했습니다.");
+    }
+    window.setTimeout(() => routeSearchRef.current?.focus(), 0);
+  }
+
+  function runSaveCommand(): void {
+    if (!draftScene) {
+      setStatusText("저장할 씬이 없습니다.");
+      return;
+    }
+    if (saveState === "saving") {
+      setStatusText("이미 저장 중입니다.");
+      return;
+    }
+    if (!contentDirty) {
+      setStatusText(routingDirty ? "구조 변경은 인스펙터의 연결/엔딩 저장 버튼으로 저장하세요." : "저장할 씬 변경이 없습니다.");
+      return;
+    }
+    void saveDraftScene();
+  }
+
+  function openPreview(): void {
+    if (!projectId) {
+      setStatusText("프리뷰를 열 프로젝트가 없습니다.");
+      return;
+    }
+    if (previewCommandDisabledReason) {
+      setStatusText(`프리뷰 제한: ${previewCommandDisabledReason}`);
+      return;
+    }
+    recordUXDecisionEvent({
+      eventName: "previewed",
+      outcome: previewPreflight?.canRun === true ? "started" : "opened",
+      preflightResult: previewPreflight || undefined
+    });
+    onNavigate(previewPath);
+  }
+
+  function runCommandAddAction(): void {
+    if (commandAddAction.disabledReason) {
+      setStatusText(commandAddAction.disabledReason);
+      return;
+    }
+    if (commandAddAction.kind === "start") {
+      void createStartScene();
+      return;
+    }
+    if (commandAddAction.kind === "choice") {
+      void createChoiceTargetScene();
+      return;
+    }
+    void addSceneAfterCurrent();
+  }
+
+  function handleLayoutSplitterKeyDown(target: StudioLayoutResizeTarget, event: ReactKeyboardEvent<HTMLButtonElement>): void {
+    const horizontalKeys = ["ArrowLeft", "ArrowRight"];
+    const verticalKeys = ["ArrowUp", "ArrowDown"];
+    if (target === "problems" ? !verticalKeys.includes(event.key) : !horizontalKeys.includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" || event.key === "ArrowUp" ? 1 : -1;
+    const step = 24;
+    if (target === "route") {
+      updateLayout({ routeWidth: layout.routeWidth + (direction * step) });
+    } else if (target === "inspector") {
+      updateLayout({ inspectorWidth: layout.inspectorWidth - (direction * step) });
+    } else {
+      updateLayout({ problemsHeight: layout.problemsHeight + (direction * step) });
+    }
+  }
+
+  function startLayoutResize(target: StudioLayoutResizeTarget, startX: number, startY: number): void {
+    const startRouteWidth = layout.routeWidth;
+    const startInspectorWidth = layout.inspectorWidth;
+    const startProblemsHeight = layout.problemsHeight;
+
+    function handlePointerMove(event: PointerEvent): void {
+      if (target === "route") {
+        updateLayout({ routeWidth: startRouteWidth + event.clientX - startX });
+      } else if (target === "inspector") {
+        updateLayout({ inspectorWidth: startInspectorWidth - (event.clientX - startX) });
+      } else {
+        updateLayout({ problemsHeight: startProblemsHeight - (event.clientY - startY) });
+      }
+    }
+
+    function stopPointerMove(): void {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopPointerMove);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopPointerMove, { once: true });
   }
 
   async function loadFixedPrompts(): Promise<void> {
@@ -1216,7 +1419,35 @@ export function StudioWorkspace({
     <section aria-label={navigationLabel} className="studio-workspace" data-testid="studio-workspace" style={rootStyle}>
       <header aria-label="상단 명령 바" className="studio-command-bar">
         <div className="studio-command-main">
-          <strong>{project?.title || "VN Maker Studio"}</strong>
+          <nav aria-label="프로젝트 위치" className="studio-breadcrumb">
+            <button onClick={() => onNavigate("/projects")} type="button">Projects</button>
+            <span aria-hidden="true">&gt;</span>
+            <button onClick={() => onNavigate(projectOverviewPath)} type="button">{project?.title || "VN Maker Studio"}</button>
+            <span aria-hidden="true">&gt;</span>
+            <strong>Studio</strong>
+          </nav>
+          {routes.length > 1 ? (
+            <label className="studio-route-selector">
+              <span>route:</span>
+              <select aria-label="route selector" onChange={(event) => selectRoute(event.target.value)} value={activeRoute?.id || ""}>
+                {routes.map((route) => (
+                  <option key={route.id} value={route.id}>{route.title || route.id}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span className="studio-route-selector readonly">route: {activeRoute?.title || activeRoute?.id || "없음"}</span>
+          )}
+          <label className="studio-scene-title-input">
+            <span>씬</span>
+            <input
+              aria-label="SceneTitleInput"
+              disabled={!draftScene || saveState === "saving"}
+              onChange={(event) => patchDraftScene({ label: event.target.value })}
+              placeholder="선택 씬 제목"
+              value={sceneTitleInput}
+            />
+          </label>
           <StatusChip tone={saveState === "failed" || saveState === "apiFailure" ? "danger" : dirty ? "warning" : "success"}>
             {saveStateLabel(saveState, dirty)}
           </StatusChip>
@@ -1224,40 +1455,55 @@ export function StudioWorkspace({
           <span className="studio-command-status">{statusText}</span>
         </div>
         <div className="studio-command-actions">
-          <Button disabled={!draftScene || saveState === "saving" || !contentDirty} icon={<Save size={16} />} onClick={() => void saveDraftScene()} variant="primary">
+          <Button disabled={Boolean(commandAddAction.disabledReason)} icon={<Plus size={16} />} onClick={runCommandAddAction} title={commandAddAction.disabledReason || commandAddAction.label} className="studio-command-add">
+            {commandAddAction.label}
+          </Button>
+          <Button icon={<Eye size={16} />} onClick={() => onNavigate(projectOverviewPath)} title="프로젝트 상세로">
+            프로젝트 상세로
+          </Button>
+          <Button disabled={!canSaveDraftContent} icon={<Save size={16} />} onClick={runSaveCommand} title="Cmd/Ctrl+S" variant="primary">
             저장
           </Button>
           <Button disabled={saveState === "saving" || dirty} icon={<RefreshCw size={16} />} onClick={() => void validateStudio()} title={dirty ? "저장 후 검증을 실행하세요." : "검증 실행"}>
             검증
           </Button>
-          <Button disabled={Boolean(previewDisabledReason)} icon={<Play size={16} />} onClick={() => onNavigate(`/projects/${projectId}/preview`)} title={previewDisabledReason || "프리뷰로 이동"}>
+          <Button disabled={Boolean(previewCommandDisabledReason)} icon={<Play size={16} />} onClick={openPreview} title={previewCommandDisabledReason || "Cmd/Ctrl+Enter"}>
             프리뷰
           </Button>
-          <Button icon={<Settings size={16} />} onClick={() => updateLayout(studioDefaultLayoutForViewport(viewport.width, viewport.height))} variant="ghost">
-            레이아웃 리셋
-          </Button>
+          <DiagnosticDrawer summary="설정">
+            <div className="studio-settings-grid">
+              <Button icon={<Settings size={16} />} onClick={() => updateLayout(studioDefaultLayoutForViewport(viewport.width, viewport.height))} variant="ghost">
+                레이아웃 리셋
+              </Button>
+              <dl className="summary-list">
+                <div><dt>Cmd/Ctrl+S</dt><dd>선택 씬 저장</dd></div>
+                <div><dt>Cmd/Ctrl+Enter</dt><dd>선택 씬 프리뷰로 이동</dd></div>
+                <div><dt>Cmd/Ctrl+K</dt><dd>루트 맵 검색 focus</dd></div>
+              </dl>
+              <div className="studio-layout-controls" aria-label="Studio layout settings">
+                <label>
+                  <span>루트 맵 폭</span>
+                  <input max="420" min="240" onChange={(event) => updateLayout({ routeWidth: Number(event.target.value) })} type="range" value={layout.routeWidth} />
+                </label>
+                <label>
+                  <span>인스펙터 폭</span>
+                  <input max="520" min="320" onChange={(event) => updateLayout({ inspectorWidth: Number(event.target.value) })} type="range" value={layout.inspectorWidth} />
+                </label>
+                <label>
+                  <span>문제 패널 높이</span>
+                  <input max={Math.max(96, Math.floor(viewport.height * 0.4))} min="96" onChange={(event) => updateLayout({ problemsHeight: Number(event.target.value) })} type="range" value={layout.problemsHeight} />
+                </label>
+              </div>
+            </div>
+          </DiagnosticDrawer>
           <DiagnosticDrawer summary="진단">
             <dl className="summary-list" data-contract-copy="진단 API 실패">
-              <div><dt>쿼리</dt><dd>?scene={selectedScene?.id || "none"} · ?panel={selectedPanel}</dd></div>
+              <div><dt>쿼리</dt><dd>?route={activeRoute?.id || "none"} · ?scene={selectedScene?.id || "none"} · ?panel={selectedPanel}</dd></div>
               <div><dt>리비전</dt><dd>{revisionStatusText(localRevision)}</dd></div>
-              <div><dt>프리뷰 제한 사유</dt><dd>{previewDisabledReason || "없음"}</dd></div>
+              <div><dt>프리뷰 제한 사유</dt><dd>{previewCommandDisabledReason || "없음"}</dd></div>
               <div><dt>진단 범위</dt><dd>진단 패널</dd></div>
               <div><dt>검증 최신성</dt><dd>{dirty ? "저장되지 않은 변경으로 갱신 필요" : "현재 초안 기준"}</dd></div>
             </dl>
-            <div className="studio-layout-controls" aria-label="Studio layout settings">
-              <label>
-                <span>루트 맵 폭</span>
-                <input max="420" min="240" onChange={(event) => updateLayout({ routeWidth: Number(event.target.value) })} type="range" value={layout.routeWidth} />
-              </label>
-              <label>
-                <span>인스펙터 폭</span>
-                <input max="520" min="320" onChange={(event) => updateLayout({ inspectorWidth: Number(event.target.value) })} type="range" value={layout.inspectorWidth} />
-              </label>
-              <label>
-                <span>문제 패널 높이</span>
-                <input max={Math.max(96, Math.floor(viewport.height * 0.4))} min="96" onChange={(event) => updateLayout({ problemsHeight: Number(event.target.value) })} type="range" value={layout.problemsHeight} />
-              </label>
-            </div>
           </DiagnosticDrawer>
         </div>
       </header>
@@ -1270,14 +1516,19 @@ export function StudioWorkspace({
           </div>
           {layout.routeCollapsed ? null : (
             <>
-              <div className="button-row">
-                <Button disabled={saveState === "saving"} icon={<Plus size={16} />} onClick={() => void createStartScene()} variant={scenes.length === 0 ? "primary" : "secondary"}>
-                  시작 씬 만들기
-                </Button>
-              </div>
-              {routeMapScenes.length > 0 ? (
+              <label className="studio-route-search">
+                <Search aria-hidden="true" size={15} />
+                <input
+                  aria-label="루트 맵 씬 검색"
+                  onChange={(event) => setRouteSearchTerm(event.target.value)}
+                  placeholder="씬 검색"
+                  ref={routeSearchRef}
+                  value={routeSearchTerm}
+                />
+              </label>
+              {filteredRouteMapScenes.length > 0 ? (
                 <ol className="studio-node-list">
-                  {routeMapScenes.map((scene, index) => {
+                  {filteredRouteMapScenes.map((scene, index) => {
                     const sceneProblemCount = visibleIssues.filter((issue) => findIssueSceneId(issue, project) === scene.id).length;
                     return (
                       <li key={scene.id || index}>
@@ -1298,6 +1549,8 @@ export function StudioWorkspace({
                     );
                   })}
                 </ol>
+              ) : routeMapScenes.length > 0 ? (
+                <p className="page-muted">검색 결과가 없습니다.</p>
               ) : (
                 <EmptyState
                   action={<Button icon={<Plus size={16} />} onClick={() => void createStartScene()} variant="primary">시작 씬 만들기</Button>}
@@ -1308,21 +1561,28 @@ export function StudioWorkspace({
             </>
           )}
         </aside>
+        <button
+          role="separator"
+          aria-label="루트 맵 폭 조절"
+          aria-orientation="vertical"
+          aria-valuemax={420}
+          aria-valuemin={240}
+          aria-valuenow={layout.routeWidth}
+          className="studio-splitter vertical"
+          onKeyDown={(event) => handleLayoutSplitterKeyDown("route", event)}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            startLayoutResize("route", event.clientX, event.clientY);
+          }}
+          type="button"
+        />
 
         <main className="studio-center">
           <section aria-label="스테이지 미리보기" className="studio-stage">
             <div className="studio-stage-header">
               <div>
                 <strong>스테이지 미리보기</strong>
-                <span>{previewDisabledReason || "프리뷰 이동 가능"} · 문제 {problemCount}건</span>
-              </div>
-              <div className="button-row">
-                <Button disabled={!selectedScene || Boolean(draftScene?.ending) || (draftScene?.choices || []).length > 0 || saveState === "saving"} icon={<Plus size={16} />} onClick={() => void addSceneAfterCurrent()}>
-                  현재 씬 뒤 새 씬
-                </Button>
-                <Button disabled={!selectedScene || Boolean(draftScene?.ending) || Boolean(draftScene?.next) || saveState === "saving"} icon={<GitBranch size={16} />} onClick={() => void createChoiceTargetScene()}>
-                  선택지 대상 생성
-                </Button>
+                <span>{previewCommandDisabledReason || "프리뷰 이동 가능"} · 문제 {problemCount}건</span>
               </div>
             </div>
             <div className="studio-stage-frame">
@@ -1378,6 +1638,21 @@ export function StudioWorkspace({
             )}
           </section>
         </main>
+        <button
+          role="separator"
+          aria-label="인스펙터 폭 조절"
+          aria-orientation="vertical"
+          aria-valuemax={520}
+          aria-valuemin={320}
+          aria-valuenow={layout.inspectorWidth}
+          className="studio-splitter vertical"
+          onKeyDown={(event) => handleLayoutSplitterKeyDown("inspector", event)}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            startLayoutResize("inspector", event.clientX, event.clientY);
+          }}
+          type="button"
+        />
 
         <aside aria-label="인스펙터" className={`studio-inspector ${layout.inspectorCollapsed ? "collapsed" : ""}`}>
           <div className="studio-panel-toolbar">
@@ -1615,6 +1890,23 @@ export function StudioWorkspace({
       </div>
 
       <section aria-label="문제 패널" className={`studio-problems-panel ${layout.problemsCollapsed ? "collapsed" : ""}`}>
+        {layout.problemsCollapsed ? null : (
+          <button
+            role="separator"
+            aria-label="문제 패널 높이 조절"
+            aria-orientation="horizontal"
+            aria-valuemax={Math.max(96, Math.floor(viewport.height * 0.4))}
+            aria-valuemin={96}
+            aria-valuenow={layout.problemsHeight}
+            className="studio-splitter horizontal"
+            onKeyDown={(event) => handleLayoutSplitterKeyDown("problems", event)}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              startLayoutResize("problems", event.clientX, event.clientY);
+            }}
+            type="button"
+          />
+        )}
         <div className="studio-panel-toolbar">
           <strong>문제 패널</strong>
           <div className="button-row">
