@@ -884,6 +884,29 @@ assert.doesNotMatch(studioWorkspaceSource, /blocks\s*:\s*\[/, "Script block UI�
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(studioWorkspaceSource, pattern, `StudioWorkspace는 #105 support false 상태를 candidate review 전용으로 표시해야 합니다: ${requiredText}`);
 });
+[
+  "ConditionEffectCandidateReview",
+  "conditionRuntimeGateStatus",
+  "conditionChoiceSummaryText",
+  "conditionReadableSummary",
+  "effectReadableSummary",
+  "ConditionEvaluationTrace",
+  "conditionPreviewCountsAsStrictSuccess",
+  "strict preview success 제외",
+  "support false",
+  "candidate review only",
+  "data-condition-runtime-support",
+  "data-condition-evaluation-trace",
+  "data-condition-choice-id",
+  "조건 builder 비활성",
+  "효과 builder 비활성",
+  "관련 Problems Panel",
+  "선택지 탭으로 이동",
+  "검증 탭으로 이동"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace 조건/효과 support gate에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
 assert.match(studioWorkspaceSource, /disabled=\{saveState === "saving" \|\| dirty\}[\s\S]{0,180}validateStudio/, "dirty draft 상태에서는 저장본 검증을 실행하지 않도록 검증 버튼을 막아야 합니다.");
 assert.match(studioWorkspaceSource, /if \(dirty\)[\s\S]{0,260}저장 후 검증을 실행하세요\./, "validateStudio는 dirty draft를 stale 저장본으로 검증하지 않아야 합니다.");
 assert.match(studioWorkspaceSource, /selectScene\(nextSelectedSceneId,\s*\{\s*force:\s*true\s*\}\)/, "서버 성공 응답의 scene 전환은 dirty confirm guard를 우회해야 합니다.");

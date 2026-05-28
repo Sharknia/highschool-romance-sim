@@ -39,6 +39,8 @@ import type {
   ProjectGenerationJob,
   ProjectIssue,
   ProjectPreviewPreflight,
+  ConditionRuntimeSupport,
+  ConditionEvaluationTrace,
   ProjectRepairAction,
   ProjectRepairActionRequiredInput,
   ProjectRepairHistoryEntry,
@@ -556,6 +558,73 @@ function studioAssetJobSourceText(job: ProjectGenerationJob): string {
   return `mock/actual/dummy · ${generationProviderText(job.provider)}`;
 }
 
+function compactUnknownValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => compactUnknownValue(item)).join(", ");
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${key} ${compactUnknownValue(item)}`)
+      .join(" · ");
+  }
+  if (typeof value === "undefined" || value === null || value === "") {
+    return "없음";
+  }
+  return String(value);
+}
+
+function conditionReadableSummary(condition?: Record<string, unknown>): string {
+  if (!condition || Object.keys(condition).length === 0) {
+    return "조건 후보 없음";
+  }
+  const parts: string[] = [];
+  if (Array.isArray(condition.flags)) {
+    parts.push(`필요 flags: ${condition.flags.join(", ")}`);
+  }
+  if (condition.affinity && typeof condition.affinity === "object") {
+    parts.push(`호감도 조건: ${compactUnknownValue(condition.affinity)}`);
+  }
+  Object.entries(condition)
+    .filter(([key]) => key !== "flags" && key !== "affinity")
+    .forEach(([key, value]) => parts.push(`${key}: ${compactUnknownValue(value)}`));
+  return parts.length ? parts.join(" · ") : "조건 후보 raw 확인 필요";
+}
+
+function effectReadableSummary(effects?: Record<string, unknown>): string {
+  if (!effects || Object.keys(effects).length === 0) {
+    return "효과 후보 없음";
+  }
+  const parts: string[] = [];
+  if (Array.isArray(effects.flags)) {
+    parts.push(`추가 flags: ${effects.flags.join(", ")}`);
+  }
+  if (effects.affinity && typeof effects.affinity === "object") {
+    parts.push(`호감도 변화: ${compactUnknownValue(effects.affinity)}`);
+  }
+  if (effects.memoryTags && typeof effects.memoryTags === "object") {
+    parts.push(`memoryTags: ${compactUnknownValue(effects.memoryTags)}`);
+  }
+  Object.entries(effects)
+    .filter(([key]) => key !== "flags" && key !== "affinity" && key !== "memoryTags")
+    .forEach(([key, value]) => parts.push(`${key}: ${compactUnknownValue(value)}`));
+  return parts.length ? parts.join(" · ") : "효과 후보 raw 확인 필요";
+}
+
+function conditionChoiceSummaryText(choice: SceneChoice): string {
+  return `${conditionReadableSummary(choice.condition)} / ${effectReadableSummary(choice.effects)}`;
+}
+
+function conditionRuntimeGateStatus(support: ConditionRuntimeSupport | null = null, trace: ConditionEvaluationTrace | null = null): string {
+  const supported = support?.supported === true;
+  const mode = support?.editorMode || "candidate_review_only";
+  const strictPreviewStatus = support?.strictPreviewStatus || trace?.status || "not_evaluated";
+  const strictSuccess = support?.strictPreviewSuccess === true;
+  if (!supported) {
+    return `support false · ${mode} · ${strictPreviewStatus} · strict preview success 제외 · conditionPreviewCountsAsStrictSuccess false`;
+  }
+  return `support true · ${mode} · ${strictPreviewStatus} · ${strictSuccess ? "strict preview success 포함" : "strict preview success 제외"}`;
+}
+
 function saveStateLabel(saveState: StudioSaveState, dirty: boolean): string {
   if (saveState === "saving") return "저장 중";
   if (saveState === "failed") return "저장 실패";
@@ -1071,6 +1140,7 @@ export function StudioWorkspace({
         ? "noProblems"
         : validationRunState;
   const conditionRuntimeSupport = previewPreflight?.conditionRuntimeSupport || previewPreflight?.runtimeCapabilities?.conditionRuntimeSupport || null;
+  const conditionEvaluationTrace = previewPreflight?.conditionEvaluationTrace || null;
   const conditionSupportMode = conditionRuntimeSupport?.editorMode || "candidate_review_only";
   const conditionStrictPreviewText = conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated"
     ? "condition preview not evaluated"
@@ -2153,6 +2223,81 @@ export function StudioWorkspace({
       return;
     }
     setStudioAssetStatus("background/CG 작업만 현재 씬 slot에 연결할 수 있습니다.");
+  }
+
+  function ConditionEffectCandidateReview() {
+    const conditionProblemRows = problemRows.filter((row) =>
+      row.issue.code === "conditional-choice-runtime-unsupported"
+      || row.issue.path?.includes("condition")
+      || row.issue.path?.includes("effects")
+      || row.focus?.inspectorPanel === "stats"
+    );
+    return (
+      <section
+        className={focusedClass("condition", "effects", "stats:condition", "stats:effects").trim()}
+        data-condition-evaluation-trace={conditionEvaluationTrace?.status || "not_evaluated"}
+        data-condition-runtime-support={conditionSupportMode}
+        ref={(element) => {
+          inspectorFirstFieldRef.current = element;
+          setFocusTargets(["condition", "effects", "stats:condition", "stats:effects"], element);
+        }}
+        tabIndex={-1}
+      >
+        <h3>조건/효과 후보 검토</h3>
+        <p className="studio-disabled-note">
+          조건 판정 런타임 지원이 #105에서 확정되기 전까지 편집할 수 없습니다. 현재 {conditionRuntimeGateStatus(conditionRuntimeSupport, conditionEvaluationTrace)}입니다. {conditionStrictPreviewText}
+        </p>
+        <dl className="summary-list">
+          <div><dt>support</dt><dd>{conditionRuntimeSupport?.supported ? "support true" : "support false"}</dd></div>
+          <div><dt>editor mode</dt><dd>{conditionSupportMode === "candidate_review_only" ? "candidate review only" : conditionSupportMode}</dd></div>
+          <div><dt>strict preview</dt><dd>{conditionRuntimeSupport?.strictPreviewSuccess ? "strict preview success 포함" : "strict preview success 제외"}</dd></div>
+          <div><dt>conditionPreviewCountsAsStrictSuccess</dt><dd>false</dd></div>
+          <div><dt>ConditionEvaluationTrace</dt><dd>{conditionEvaluationTrace?.reasonCode || conditionRuntimeSupport?.reasonCode || "conditional-choice-runtime-unsupported"}</dd></div>
+        </dl>
+        <div className="button-row">
+          <Button disabled icon={<Settings size={16} />} title="support false 상태에서는 조건 builder를 저장 가능한 편집기로 열지 않습니다.">
+            조건 builder 비활성
+          </Button>
+          <Button disabled icon={<Settings size={16} />} title="support false 상태에서는 효과 builder를 저장 가능한 편집기로 열지 않습니다.">
+            효과 builder 비활성
+          </Button>
+          <Button icon={<MousePointerClick size={16} />} onClick={() => setPanel("choices")} variant="ghost">
+            선택지 탭으로 이동
+          </Button>
+          <Button icon={<ListChecks size={16} />} onClick={() => setPanel("validation")} variant="ghost">
+            검증 탭으로 이동
+          </Button>
+          <Button disabled={conditionProblemRows.length === 0} icon={<AlertTriangle size={16} />} onClick={openProblemsPanel} variant="ghost">
+            관련 Problems Panel
+          </Button>
+        </div>
+        <ul className="studio-readonly-list">
+          {(draftScene?.choices || []).map((choice, index) => {
+            const hasCondition = Boolean(choice.condition && Object.keys(choice.condition).length);
+            const hasEffects = Boolean(choice.effects && Object.keys(choice.effects).length);
+            return (
+              <li data-condition-choice-id={choice.id || `choice-${index}`} key={choice.id || index}>
+                <strong>{choice.text || "선택지"}</strong>
+                <span>{conditionChoiceSummaryText(choice)}</span>
+                <small>사람 readable summary · 조건 후보 {hasCondition ? "있음" : "없음"} · 효과 후보 {hasEffects ? "있음" : "없음"}</small>
+              </li>
+            );
+          })}
+          {(draftScene?.choices || []).length === 0 ? (
+            <li><strong>선택지 없음</strong><span>선택지 탭에서 선택지를 만들면 조건/효과 후보 요약이 여기에 표시됩니다.</span></li>
+          ) : null}
+          {conditionProblemRows.map((row) => (
+            <li key={`condition-problem-${row.key}`}>
+              <strong>{row.issue.message || row.issue.code || "조건/효과 문제"}</strong>
+              <span>{row.defaultActionLabel || "검토 필요"}</span>
+            </li>
+          ))}
+        </ul>
+        <DiagnosticDrawer summary="ConditionEvaluationTrace 원문">
+          <pre>{JSON.stringify({ conditionRuntimeSupport, conditionEvaluationTrace }, null, 2)}</pre>
+        </DiagnosticDrawer>
+      </section>
+    );
   }
 
   function renderStudioAssetJob(job: ProjectGenerationJob) {
@@ -3648,38 +3793,7 @@ export function StudioWorkspace({
                   ) : null}
 
                   {selectedPanel === "stats" ? (
-                    <section
-                      className={focusedClass("condition", "effects", "stats:condition", "stats:effects").trim()}
-                      data-condition-runtime-support={conditionSupportMode}
-                      ref={(element) => {
-                        inspectorFirstFieldRef.current = element;
-                        setFocusTargets(["condition", "effects", "stats:condition", "stats:effects"], element);
-                      }}
-                      tabIndex={-1}
-                    >
-                      <h3>조건/효과 후보 검토</h3>
-                      <p className="studio-disabled-note">
-                        조건 판정 런타임 지원이 #105에서 확정되기 전까지 편집할 수 없습니다. 현재 미지원 상태입니다. {conditionStrictPreviewText}
-                      </p>
-                      <ul className="studio-readonly-list">
-                        {(draftScene.choices || []).map((choice, index) => {
-                          const hasCondition = Boolean(choice.condition && Object.keys(choice.condition).length);
-                          const hasEffects = Boolean(choice.effects && Object.keys(choice.effects).length);
-                          return (
-                            <li key={choice.id || index}>
-                              <strong>{choice.text || "선택지"}</strong>
-                              <span>조건 후보 {hasCondition ? "있음" : "없음"} · 효과 후보 {hasEffects ? "있음" : "없음"}</span>
-                            </li>
-                          );
-                        })}
-                        {localRepairActions.map((action, index) => (
-                          <li key={`${action.actionId || "action"}-${index}`}>
-                            <strong>{action.label || action.actionId || "수리 후보"}</strong>
-                            <span>{action.disabledReason || action.description || action.targetPath || "검토 가능"}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
+                    <ConditionEffectCandidateReview />
                   ) : null}
 
                   {selectedPanel === "assets" ? (
