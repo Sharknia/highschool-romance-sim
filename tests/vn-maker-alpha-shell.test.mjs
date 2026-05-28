@@ -12,6 +12,9 @@ function readText(path) {
 const appSource = readText("apps/web/src/client/App.tsx");
 const apiClientSource = readText("apps/web/src/client/api/client.ts");
 const issue27QaSource = readText("docs/qa/issue-27-alpha-project-management.md");
+const issue118QaPath = "docs/qa/issue-118-studio-ux-regression-accessibility.md";
+const issue118QaExists = existsSync(join(root, issue118QaPath));
+const issue118QaSource = issue118QaExists ? readText(issue118QaPath) : "";
 const toolkitDocsSource = readText("docs/vn-maker-toolkit.md");
 
 [
@@ -404,6 +407,44 @@ const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRe
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(toolkitDocsSource, pattern, `toolkit 문서는 Phase 0 판정 프로토콜 계약을 설명해야 합니다: ${requiredText}`);
 });
+assert.ok(issue118QaExists, "#118 최종 Studio UX 회귀/접근성 QA gate 문서가 있어야 합니다.");
+[
+  "# Issue 118 Studio UX Regression And Accessibility QA",
+  "Baseline Coverage Matrix",
+  "Final Gate Coverage Matrix",
+  "Ready",
+  "Partial",
+  "Missing",
+  "Browser E2E Primary Happy Path",
+  "Optional/Diagnostic Flow Evidence",
+  "Failure Path Evidence",
+  "Keyboard And Accessibility Evidence",
+  "Mock / Actual / Replay Separation",
+  "UX Event Log Evidence",
+  "Legacy-linear Reconciliation",
+  "legacy-linear #12-#16/#18/#19",
+  "#109",
+  "#110",
+  "#111",
+  "#112",
+  "#113",
+  "#114",
+  "#115",
+  "#116",
+  "#117",
+  "#118",
+  "#119",
+  "#120",
+  "#121",
+  "node tests/vn-maker-alpha-shell.test.mjs",
+  "npm run typecheck",
+  "npm run test:maker",
+  "Playwright smoke"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(issue118QaSource, pattern, `#118 QA gate 문서는 '${requiredText}' 증거를 포함해야 합니다.`);
+});
+assert.doesNotMatch(issue118QaSource, /\bnot-run\b/i, "#118 QA gate 문서는 실행하지 않은 검증을 완료 증거처럼 남기면 안 됩니다.");
 assert.match(`${projectStartSource}\n${recentProjectListSource}`, /ContentList/, "프로젝트 목록 화면은 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(
   projectStartSource.includes('type ProjectListState = "loading" | "empty" | "ready" | "error" | "deleting";'),
