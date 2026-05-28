@@ -76,6 +76,7 @@ export interface ProjectData {
     choices?: Array<{ id?: string; text?: string; next?: string; condition?: Record<string, unknown>; effects?: Record<string, unknown> }>;
     next?: string;
     ending?: { id?: string; title?: string; kind?: string };
+    memoryTags?: Record<string, string[]>;
   }>;
   assets?: ProjectAsset[];
   generationJobs?: ProjectGenerationJob[];
@@ -279,6 +280,118 @@ export interface ProjectPreviewPreflight {
   };
   conditionRuntimeSupport?: ConditionRuntimeSupport;
   conditionEvaluationTrace?: ConditionEvaluationTrace;
+}
+
+export type StudioInspectorPanelId = "scene" | "choices" | "stats" | "assets" | "validation" | string;
+
+export interface StudioIssueFocus {
+  issueId?: string;
+  severity?: string;
+  issueCode?: string;
+  path?: string;
+  message?: string;
+  routeId?: string;
+  sceneId?: string;
+  choiceId?: string;
+  field?: string;
+  inspectorPanel?: StudioInspectorPanelId;
+  scriptBlockId?: string;
+  defaultAction?: "focus" | "repair" | "preview-blocker" | "none" | string;
+  targetSceneId?: string;
+  repairActionIds?: string[];
+}
+
+export interface StudioRouteGraphNode {
+  id?: string;
+  label?: string;
+  summary?: string;
+  routeId?: string;
+  entry?: boolean;
+  reachable?: boolean;
+  unreachable?: boolean;
+  ending?: boolean;
+  problemSeverity?: string;
+}
+
+export interface StudioRouteGraphEdge {
+  id?: string;
+  kind?: "route-entry" | "next" | "choice" | string;
+  sourceSceneId?: string;
+  targetSceneId?: string;
+  choiceId?: string;
+  label?: string;
+  missingTarget?: boolean;
+}
+
+export interface StudioRouteGraphView {
+  routeId?: string;
+  routeTitle?: string;
+  entrySceneId?: string;
+  selectedSceneId?: string;
+  nodes?: StudioRouteGraphNode[];
+  edges?: StudioRouteGraphEdge[];
+  markers?: {
+    unreachableSceneIds?: string[];
+    missingTargetSceneIds?: string[];
+    problemSceneIds?: string[];
+    problemChoiceIds?: string[];
+    reachableEndingIds?: string[];
+    uncoveredTerminalSceneIds?: string[];
+  };
+}
+
+export interface StudioRouteSelection {
+  routeId?: string;
+  routeTitle?: string;
+  entrySceneId?: string;
+  selectedSceneId?: string;
+  selectedProblemId?: string;
+  deepLinkQuery?: {
+    route?: string;
+    scene?: string;
+    panel?: StudioInspectorPanelId;
+    problem?: string;
+  };
+  availableRoutes?: Array<{
+    routeId?: string;
+    routeTitle?: string;
+    entrySceneId?: string;
+    heroineId?: string;
+  }>;
+}
+
+export interface StudioPreviewPreflightView {
+  canRun?: boolean;
+  disabledReason?: string | null;
+  nextAction?: string;
+  projectRevision?: ProjectRevision;
+  blockers?: StudioIssueFocus[];
+  warnings?: StudioIssueFocus[];
+  runtimeCapabilities?: ProjectPreviewPreflight["runtimeCapabilities"];
+  conditionRuntimeSupport?: ConditionRuntimeSupport;
+  conditionEvaluationTrace?: ConditionEvaluationTrace;
+}
+
+export interface StudioViewModel {
+  projectId?: string;
+  projectRevision?: ProjectRevision;
+  routeSelection?: StudioRouteSelection;
+  routeGraph?: StudioRouteGraphView;
+  issues?: StudioIssueFocus[];
+  previewPreflight?: StudioPreviewPreflightView;
+  generatedAt?: string;
+}
+
+export interface StudioProblemAction {
+  actionId?: string;
+  issueId?: string;
+  issueCode?: string;
+  targetPath?: string;
+  label?: string;
+  disabledReason?: string | null;
+  destructive?: boolean;
+  requiresPreflight?: boolean;
+  expectedProjectRevision?: ProjectRevision;
 }
 
 export interface ProjectRepairActionRequiredInput {
@@ -605,6 +718,11 @@ export interface ProjectApiResult extends ApiResult {
   export?: ProjectExportResult;
   previewReadiness?: ProjectPreviewReadiness;
   repairActions?: ProjectRepairAction[];
+  studio?: StudioViewModel;
+  problemActions?: StudioProblemAction[];
+  appliedOperations?: string[];
+  selectedRouteId?: string;
+  selectedSceneId?: string;
   repairPreview?: ProjectRepairPreview;
   repairHistoryEntry?: ProjectRepairHistoryEntry | null;
   repairHistory?: ProjectRepairHistoryEntry[];

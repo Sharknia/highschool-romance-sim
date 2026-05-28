@@ -1,6 +1,6 @@
 import { ArrowRight, CheckCircle2, Copy, ExternalLink, GitCompareArrows, Heart, Image as ImageIcon, Play, RefreshCw, Settings, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { AssetStatePanel, Button, DiagnosticDrawer, EmptyState, ReadinessPanel, StatusChip, TabList, TabStatusList } from "../../components/ui";
 import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePageTypes";
@@ -34,6 +34,15 @@ import {
   primaryActionTabFromSummary
 } from "./projectDetailState";
 import {
+  activeRepairHistoryEntry,
+  repairActionKey,
+  repairActionMetaText,
+  repairInputDisplayLabel,
+  repairInputValue,
+  repairRequestBody,
+  repairResultMessage
+} from "./projectRepairFlow";
+import {
   backgroundAssetDisplayLabel,
   backgroundConnectionText,
   backgroundSceneConnectionText,
@@ -47,6 +56,7 @@ import {
   imageJobKindLabel,
   isDummyAsset,
   isDummyGenerationJob,
+  isVisualImageJob,
   jobStatusLabel,
   repairDiffOperationLabel,
   repairDiffValueText
@@ -177,10 +187,6 @@ function eventResultHasCg(result: ProjectApiResult, plan?: ProjectEventPlan): bo
     result.project?.generationJobs?.some((job) => job.kind === "cg" && job.status !== "completed")
     || (plan?.decision?.cgCount || 0) > 0
   );
-}
-
-function isVisualImageJob(job: ProjectGenerationJob): boolean {
-  return job.kind === "background" || job.kind === "cg";
 }
 
 function assetState(jobs: ProjectGenerationJob[]): AssetState {
@@ -357,48 +363,6 @@ function previewPreflightIssueText(issue: NonNullable<ProjectPreviewPreflight["b
   return `${code}${path}${issue.message || "확인이 필요합니다."}${repairs}`;
 }
 
-function repairActionInputText(action: ProjectRepairAction): string {
-  const inputs = (action.requiredInputs || []).map((input) => input.label || input.name).filter(Boolean);
-  return inputs.length ? `필요 입력 ${inputs.join(", ")}` : "추가 입력 없음";
-}
-
-function repairActionMetaText(action: ProjectRepairAction): string {
-  const metadata = [
-    action.issueCode ? `문제 코드 ${action.issueCode}` : "",
-    action.targetPath ? `대상 ${action.targetPath}` : "",
-    action.destructive ? "삭제/변경 포함" : "비파괴",
-    action.requiresConfirmation ? "확인 필요" : "",
-    repairActionInputText(action)
-  ].filter(Boolean);
-  return metadata.join(" · ");
-}
-
-function repairActionKey(action: Pick<ProjectRepairAction, "actionId" | "issueCode" | "targetPath">): string {
-  return [action.issueCode || "issue", action.actionId || "action", action.targetPath || "target"].join("::");
-}
-
-function repairInputDefaultValue(input: ProjectRepairActionRequiredInput): string {
-  if (input.inputType === "select") {
-    return input.options?.[0]?.value || "";
-  }
-  return "";
-}
-
-function repairInputDisplayLabel(input: ProjectRepairActionRequiredInput): string {
-  return input.label || input.name || "입력";
-}
-
-function repairResultMessage(result: ProjectApiResult, fallback: string): string {
-  return result.message || result.error || result.issues?.[0]?.message || result.validation?.issues?.[0]?.message || fallback;
-}
-
-function activeRepairHistoryEntry(entry: ProjectRepairHistoryEntry | null): ProjectRepairHistoryEntry | null {
-  if (entry?.id && !entry.revertedAt) {
-    return entry;
-  }
-  return null;
-}
-
 function requiredDataNameLabel(name: string): string {
   if (name === "heroine") return "히로인";
   if (name === "background") return "배경";
@@ -497,6 +461,7 @@ export function ProjectDetailView({
 }: ProjectDetailViewProps) {
   const { postAuthedJson } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [heroines, setHeroines] = useState<HeroineDraft[]>([]);
   const [selectedHeroineId, setSelectedHeroineId] = useState("");
   const [heroineStatus, setHeroineStatus] = useState("히로인 라이브러리를 불러오는 중입니다.");
@@ -534,6 +499,7 @@ export function ProjectDetailView({
   const [repairStatus, setRepairStatus] = useState("수리 후보를 선택해 diff를 확인하세요.");
   const [repairBusy, setRepairBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSceneQuery = searchParams.get("scene") || "";
   const [exportState, setExportState] = useState<ExportState>("empty");
   const [exportStatus, setExportStatus] = useState("내보내기 전입니다.");
   const [exportResult, setExportResult] = useState<ProjectExportResult | null>(null);
@@ -569,6 +535,10 @@ export function ProjectDetailView({
     const routeEntryScene = projectScenes.find((scene) => scene.id === currentRoute?.entrySceneId);
     return projectScenes.find((scene) => scene.id === selectedSceneId) || routeEntryScene || projectScenes[0] || null;
   }, [currentRoute?.entrySceneId, projectScenes, selectedSceneId]);
+  const previewSceneFromQuery = useMemo(() => {
+    if (!previewSceneQuery) return null;
+    return projectScenes.find((scene) => scene.id === previewSceneQuery) || null;
+  }, [previewSceneQuery, projectScenes]);
   const pendingDiff = pendingPatch?.validation?.diff || pendingPatch?.diff;
   const visibleEventIssues = eventIssues.length > 0 ? eventIssues : pendingPatch?.validation?.issues || [];
   const imageJobs = useMemo(() => {
@@ -714,6 +684,14 @@ export function ProjectDetailView({
       setSelectedSceneId(nextScene.id);
     }
   }, [activeTab, currentProject, projectRoutes, projectScenes, selectedRouteId, selectedSceneId]);
+
+  useEffect(() => {
+    if (activeTab !== "preview" || !previewSceneFromQuery?.id || previewSceneId === previewSceneFromQuery.id) {
+      return;
+    }
+    setPreviewSceneId(previewSceneFromQuery.id);
+    setPreviewStatus(`Studio에서 선택한 씬 ${sceneLabel(previewSceneFromQuery)} 기준으로 프리뷰를 준비합니다.`);
+  }, [activeTab, previewSceneFromQuery, previewSceneId]);
 
   useEffect(() => {
     if (activeTab !== "studio") {
@@ -1189,40 +1167,6 @@ export function ProjectDetailView({
     return validationIssues(result).map(issueText);
   }
 
-  function repairInputValue(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput): string {
-    const name = input.name || "";
-    if (!name) {
-      return "";
-    }
-    const value = repairActionInputs[repairActionKey(action)]?.[name];
-    return typeof value === "string" ? value : repairInputDefaultValue(input);
-  }
-
-  function repairInputsFor(action: ProjectRepairAction): Record<string, string> {
-    return (action.requiredInputs || []).reduce<Record<string, string>>((inputs, input) => {
-      if (input.name) {
-        inputs[input.name] = repairInputValue(action, input);
-      }
-      return inputs;
-    }, {});
-  }
-
-  function repairRequestBody(action: ProjectRepairAction): Record<string, unknown> {
-    const body: Record<string, unknown> = {
-      projectDirectory,
-      repairAction: {
-        actionId: action.actionId,
-        issueCode: action.issueCode,
-        targetPath: action.targetPath,
-        inputs: repairInputsFor(action)
-      }
-    };
-    if (currentPreviewPreflight?.projectRevision) {
-      body.expectedProjectRevision = currentPreviewPreflight.projectRevision;
-    }
-    return body;
-  }
-
   function updateRepairInput(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput, value: string): void {
     if (!input.name) {
       return;
@@ -1277,7 +1221,7 @@ export function ProjectDetailView({
       outcome: "used"
     });
     try {
-      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/preview", repairRequestBody(action));
+      const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/preview", repairRequestBody(action, projectDirectory, repairActionInputs, currentPreviewPreflight?.projectRevision));
       if (result.ok === false || !result.repairPreview) {
         setRepairPreview(null);
         if (result.previewReadiness) setPreviewReadiness(result.previewReadiness);
@@ -1322,8 +1266,7 @@ export function ProjectDetailView({
     setRepairStatus("수리를 적용하고 검증을 다시 계산하는 중입니다.");
     try {
       const result = await postAuthedJson<ProjectApiResult>("/api/project/repair/apply", {
-        ...repairRequestBody(repairPreview.repairAction),
-        expectedProjectRevision: repairPreview.beforeRevision,
+        ...repairRequestBody(repairPreview.repairAction, projectDirectory, repairActionInputs, repairPreview.beforeRevision),
         confirmToken: repairPreview.confirmToken
       });
       if (result.ok === false) {
@@ -2010,13 +1953,13 @@ export function ProjectDetailView({
                               <label key={`${repairActionKey(action)}-${input.name || input.label}`} className="repair-action-input">
                                 <span>{repairInputDisplayLabel(input)}</span>
                                 {input.inputType === "select" ? (
-                                  <select disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} value={repairInputValue(action, input)}>
+                                  <select disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} value={repairInputValue(action, input, repairActionInputs)}>
                                     {(input.options || []).map((option) => (
                                       <option key={option.value || option.label} value={option.value || ""}>{option.label || option.value || "선택"}</option>
                                     ))}
                                   </select>
                                 ) : (
-                                  <input disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} placeholder={repairInputDisplayLabel(input)} value={repairInputValue(action, input)} />
+                                  <input disabled={repairBusy || Boolean(action.disabledReason)} onChange={(event) => updateRepairInput(action, input, event.target.value)} placeholder={repairInputDisplayLabel(input)} value={repairInputValue(action, input, repairActionInputs)} />
                                 )}
                               </label>
                             ))}

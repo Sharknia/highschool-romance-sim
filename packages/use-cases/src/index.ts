@@ -16,6 +16,8 @@ import {
   createImageGenerationJob,
   createPreviewPreflight,
   createProjectRevision,
+  createStudioIssueFocus,
+  createStudioViewModel,
   planExpressionAssetsForHeroine,
   createProjectFromHeroine,
   createStarterProject,
@@ -58,6 +60,7 @@ import {
   type ProjectPatchDescription,
   type ProjectActionEventDto,
   type ProjectRevisionDto,
+  type StudioViewModelDto,
   type TestPromptFixtureDto,
   type TestPromptSetDto,
   type UXDecisionEventDto,
@@ -245,6 +248,8 @@ export type MakerActionId =
   | "restoreProject"
   | "restoreRecentProject"
   | "validateProject"
+  | "getStudioContext"
+  | "applyStudioMutation"
   | "expandEvent"
   | "approveEvent"
   | "listFixedPrompts"
@@ -417,6 +422,53 @@ export interface RepairHistoryEntryDto {
   afterRevision: ProjectRevisionDto;
   appliedAt: string;
   revertedAt?: string;
+}
+
+export interface StudioProblemActionDto {
+  actionId: string;
+  issueId: string;
+  issueCode: string;
+  targetPath: string;
+  label: string;
+  disabledReason: string | null;
+  destructive: boolean;
+  requiresPreflight: boolean;
+  expectedProjectRevision: ProjectRevisionDto;
+}
+
+export type StudioMutationOperation =
+  | { type: "upsertScene"; scene: VnMakerScene }
+  | { type: "deleteScene"; sceneId: string; mode?: "failIfReferenced" | "unlinkReferences" }
+  | { type: "duplicateScene"; sourceSceneId: string; newSceneId?: string; label?: string }
+  | { type: "deleteChoice"; sceneId: string; choiceId: string }
+  | { type: "duplicateChoice"; sceneId: string; choiceId: string; newChoiceId?: string; text?: string }
+  | { type: "reorderChoice"; sceneId: string; choiceId: string; toIndex: number }
+  | { type: "clearChoiceTarget"; sceneId: string; choiceId: string }
+  | { type: "unlinkSceneTarget"; sourceSceneId: string; targetSceneId: string; edgeType?: "next" | "choice" | "all" }
+  | { type: "setRouteEntry"; routeId: string; sceneId: string };
+
+export interface StudioDraftSaveInput {
+  projectDirectory?: string;
+  expectedProjectRevision: ProjectRevisionInput;
+  routeId?: string;
+  sceneId?: string;
+  operations: StudioMutationOperation[];
+}
+
+export interface StudioMutationResultDto {
+  ok: true;
+  projectDirectory: string;
+  project: VnMakerProject;
+  previousRevision: ProjectRevisionDto;
+  projectRevision: ProjectRevisionDto;
+  validation: {
+    ok: boolean;
+    issues: ValidationIssue[];
+  };
+  studio: StudioViewModelDto;
+  selectedRouteId?: string;
+  selectedSceneId?: string;
+  appliedOperations: string[];
 }
 
 export interface UndoRepairInput {
@@ -1287,6 +1339,41 @@ function repairActionsForValidation(
     }
   });
   return actions;
+}
+
+function studioProblemActionsFor(
+  project: VnMakerProject,
+  validation: { ok?: boolean; issues?: ValidationIssue[] },
+  preflight: PreviewPreflightDto,
+  projectRevision: ProjectRevisionDto
+): StudioProblemActionDto[] {
+  return repairActionsForValidation(project, validation, preflight).map((action) => {
+    const sourceIssue = (validation.issues || []).find((issue) =>
+      issue.severity === "error" && issue.code === action.issueCode && issue.path === action.targetPath
+    );
+    const focus = sourceIssue
+      ? createStudioIssueFocus(project, sourceIssue)
+      : createStudioIssueFocus(project, {
+        issueCode: action.issueCode,
+        path: action.targetPath,
+        message: action.description,
+        sceneIds: action.expectedTarget.sceneIds,
+        choiceIds: action.expectedTarget.choiceIds,
+        targetSceneId: action.expectedTarget.targetSceneId,
+        repairActionIds: [action.actionId]
+      }, { severity: "error" });
+    return {
+      actionId: action.actionId,
+      issueId: focus.issueId,
+      issueCode: action.issueCode,
+      targetPath: action.targetPath,
+      label: action.label,
+      disabledReason: action.disabledReason,
+      destructive: action.destructive,
+      requiresPreflight: true,
+      expectedProjectRevision: projectRevision
+    };
+  });
 }
 
 interface RepairActionRequest {
@@ -2677,6 +2764,318 @@ function manualInputError(message: string, path: string, sceneIds?: string[], ch
     sceneIds,
     choiceIds
   } as ValidationIssue)));
+}
+
+function studioInputError(message: string, path: string, sceneIds?: string[], choiceIds?: string[]): InputValidationError {
+  return new InputValidationError(message, [{ severity: "error", path, message, sceneIds, choiceIds } as ValidationIssue]);
+}
+
+function requiredStudioString(record: JsonRecord, key: string, path: string): string {
+  const value = record[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw studioInputError(`${path} 입력이 필요합니다.`, path);
+  }
+  return value.trim();
+}
+
+function optionalStudioString(record: JsonRecord, key: string, path: string): string | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw studioInputError(`${path} 입력은 문자열이어야 합니다.`, path);
+  }
+  return value.trim() || undefined;
+}
+
+function requiredStudioNumber(record: JsonRecord, key: string, path: string): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw studioInputError(`${path} 입력은 숫자여야 합니다.`, path);
+  }
+  return value;
+}
+
+function optionalStudioEnum<T extends string>(record: JsonRecord, key: string, path: string, allowed: readonly T[]): T | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw studioInputError(`${path} 입력은 ${allowed.join(", ")} 중 하나여야 합니다.`, path);
+  }
+  return value as T;
+}
+
+function studioOperationsFrom(input: unknown): StudioMutationOperation[] {
+  const operations = asRecord(input).operations;
+  if (!Array.isArray(operations) || operations.length === 0) {
+    throw studioInputError("Studio mutation operations 입력이 필요합니다.", "operations");
+  }
+  return operations.map((operation, index) => {
+    const record = asRecord(operation);
+    const path = `operations.${index}`;
+    const type = requiredStudioString(record, "type", `${path}.type`);
+    if (type === "upsertScene") {
+      return {
+        type,
+        scene: requireParsed(parseVnMakerScene(record.scene), `${path}.scene`)
+      };
+    }
+    if (type === "deleteScene") {
+      return {
+        type,
+        sceneId: requiredStudioString(record, "sceneId", `${path}.sceneId`),
+        mode: optionalStudioEnum(record, "mode", `${path}.mode`, ["failIfReferenced", "unlinkReferences"] as const)
+      };
+    }
+    if (type === "duplicateScene") {
+      return {
+        type,
+        sourceSceneId: requiredStudioString(record, "sourceSceneId", `${path}.sourceSceneId`),
+        newSceneId: optionalStudioString(record, "newSceneId", `${path}.newSceneId`),
+        label: optionalStudioString(record, "label", `${path}.label`)
+      };
+    }
+    if (type === "deleteChoice") {
+      return {
+        type,
+        sceneId: requiredStudioString(record, "sceneId", `${path}.sceneId`),
+        choiceId: requiredStudioString(record, "choiceId", `${path}.choiceId`)
+      };
+    }
+    if (type === "duplicateChoice") {
+      return {
+        type,
+        sceneId: requiredStudioString(record, "sceneId", `${path}.sceneId`),
+        choiceId: requiredStudioString(record, "choiceId", `${path}.choiceId`),
+        newChoiceId: optionalStudioString(record, "newChoiceId", `${path}.newChoiceId`),
+        text: optionalStudioString(record, "text", `${path}.text`)
+      };
+    }
+    if (type === "reorderChoice") {
+      return {
+        type,
+        sceneId: requiredStudioString(record, "sceneId", `${path}.sceneId`),
+        choiceId: requiredStudioString(record, "choiceId", `${path}.choiceId`),
+        toIndex: requiredStudioNumber(record, "toIndex", `${path}.toIndex`)
+      };
+    }
+    if (type === "clearChoiceTarget") {
+      return {
+        type,
+        sceneId: requiredStudioString(record, "sceneId", `${path}.sceneId`),
+        choiceId: requiredStudioString(record, "choiceId", `${path}.choiceId`)
+      };
+    }
+    if (type === "unlinkSceneTarget") {
+      return {
+        type,
+        sourceSceneId: requiredStudioString(record, "sourceSceneId", `${path}.sourceSceneId`),
+        targetSceneId: requiredStudioString(record, "targetSceneId", `${path}.targetSceneId`),
+        edgeType: optionalStudioEnum(record, "edgeType", `${path}.edgeType`, ["next", "choice", "all"] as const)
+      };
+    }
+    if (type === "setRouteEntry") {
+      return {
+        type,
+        routeId: requiredStudioString(record, "routeId", `${path}.routeId`),
+        sceneId: requiredStudioString(record, "sceneId", `${path}.sceneId`)
+      };
+    }
+    throw studioInputError("지원하지 않는 Studio mutation operation입니다.", `${path}.type`);
+  });
+}
+
+function requireStudioScene(project: VnMakerProject, sceneId: string, path: string): VnMakerScene {
+  const scene = project.scenes.find((item) => item.id === sceneId);
+  if (!scene) {
+    throw studioInputError("Studio mutation 대상 scene을 찾을 수 없습니다.", path, [sceneId]);
+  }
+  return scene;
+}
+
+function requireStudioChoice(scene: VnMakerScene, choiceId: string, path: string): VnMakerChoice {
+  const choice = scene.choices.find((item) => item.id === choiceId);
+  if (!choice) {
+    throw studioInputError("Studio mutation 대상 choice를 찾을 수 없습니다.", path, [scene.id], [choiceId]);
+  }
+  return choice;
+}
+
+function studioReferencedSceneIds(project: VnMakerProject, sceneId: string): string[] {
+  const refs: string[] = [];
+  project.routes.forEach((route) => {
+    if (route.entrySceneId === sceneId) {
+      refs.push(`route:${route.id}`);
+    }
+  });
+  project.scenes.forEach((scene) => {
+    if (scene.next === sceneId) {
+      refs.push(`scene:${scene.id}:next`);
+    }
+    scene.choices.forEach((choice) => {
+      if (choice.next === sceneId) {
+        refs.push(`scene:${scene.id}:choice:${choice.id}`);
+      }
+    });
+  });
+  return refs;
+}
+
+function replacementRouteEntrySceneId(project: VnMakerProject, scene: VnMakerScene): string | undefined {
+  if (scene.next && project.scenes.some((candidate) => candidate.id === scene.next && candidate.id !== scene.id)) {
+    return scene.next;
+  }
+  return project.scenes.find((candidate) => candidate.id !== scene.id)?.id;
+}
+
+function unlinkSceneReferences(project: VnMakerProject, deletedScene: VnMakerScene): void {
+  const replacementEntrySceneId = replacementRouteEntrySceneId(project, deletedScene);
+  project.routes.forEach((route) => {
+    if (route.entrySceneId === deletedScene.id) {
+      if (!replacementEntrySceneId) {
+        throw studioInputError("route entry scene을 삭제하려면 대체 scene이 필요합니다.", "operations.deleteScene.sceneId", [deletedScene.id]);
+      }
+      route.entrySceneId = replacementEntrySceneId;
+    }
+  });
+  project.scenes.forEach((scene) => {
+    if (scene.next === deletedScene.id) {
+      scene.next = undefined;
+    }
+    scene.choices.forEach((choice) => {
+      if (choice.next === deletedScene.id) {
+        choice.next = `studio-unlinked-target-${choice.id}`;
+      }
+    });
+  });
+}
+
+function applyStudioOperation(project: VnMakerProject, operation: StudioMutationOperation): { project: VnMakerProject; selectedSceneId?: string } {
+  if (operation.type === "upsertScene") {
+    return {
+      project: upsertProjectScene(project, operation.scene),
+      selectedSceneId: operation.scene.id
+    };
+  }
+
+  if (operation.type === "deleteScene") {
+    const scene = requireStudioScene(project, operation.sceneId, "operations.deleteScene.sceneId");
+    const references = studioReferencedSceneIds(project, scene.id);
+    if (references.length > 0 && operation.mode !== "unlinkReferences") {
+      throw studioInputError(`scene 삭제 전에 참조를 해제해야 합니다: ${references.join(", ")}`, "operations.deleteScene.mode", [scene.id]);
+    }
+    unlinkSceneReferences(project, scene);
+    project.scenes = project.scenes.filter((item) => item.id !== scene.id);
+    return { project, selectedSceneId: project.scenes[0]?.id };
+  }
+
+  if (operation.type === "duplicateScene") {
+    const source = requireStudioScene(project, operation.sourceSceneId, "operations.duplicateScene.sourceSceneId");
+    const newSceneId = operation.newSceneId?.trim() || uniqueSceneId(project, `${source.id}-copy`);
+    if (project.scenes.some((scene) => scene.id === newSceneId)) {
+      throw studioInputError("duplicateScene newSceneId가 이미 존재합니다.", "operations.duplicateScene.newSceneId", [newSceneId]);
+    }
+    const duplicate = requireParsed(parseVnMakerScene({
+      ...source,
+      id: newSceneId,
+      label: operation.label?.trim() || `${source.label} 복제`,
+      ending: source.ending ? {
+        ...source.ending,
+        id: uniqueEndingId(project, newSceneId)
+      } : undefined,
+      choices: source.choices.map((choice) => ({
+        ...choice,
+        id: uniqueChoiceId({ ...source, id: newSceneId, choices: [] }, choice.id)
+      }))
+    }), "scene");
+    project.scenes.push(duplicate);
+    return { project, selectedSceneId: duplicate.id };
+  }
+
+  if (operation.type === "deleteChoice") {
+    const scene = requireStudioScene(project, operation.sceneId, "operations.deleteChoice.sceneId");
+    requireStudioChoice(scene, operation.choiceId, "operations.deleteChoice.choiceId");
+    scene.choices = scene.choices.filter((choice) => choice.id !== operation.choiceId);
+    return { project, selectedSceneId: scene.id };
+  }
+
+  if (operation.type === "duplicateChoice") {
+    const scene = requireStudioScene(project, operation.sceneId, "operations.duplicateChoice.sceneId");
+    const source = requireStudioChoice(scene, operation.choiceId, "operations.duplicateChoice.choiceId");
+    const newChoiceId = operation.newChoiceId?.trim() || uniqueChoiceId(scene, `${source.id}-copy`);
+    if (scene.choices.some((choice) => choice.id === newChoiceId)) {
+      throw studioInputError("duplicateChoice newChoiceId가 이미 존재합니다.", "operations.duplicateChoice.newChoiceId", [scene.id], [newChoiceId]);
+    }
+    scene.choices.push({
+      ...source,
+      id: newChoiceId,
+      text: operation.text?.trim() || `${source.text} 복제`
+    });
+    return { project, selectedSceneId: scene.id };
+  }
+
+  if (operation.type === "reorderChoice") {
+    const scene = requireStudioScene(project, operation.sceneId, "operations.reorderChoice.sceneId");
+    const index = scene.choices.findIndex((choice) => choice.id === operation.choiceId);
+    if (index < 0) {
+      throw studioInputError("Studio mutation 대상 choice를 찾을 수 없습니다.", "operations.reorderChoice.choiceId", [scene.id], [operation.choiceId]);
+    }
+    const [choice] = scene.choices.splice(index, 1);
+    const toIndex = Math.min(scene.choices.length, Math.max(0, Math.round(operation.toIndex)));
+    scene.choices.splice(toIndex, 0, choice);
+    return { project, selectedSceneId: scene.id };
+  }
+
+  if (operation.type === "clearChoiceTarget") {
+    const scene = requireStudioScene(project, operation.sceneId, "operations.clearChoiceTarget.sceneId");
+    const choice = requireStudioChoice(scene, operation.choiceId, "operations.clearChoiceTarget.choiceId");
+    choice.next = `studio-unlinked-target-${choice.id}`;
+    return { project, selectedSceneId: scene.id };
+  }
+
+  if (operation.type === "unlinkSceneTarget") {
+    const source = requireStudioScene(project, operation.sourceSceneId, "operations.unlinkSceneTarget.sourceSceneId");
+    const edgeType = operation.edgeType || "all";
+    if ((edgeType === "next" || edgeType === "all") && source.next === operation.targetSceneId) {
+      source.next = undefined;
+    }
+    if (edgeType === "choice" || edgeType === "all") {
+      source.choices.forEach((choice) => {
+        if (choice.next === operation.targetSceneId) {
+          choice.next = `studio-unlinked-target-${choice.id}`;
+        }
+      });
+    }
+    return { project, selectedSceneId: source.id };
+  }
+
+  if (operation.type === "setRouteEntry") {
+    const route = project.routes.find((item) => item.id === operation.routeId);
+    if (!route) {
+      throw studioInputError("Studio mutation 대상 route를 찾을 수 없습니다.", "operations.setRouteEntry.routeId");
+    }
+    requireStudioScene(project, operation.sceneId, "operations.setRouteEntry.sceneId");
+    route.entrySceneId = operation.sceneId;
+    return { project, selectedSceneId: operation.sceneId };
+  }
+
+  throw studioInputError("지원하지 않는 Studio mutation operation입니다.", "operations.type");
+}
+
+function applyStudioOperations(project: VnMakerProject, operations: StudioMutationOperation[]): { project: VnMakerProject; selectedSceneId?: string; appliedOperations: string[] } {
+  let nextProject = project;
+  let selectedSceneId: string | undefined;
+  const appliedOperations: string[] = [];
+  operations.forEach((operation) => {
+    const result = applyStudioOperation(nextProject, operation);
+    nextProject = result.project;
+    selectedSceneId = result.selectedSceneId || selectedSceneId;
+    appliedOperations.push(operation.type);
+  });
+  return { project: nextProject, selectedSceneId, appliedOperations };
 }
 
 function sceneFromInput(project: VnMakerProject, inputScene: unknown): VnMakerScene {
@@ -4269,6 +4668,94 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
         });
       } finally {
         store.close();
+      }
+    },
+
+    async getStudioContext(input: unknown) {
+      try {
+        const record = asRecord(input);
+        const store = await ensureProjectStore(input, defaultProjectDirectory);
+        try {
+          const project = store.requireProject();
+          const validation = store.validateAndStore();
+          const projectRevision = store.getProjectRevision();
+          const previewPreflight = createPreviewPreflight(project, validation, projectRevision);
+          const routeId = stringField(record, "routeId");
+          const sceneId = stringField(record, "sceneId");
+          const studio = createStudioViewModel(project, validation, previewPreflight, projectRevision, {
+            routeId,
+            selectedSceneId: sceneId,
+            selectedProblemId: stringField(record, "problemId")
+          });
+          const problemActions = studioProblemActionsFor(project, validation, previewPreflight, projectRevision);
+          return withStoreActionState("getStudioContext", store, {
+            ok: true,
+            projectDirectory: store.paths.projectDirectory,
+            project,
+            validation,
+            previewPreflight,
+            repairActions: repairActionsForValidation(project, validation, previewPreflight),
+            problemActions,
+            studio
+          }, { project, validation, projectRevision });
+        } finally {
+          store.close();
+        }
+      } catch (error) {
+        return projectActionFailureFromError(error, "getStudioContext");
+      }
+    },
+
+    async applyStudioMutation(input: unknown) {
+      try {
+        const record = asRecord(input);
+        const operations = studioOperationsFrom(input);
+        const expectedProjectRevision = expectedProjectRevisionFrom(input);
+        const store = await ensureProjectStore(input, defaultProjectDirectory);
+        try {
+          let selectedSceneId = stringField(record, "sceneId");
+          let appliedOperations: string[] = [];
+          const result = store.applyProjectMutation({
+            expectedProjectRevision,
+            mutate: (project) => {
+              const outcome = applyStudioOperations(project, operations);
+              selectedSceneId = outcome.selectedSceneId || selectedSceneId;
+              appliedOperations = outcome.appliedOperations;
+              return outcome.project;
+            }
+          });
+          const routeId = stringField(record, "routeId") || result.project.routes[0]?.id;
+          selectedSceneId = selectedSceneId || result.project.routes.find((route) => route.id === routeId)?.entrySceneId || result.project.scenes[0]?.id;
+          const previewPreflight = createPreviewPreflight(result.project, result.validation, result.projectRevision);
+          const studio = createStudioViewModel(result.project, result.validation, previewPreflight, result.projectRevision, {
+            routeId,
+            selectedSceneId,
+            selectedProblemId: stringField(record, "problemId")
+          });
+          return withStoreActionState("applyStudioMutation", store, {
+            ok: true,
+            projectDirectory: store.paths.projectDirectory,
+            project: result.project,
+            previousRevision: result.previousRevision,
+            projectRevision: result.projectRevision,
+            validation: result.validation,
+            previewPreflight,
+            repairActions: repairActionsForValidation(result.project, result.validation, previewPreflight),
+            problemActions: studioProblemActionsFor(result.project, result.validation, previewPreflight, result.projectRevision),
+            studio,
+            selectedRouteId: routeId,
+            selectedSceneId,
+            appliedOperations
+          } satisfies StudioMutationResultDto & JsonRecord, {
+            project: result.project,
+            validation: result.validation,
+            projectRevision: result.projectRevision
+          });
+        } finally {
+          store.close();
+        }
+      } catch (error) {
+        return projectActionFailureFromError(error, "applyStudioMutation");
       }
     },
 
