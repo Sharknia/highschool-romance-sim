@@ -253,14 +253,17 @@ function sceneRoutingSnapshot(scene: ProjectScene | null): Record<string, unknow
   };
 }
 
-function sceneContentSavePayload(draft: ProjectScene, source: ProjectScene | null): ProjectScene {
-  const content = sceneContentSnapshot(draft) || {};
+function studioSceneSavePayload(draft: ProjectScene): ProjectScene {
   return {
-    ...content,
-    choices: (source?.choices || []).map((choice) => ({ ...choice })),
-    ending: source?.ending ? { ...source.ending } : undefined,
-    next: source?.next
-  } as ProjectScene;
+    ...draft,
+    characters: (draft.characters || []).map((character) => ({ ...character })),
+    choices: (draft.choices || []).map((choice) => ({
+      ...choice,
+      condition: choice.condition ? { ...choice.condition } : undefined,
+      effects: choice.effects ? { ...choice.effects } : undefined
+    })),
+    ending: draft.ending ? { ...draft.ending } : undefined
+  };
 }
 
 function issueText(issue: ProjectIssue): string {
@@ -391,8 +394,20 @@ function resultSelectedSceneId(result: ProjectApiResult): string {
   return typeof result.selectedSceneId === "string" ? result.selectedSceneId : "";
 }
 
+function isApiTransportFailure(result: ProjectApiResult): boolean {
+  return result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE" || result.code === "HTTP_ERROR" || result.code === "NETWORK_ERROR";
+}
+
 function isApiFailure(result: ProjectApiResult): boolean {
-  return result.ok === false || result.code === "NON_JSON_RESPONSE" || result.code === "EMPTY_RESPONSE" || result.code === "HTTP_ERROR" || result.code === "NETWORK_ERROR";
+  return result.ok === false || isApiTransportFailure(result);
+}
+
+function failedResultStatusText(result: ProjectApiResult, fallbackStatus: string, apiFailure: boolean): string {
+  const detail = result.message || result.error || fallbackStatus;
+  if (result.code === "STALE_PROJECT_REVISION") {
+    return `저장 실패: 리비전 충돌입니다. 최신 검증 결과를 확인한 뒤 다시 저장하세요. ${detail}`;
+  }
+  return `${apiFailure ? "API 실패" : "저장 실패"}: ${detail}`;
 }
 
 function uniqueSceneId(project: ProjectData | null, seed: string): string {
@@ -542,7 +557,7 @@ export function StudioWorkspace({
   const unsupportedProjectPath = projectId ? `/projects/${projectId}/overview` : "/projects";
   const projectOverviewPath = projectId ? `/projects/${projectId}/overview` : "/projects";
   const sceneTitleInput = draftScene?.label || "";
-  const canSaveDraftContent = Boolean(draftScene && saveState !== "saving" && contentDirty);
+  const canSaveStudioDraft = Boolean(draftScene && saveState !== "saving" && dirty);
   const commandAddAction = studioCommandAddAction({ draftScene, hasScenes: scenes.length > 0, saveState });
   const previewPath = projectId ? studioPreviewPath(projectId, activeRoute?.id, selectedScene?.id) : "/projects";
   const routeMapScenes = useMemo(() => {
@@ -712,7 +727,7 @@ export function StudioWorkspace({
     }
     window.addEventListener("keydown", handleStudioShortcuts);
     return () => window.removeEventListener("keydown", handleStudioShortcuts);
-  }, [activeRoute?.id, contentDirty, dirty, draftScene, layout.routeCollapsed, previewCommandDisabledReason, previewPath, previewPreflight, projectId, routingDirty, saveState, selectedScene?.id]);
+  }, [activeRoute?.id, dirty, draftScene, layout.routeCollapsed, previewCommandDisabledReason, previewPath, previewPreflight, projectId, saveState, selectedScene?.id]);
 
   useEffect(() => {
     const next = canonicalStudioQuery(searchParams, {
@@ -811,11 +826,11 @@ export function StudioWorkspace({
       setStatusText("이미 저장 중입니다.");
       return;
     }
-    if (!contentDirty) {
-      setStatusText(routingDirty ? "구조 변경은 인스펙터의 연결/엔딩 저장 버튼으로 저장하세요." : "저장할 씬 변경이 없습니다.");
+    if (!dirty) {
+      setStatusText("저장할 Studio 변경이 없습니다.");
       return;
     }
-    void saveDraftScene();
+    void saveStudioDraft();
   }
 
   function openPreview(): void {
@@ -1113,14 +1128,28 @@ export function StudioWorkspace({
     });
   }
 
-  function applySuccessfulResult(result: ProjectApiResult, fallbackStatus: string): void {
+  function applySuccessfulResult(result: ProjectApiResult, fallbackStatus: string, options: { preserveContext?: boolean; selectedSceneId?: string } = {}): void {
     const nextRevision = revisionFromResult(result);
     if (nextRevision) {
       setLocalRevision(nextRevision);
     }
     setLocalIssues(resultIssues(result));
     onProjectResult(result);
-    const nextSelectedSceneId = resultSelectedSceneId(result);
+    const nextSelectedSceneId = options.selectedSceneId || resultSelectedSceneId(result);
+    if (options.preserveContext) {
+      const selectedSceneId = nextSelectedSceneId || selectedScene?.id || draftScene?.id || "";
+      updateQuery({
+        panel: selectedPanel,
+        route: activeRoute?.id || "",
+        scene: selectedSceneId
+      }, true);
+      const savedScene = result.project?.scenes?.find((scene) => scene.id === selectedSceneId) || draftScene;
+      setDraftScene(cloneScene(savedScene || null));
+      setDraftBaseScene(cloneScene(savedScene || null));
+      setSaveState("saved");
+      setStatusText(result.message || fallbackStatus);
+      return;
+    }
     if (nextSelectedSceneId) {
       selectScene(nextSelectedSceneId, { force: true });
     } else if (draftScene) {
@@ -1145,9 +1174,9 @@ export function StudioWorkspace({
     if (result.project || result.previewPreflight || result.previewReadiness || result.exportPlan) {
       onProjectResult(result);
     }
-    const apiFailure = isApiFailure(result);
+    const apiFailure = isApiTransportFailure(result);
     setSaveState(apiFailure ? "apiFailure" : "failed");
-    setStatusText(`${apiFailure ? "API 실패" : "저장 실패"}: ${result.message || result.error || fallbackStatus}`);
+    setStatusText(failedResultStatusText(result, fallbackStatus, apiFailure));
   }
 
   async function validateStudio(): Promise<ProjectRevision | null> {
@@ -1195,7 +1224,7 @@ export function StudioWorkspace({
     return validateStudio();
   }
 
-  async function saveDraftScene(): Promise<void> {
+  async function saveStudioDraft(): Promise<void> {
     if (!draftScene) {
       setStatusText("저장할 씬이 없습니다.");
       return;
@@ -1207,18 +1236,25 @@ export function StudioWorkspace({
       return;
     }
     setSaveState("saving");
-    setStatusText("씬을 저장하는 중입니다.");
+    setStatusText("Studio 변경 사항을 저장하는 중입니다.");
     try {
-      const result = await postJson("/api/project/scenes", {
+      const result = await postJson("/api/project/studio/mutate", {
         expectedProjectRevision,
+        operations: [
+          {
+            type: "upsertScene",
+            scene: studioSceneSavePayload(draftScene)
+          }
+        ],
         projectDirectory,
-        scene: sceneContentSavePayload(draftScene, selectedScene)
+        routeId: activeRoute?.id,
+        sceneId: draftScene.id
       });
       if (isApiFailure(result)) {
-        applyFailedResult(result, "씬을 저장하지 못했습니다.");
+        applyFailedResult(result, "Studio 저장을 완료하지 못했습니다.");
         return;
       }
-      applySuccessfulResult(result, "씬 저장 완료.");
+      applySuccessfulResult(result, "Studio 저장 완료.", { preserveContext: true, selectedSceneId: draftScene.id });
     } catch (error) {
       setSaveState("apiFailure");
       setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -1296,68 +1332,24 @@ export function StudioWorkspace({
     );
   }
 
-  async function linkExistingTarget(link: { choiceId?: string; choiceText?: string; targetSceneId: string; type: "choice" | "next" }): Promise<void> {
-    if (!selectedScene?.id || !link.targetSceneId) {
-      setStatusText("출발 씬과 대상 씬을 모두 선택해야 합니다.");
-      return;
-    }
-    const expectedProjectRevision = await ensureRevision();
-    if (!expectedProjectRevision) {
-      setSaveState("failed");
-      setStatusText("저장 실패: 최신 projectRevision을 확인할 수 없습니다.");
-      return;
-    }
-    setSaveState("saving");
-    try {
-      const result = await postJson("/api/project/scenes/link", {
-        expectedProjectRevision,
-        link: link.type === "choice"
-          ? { choiceId: link.choiceId, choiceText: link.choiceText, type: "choice" }
-          : { type: "next" },
-        projectDirectory,
-        sourceSceneId: selectedScene.id,
-        targetSceneId: link.targetSceneId
-      });
-      if (isApiFailure(result)) {
-        applyFailedResult(result, "연결을 저장하지 못했습니다.");
-        return;
-      }
-      applySuccessfulResult(result, "연결 저장 완료.");
-    } catch (error) {
-      setSaveState("apiFailure");
-      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  async function setEnding(ending: ProjectScene["ending"] | null): Promise<void> {
-    if (!selectedScene?.id) {
+  function applyDraftEnding(ending: ProjectScene["ending"] | null): void {
+    if (!draftScene?.id) {
       setStatusText("엔딩을 설정할 씬을 먼저 선택해야 합니다.");
       return;
     }
-    const expectedProjectRevision = await ensureRevision();
-    if (!expectedProjectRevision) {
-      setSaveState("failed");
-      setStatusText("저장 실패: 최신 projectRevision을 확인할 수 없습니다.");
-      return;
-    }
-    setSaveState("saving");
-    try {
-      const result = await postJson("/api/project/scenes/ending", {
-        clearOutgoing: ending ? true : undefined,
-        ending,
-        expectedProjectRevision,
-        projectDirectory,
-        sceneId: selectedScene.id
-      });
-      if (isApiFailure(result)) {
-        applyFailedResult(result, "엔딩을 저장하지 못했습니다.");
-        return;
+    setDraftScene((current) => {
+      if (!current) return current;
+      if (!ending) {
+        return { ...current, ending: undefined };
       }
-      applySuccessfulResult(result, ending ? "엔딩 저장 완료." : "엔딩 해제 완료.");
-    } catch (error) {
-      setSaveState("apiFailure");
-      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
-    }
+      return {
+        ...current,
+        choices: [],
+        ending: { ...ending },
+        next: undefined
+      };
+    });
+    setStatusText(ending ? "엔딩 변경이 초안에 반영되었습니다." : "엔딩 해제가 초안에 반영되었습니다.");
   }
 
   function handleProblemFocus(issue: ProjectIssue): void {
@@ -1461,7 +1453,7 @@ export function StudioWorkspace({
           <Button icon={<Eye size={16} />} onClick={() => onNavigate(projectOverviewPath)} title="프로젝트 상세로">
             프로젝트 상세로
           </Button>
-          <Button disabled={!canSaveDraftContent} icon={<Save size={16} />} onClick={runSaveCommand} title="Cmd/Ctrl+S" variant="primary">
+          <Button disabled={!canSaveStudioDraft} icon={<Save size={16} />} onClick={runSaveCommand} title="Cmd/Ctrl+S" variant="primary">
             저장
           </Button>
           <Button disabled={saveState === "saving" || dirty} icon={<RefreshCw size={16} />} onClick={() => void validateStudio()} title={dirty ? "저장 후 검증을 실행하세요." : "검증 실행"}>
@@ -1476,7 +1468,7 @@ export function StudioWorkspace({
                 레이아웃 리셋
               </Button>
               <dl className="summary-list">
-                <div><dt>Cmd/Ctrl+S</dt><dd>선택 씬 저장</dd></div>
+                <div><dt>Cmd/Ctrl+S</dt><dd>Studio 저장</dd></div>
                 <div><dt>Cmd/Ctrl+Enter</dt><dd>선택 씬 프리뷰로 이동</dd></div>
                 <div><dt>Cmd/Ctrl+K</dt><dd>루트 맵 검색 focus</dd></div>
               </dl>
@@ -1694,10 +1686,10 @@ export function StudioWorkspace({
                         </select>
                       </label>
                       <div className="button-row">
-                        <Button disabled={saveState === "saving"} icon={<CheckCircle2 size={16} />} onClick={() => void setEnding(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal", title: "새 엔딩" })}>
-                          엔딩 저장
+                        <Button disabled={saveState === "saving"} icon={<CheckCircle2 size={16} />} onClick={() => applyDraftEnding(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal", title: "새 엔딩" })}>
+                          엔딩 적용
                         </Button>
-                        <Button disabled={saveState === "saving" || !draftScene.ending} icon={<RefreshCw size={16} />} onClick={() => void setEnding(null)} variant="ghost">
+                        <Button disabled={saveState === "saving" || !draftScene.ending} icon={<RefreshCw size={16} />} onClick={() => applyDraftEnding(null)} variant="ghost">
                           엔딩 해제
                         </Button>
                       </div>
@@ -1723,9 +1715,6 @@ export function StudioWorkspace({
                           {scenes.filter((scene) => scene.id !== draftScene.id).map((scene) => <option key={scene.id} value={scene.id}>{sceneTitle(scene)}</option>)}
                         </select>
                       </label>
-                      <Button disabled={!draftScene.next || saveState === "saving"} icon={<GitBranch size={16} />} onClick={() => void linkExistingTarget({ targetSceneId: draftScene.next || "", type: "next" })}>
-                        다음 연결 저장
-                      </Button>
                       <h3>선택지 연결</h3>
                       <div className="button-row">
                         <Button disabled={Boolean(draftScene.next) || Boolean(draftScene.ending)} icon={<Plus size={16} />} onClick={addChoiceDraft}>
@@ -1749,11 +1738,6 @@ export function StudioWorkspace({
                                 {scenes.filter((scene) => scene.id !== draftScene.id).map((scene) => <option key={scene.id} value={scene.id}>{sceneTitle(scene)}</option>)}
                               </select>
                             </label>
-                            <div className="button-row">
-                              <Button disabled={!choice.next || saveState === "saving"} onClick={() => void linkExistingTarget({ choiceId: choice.id, choiceText: choice.text, targetSceneId: choice.next || "", type: "choice" })}>
-                                선택지 연결 저장
-                              </Button>
-                            </div>
                           </li>
                         ))}
                       </ul>
