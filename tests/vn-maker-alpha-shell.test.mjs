@@ -444,6 +444,19 @@ assert.ok(issue118QaExists, "#118 최종 Studio UX 회귀/접근성 QA gate 문�
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(issue118QaSource, pattern, `#118 QA gate 문서는 '${requiredText}' 증거를 포함해야 합니다.`);
 });
+[
+  /\| Notion \/ issue area \| Baseline status \| Owner issue \| Baseline evidence \| Gap before this gate \|/,
+  /\| Area \| Final status \| Owner issue \| Evidence \| Remaining gap \|/,
+  /\| Browser E2E Primary Happy Path \| Ready \| #118 \|/,
+  /\| Optional\/Diagnostic Flow Evidence \| Ready \| #117, #120, #118 \|/,
+  /\| Failure Path Evidence \| Ready \| #110, #112, #115, #116, #118 \|/,
+  /\| Keyboard And Accessibility Evidence \| Ready \| #111, #112, #115, #118 \|/,
+  /\| Mock \/ Actual \/ Replay Separation \| Ready \| #117, #118 \|/,
+  /\| Legacy-linear Reconciliation \| Ready \| #118 \|/,
+  /## Verification Results[\s\S]*\| Command \| Result \| Evidence \|[\s\S]*\| `node tests\/vn-maker-alpha-shell\.test\.mjs` \| Passed \|[\s\S]*\| `npm run typecheck` \| Passed \|[\s\S]*\| `npm run test:maker` \| Passed \|[\s\S]*\| Playwright smoke \| Passed \|[\s\S]*\| `git diff --check` \| Passed \|/
+].forEach((pattern) => {
+  assert.match(issue118QaSource, pattern, `#118 QA gate 문서는 matrix 구조와 실행 결과를 보존해야 합니다: ${pattern}`);
+});
 assert.doesNotMatch(issue118QaSource, /\bnot-run\b/i, "#118 QA gate 문서는 실행하지 않은 검증을 완료 증거처럼 남기면 안 됩니다.");
 assert.match(`${projectStartSource}\n${recentProjectListSource}`, /ContentList/, "프로젝트 목록 화면은 중앙 ContentList 패턴을 사용해야 합니다.");
 assert.ok(

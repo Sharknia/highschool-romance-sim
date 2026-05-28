@@ -24,20 +24,19 @@
 
 ## Final Gate Coverage Matrix
 
-| Area | Final status | Evidence | Remaining gap |
-| --- | --- | --- | --- |
-| Desktop shell and layout | Ready | Playwright smoke rendered `루트 맵`, `스테이지 미리보기`, `스크립트 편집기`, `인스펙터`, `문제 패널` at 1280x720, 1366x768, 1440x900, 1920x1080 with `scrollWidth == viewport width`. | Exhaustive OS/browser matrix is outside #118. |
-| Below-minimum and mobile policy | Ready | Playwright smoke at 390x844 showed `studio-unsupported`, no `studio-workspace`, and `1280x720 이상` copy. | None for active scope. |
-| Browser E2E Primary Happy Path | Ready | Project `smoke-118-final-1779965524954`, `/tmp/vn-maker-smoke-118-final-1779965524954.vnmaker`: open Studio, route `haru-route`, scene `scene-opening`, create choice target `scene---1779965528721`, set text/background/ending, save, validate, preview `/projects/smoke-118-final-1779965524954/preview?route=haru-route&scene=scene---1779965528721`. | None for active scope. |
-| Validation stale and save failure | Ready | Browser overlay showed `validation stale`; intercepted non-JSON 5xx save showed `API 실패: 서버 응답을 해석하지 못했습니다.` | None for active scope. |
-| Stale revision, repair conflict, asset missing | Ready | `tests/vn-maker-regression.test.mjs` covers `STALE_PROJECT_REVISION`, repair stale/conflict paths, `PREVIEW_BLOCKED`, `background-required`, empty/non-JSON/5xx client response contracts. | Browser only rechecked representative non-JSON 5xx save and stale validation. |
-| Repair preview/apply/undo | Ready | Browser flow cleared a choice target, opened missing-target repair diff, applied `create-target-scene`, then used `마지막 수리 되돌리기`. UX event log includes `repair_action_used`, `repaired`, `undo_used`. | None for active scope. |
-| Current selected scene preview startSceneId | Ready | Playwright preview URL preserved selected scene `scene---1779965528721` as query `scene=scene---1779965528721`. | None for active scope. |
-| Keyboard And Accessibility Evidence | Ready | `Ctrl+K` focused `aria-label="루트 맵 씬 검색"`, route splitter `ArrowRight` changed `aria-valuenow` 300 -> 324, Delete shortcut opened scene deletion confirmation, command buttons exposed names `저장`, `검증`, `프리뷰`. | Escape behavior remains covered by shared dialog source contract, not re-exercised in this browser smoke. |
-| Optional/Diagnostic Flow Evidence | Ready | Validation tab drawer `생성 보조 / QA` opened; `목 재생` active badge confirmed `mockReplay` / `목 replay`; `이벤트 로그 export` and `Phase 0 리포트` completed. #120 remains CG job lifecycle evidence for planned/run/connect. | Natural-language patch quality is outside this gate. |
-| UX Event Log Evidence | Ready | Event log count 10; names: `started`, `help_opened`, `recipe_used`, `generated`, `previewed`, `repair_action_used`, `repaired`, `undo_used`; at least one event carried `preflightResult`. Repair events carried `missing-target`, `create-target-scene`, `success/undone`. | None for active scope. |
-| Mock / Actual / Replay Separation | Ready | Primary authoring stayed manual; generation drawer was optional. Active `mockReplay` badge was verified after `목 재생`. #117 evidence keeps actual patch, protocol replay, unavailable state separated from Problems Panel. | None for active scope. |
-| Legacy-linear Reconciliation | Ready | legacy-linear #12-#16/#18/#19 are documented as legacy backlog, not active #108 child completion. They are not closed by this gate and are not counted as blockers for #109-#121 completion. | Product owner can later decide superseded/keep-open state per legacy scope. |
+| Area | Final status | Owner issue | Evidence | Remaining gap |
+| --- | --- | --- | --- | --- |
+| Desktop shell and layout | Ready | #109, #119 | Playwright smoke rendered `루트 맵`, `스테이지 미리보기`, `스크립트 편집기`, `인스펙터`, `문제 패널` at 1280x720, 1366x768, 1440x900, 1920x1080 with `scrollWidth == viewport width`. | Exhaustive OS/browser matrix is outside #118. |
+| Below-minimum and mobile policy | Ready | #109, #118 | Playwright smoke at 390x844 showed `studio-unsupported`, no `studio-workspace`, and `1280x720 이상` copy. | None for active scope. |
+| Browser E2E Primary Happy Path | Ready | #118 | Project `smoke-118-final-1779965524954`, `/tmp/vn-maker-smoke-118-final-1779965524954.vnmaker`: open Studio, route `haru-route`, scene `scene-opening`, create choice target `scene---1779965528721`, set text/background/ending, save, validate, preview `/projects/smoke-118-final-1779965524954/preview?route=haru-route&scene=scene---1779965528721`. | None for active scope. |
+| Failure Path Evidence | Ready | #110, #112, #115, #116, #118 | Browser overlay showed `validation stale`; intercepted non-JSON 5xx save showed `API 실패: 서버 응답을 해석하지 못했습니다.` `tests/vn-maker-regression.test.mjs` covers `STALE_PROJECT_REVISION`, repair stale/conflict paths, `PREVIEW_BLOCKED`, `background-required`, empty/non-JSON/5xx client response contracts. | Browser only rechecked representative non-JSON 5xx save and stale validation. |
+| Repair preview/apply/undo | Ready | #112, #114, #115, #118 | Browser flow cleared a choice target, opened missing-target repair diff, applied `create-target-scene`, then used `마지막 수리 되돌리기`. UX event log includes `repair_action_used`, `repaired`, `undo_used`. | None for active scope. |
+| Current selected scene preview startSceneId | Ready | #116, #118 | Playwright preview URL preserved selected scene `scene---1779965528721` as query `scene=scene---1779965528721`. | None for active scope. |
+| Keyboard And Accessibility Evidence | Ready | #111, #112, #115, #118 | `Ctrl+K` focused `aria-label="루트 맵 씬 검색"`, route splitter `ArrowRight` changed `aria-valuenow` 300 -> 324, Delete shortcut opened scene deletion confirmation, command buttons exposed names `저장`, `검증`, `프리뷰`. | Escape behavior remains covered by shared dialog source contract, not re-exercised in this browser smoke. |
+| Optional/Diagnostic Flow Evidence | Ready | #117, #120, #118 | Validation tab drawer `생성 보조 / QA` opened; `목 재생` active badge confirmed `mockReplay` / `목 replay`; `이벤트 로그 export` and `Phase 0 리포트` completed. #120 remains CG job lifecycle evidence for planned/run/connect. | Natural-language patch quality is outside this gate. |
+| UX Event Log Evidence | Ready | #117, #118 | Event log count 10; names: `started`, `help_opened`, `recipe_used`, `generated`, `previewed`, `repair_action_used`, `repaired`, `undo_used`; at least one event carried `preflightResult`. Repair events carried `missing-target`, `create-target-scene`, `success/undone`. | None for active scope. |
+| Mock / Actual / Replay Separation | Ready | #117, #118 | Primary authoring stayed manual; generation drawer was optional. Active `mockReplay` badge was verified after `목 재생`. #117 evidence keeps actual patch, protocol replay, unavailable state separated from Problems Panel. | None for active scope. |
+| Legacy-linear Reconciliation | Ready | #118 | legacy-linear #12-#16/#18/#19 are documented as legacy backlog, not active #108 child completion. They are not closed by this gate and are not counted as blockers for #109-#121 completion. | Product owner can later decide superseded/keep-open state per legacy scope. |
 
 ## Browser E2E Primary Happy Path
 
@@ -101,12 +100,12 @@ legacy-linear #12-#16/#18/#19 remain separate legacy backlog records. They are n
 
 This avoids mixing older linear task state with the Project v2 child issue set while preserving the legacy records for a later owner decision.
 
-## Verification Commands
+## Verification Results
 
-Required fresh verification for final completion:
-
-- `node tests/vn-maker-alpha-shell.test.mjs`
-- `npm run typecheck`
-- `npm run test:maker`
-- Playwright smoke for #118 Studio UX regression and accessibility QA
-- `git diff --check`
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `node tests/vn-maker-alpha-shell.test.mjs` | Passed | #118 QA document contract and Studio source contracts passed. |
+| `npm run typecheck` | Passed | Legacy typecheck and maker package typechecks passed. |
+| `npm run test:maker` | Passed | Maker build plus domain/use-case/web/source/UX quality suites passed. |
+| Playwright smoke | Passed | Desktop 4 viewport, mobile unsupported, primary happy path, diagnostics, repair/undo, non-JSON 5xx failure path passed. |
+| `git diff --check` | Passed | No whitespace errors. |
