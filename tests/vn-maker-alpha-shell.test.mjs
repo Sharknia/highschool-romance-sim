@@ -356,7 +356,6 @@ const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRe
   'eventName: "added_condition"',
   'eventName: "help_opened"',
   'eventName: "abandoned"',
-  "static_tutorial",
   "inline_guide",
   "automatic_repair_suggestion",
   "/api/events/ux/export",
@@ -656,6 +655,19 @@ assert.match(clientStylesSource, /\.studio-command-bar\s*\{[\s\S]{0,220}height:\
   "contentDirty",
   "routingDirty",
   "mergedStudioIssues",
+  "StudioIssueFocus",
+  "localStudioIssues",
+  "localProblemActions",
+  "/api/project/studio/context",
+  "problemActions",
+  "selectedProblemQuery",
+  "pendingProblemFocusRef",
+  "focusRequestTick",
+  "clearWhenAbsent",
+  "layout.inspectorCollapsed",
+  "data-repair-candidate-action",
+  "automatic_repair_suggestion",
+  "inline_guide",
   "canonicalStudioQuery",
   "unsupportedProjectPath",
   "issuePanel",
@@ -669,6 +681,14 @@ assert.match(studioWorkspaceSource, /scene:\s*studioSceneSavePayload\(draftScene
 assert.doesNotMatch(studioWorkspaceSource, /scene:\s*draftScene/, "Studio generic 저장은 draftScene 전체를 그대로 API에 보내면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /postJson\("\/api\/project\/scenes\/link"/, "Studio routing 저장은 inspector 전용 link API로 우회하면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /postJson\("\/api\/project\/scenes\/ending"/, "Studio ending 저장은 inspector 전용 ending API로 우회하면 안 됩니다.");
+assert.doesNotMatch(studioWorkspaceSource, /static_tutorial/, "문제 row focus는 정적 튜토리얼 사용으로 기록하면 안 됩니다.");
+assert.doesNotMatch(studioWorkspaceSource, /\/api\/project\/repair\/apply/, "Studio #113 수리 후보 UI는 repair apply endpoint를 호출하면 안 됩니다.");
+assert.match(studioWorkspaceSource, /problem:\s*row\.key/, "문제 row click은 ?problem query를 canonical Studio query에 기록해야 합니다.");
+assert.match(studioWorkspaceSource, /focusProblemTarget\(pending\.focus,\s*pending\.panel\)/, "문제 row click은 렌더 완료 후 DTO focus target으로 실제 필드를 focus해야 합니다.");
+assert.match(studioWorkspaceSource, /handleProblemFocus\(row,\s*action\)/, "수리 후보 chip click은 클릭한 action ID를 UX event에 기록할 수 있어야 합니다.");
+assert.match(studioWorkspaceSource, /if \(layout\.inspectorCollapsed\)[\s\S]{0,140}updateLayout\(\{ inspectorCollapsed: false \}\)/, "문제 row focus는 접힌 inspector를 펼친 뒤 필드 focus를 시도해야 합니다.");
+assert.match(studioWorkspaceSource, /clearWhenAbsent[\s\S]{0,120}setLocalStudioIssues\(\[\]\)/, "Studio DTO가 없는 validate 응답은 이전 StudioIssueFocus를 stale 상태로 남기면 안 됩니다.");
+assert.match(studioWorkspaceSource, /clearWhenAbsent[\s\S]{0,220}setLocalProblemActions\(\[\]\)/, "Studio DTO가 없는 validate 응답은 이전 problemActions를 stale 상태로 남기면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /selectScene\(sceneId\);[\s\S]{0,120}setPanel\(nextPanel\);/, "문제 row focus는 stale searchParams 기반 scene/panel 연속 업데이트로 query를 덮으면 안 됩니다.");
 assert.match(projectDetailViewSource, /if \(activeTab === "studio"\)[\s\S]{0,220}return studioWorkspace/, "Studio 탭은 미지원 viewport에서 상세 shell chrome을 노출하지 않도록 workspace를 상위에서 바로 반환해야 합니다.");
 assert.doesNotMatch(studioWorkspaceSource, /conditionDraft|effectsDraft|setCondition|setEffects/, "조건/효과는 #105 전까지 프론트 임시 canonical 편집 모델을 만들면 안 됩니다.");

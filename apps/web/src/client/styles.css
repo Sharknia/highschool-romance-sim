@@ -539,6 +539,14 @@ a {
   color: #bfb6a8;
 }
 
+.field-row.focused input,
+.field-row.focused select,
+.field-row.focused textarea,
+.studio-inspector-body section.focused {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.18);
+}
+
 .settings-list {
   display: grid;
   gap: 8px;
@@ -2370,11 +2378,22 @@ a {
   padding: 0;
 }
 
-.studio-problem-list button {
+.studio-problem-row {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.studio-problem-row.selected .studio-problem-main {
+  border-color: var(--color-primary);
+  background: #102621;
+}
+
+.studio-problem-main {
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: start;
   border: 1px solid var(--color-border);
@@ -2386,15 +2405,51 @@ a {
   cursor: pointer;
 }
 
-.studio-problem-list button:hover,
-.studio-problem-list button:focus-visible {
+.studio-problem-main:hover,
+.studio-problem-main:focus-visible {
   border-color: var(--color-primary);
   outline: none;
 }
 
-.studio-problem-list span:last-child {
+.studio-problem-main span:nth-child(2) {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.studio-problem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 8px;
+}
+
+.studio-problem-action-chip {
+  min-height: 30px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #6b5935;
+  border-radius: 7px;
+  padding: 5px 7px;
+  color: #f6deb1;
+  background: #251e12;
+  cursor: pointer;
+}
+
+.studio-problem-action-chip.destructive {
+  border-color: #7f3b3b;
+  color: #ffd0d0;
+  background: #2a1414;
+}
+
+.studio-problem-action-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.studio-problem-action-chip small {
+  color: var(--color-text-muted);
 }
 
 .asset-job-list {

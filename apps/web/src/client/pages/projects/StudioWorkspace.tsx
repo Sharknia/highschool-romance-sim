@@ -15,7 +15,7 @@ import {
   Search,
   Settings
 } from "lucide-react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button, DiagnosticDrawer, EmptyState, StatusChip } from "../../components/ui";
@@ -27,6 +27,8 @@ import type {
   ProjectPreviewPreflight,
   ProjectRepairAction,
   ProjectRevision,
+  StudioIssueFocus,
+  StudioProblemAction,
   Phase0DecisionReport,
   GenerationResultLog,
   TestPromptFixture,
@@ -356,6 +358,35 @@ function preflightToIssues(preflight: ProjectPreviewPreflight | null): ProjectIs
   return [...blockers, ...warnings];
 }
 
+interface StudioProblemRow {
+  actions: StudioProblemAction[];
+  defaultActionLabel: string;
+  focus?: StudioIssueFocus;
+  issue: ProjectIssue;
+  key: string;
+}
+
+function studioFocusToIssue(focus: StudioIssueFocus): ProjectIssue {
+  return {
+    code: focus.issueCode,
+    message: focus.message,
+    path: focus.path,
+    sceneIds: focus.sceneId ? [focus.sceneId] : undefined,
+    choiceIds: focus.choiceId ? [focus.choiceId] : undefined,
+    targetSceneId: focus.targetSceneId,
+    severity: focus.severity
+  };
+}
+
+function studioFocusIdentity(focus: StudioIssueFocus): string {
+  return focus.issueId || [
+    focus.severity || "info",
+    focus.issueCode || "validation-issue",
+    focus.path || "",
+    focus.message || ""
+  ].join(":");
+}
+
 function studioIssueKey(issue: ProjectIssue): string {
   return [
     issue.severity || "info",
@@ -366,6 +397,15 @@ function studioIssueKey(issue: ProjectIssue): string {
     (issue.choiceIds || []).join(","),
     issue.targetSceneId || ""
   ].join("::");
+}
+
+function studioIssueIdentity(issue: ProjectIssue): string {
+  return [
+    issue.severity || "info",
+    issue.code || "validation-issue",
+    issue.path || "",
+    issue.message || ""
+  ].join(":");
 }
 
 function mergedStudioIssues(localIssues: ProjectIssue[], preflightIssues: ProjectIssue[]): ProjectIssue[] {
@@ -379,6 +419,72 @@ function mergedStudioIssues(localIssues: ProjectIssue[], preflightIssues: Projec
   });
 }
 
+function uniqueStudioIssueFocuses(issues: StudioIssueFocus[]): StudioIssueFocus[] {
+  const seen = new Set<string>();
+  return issues.filter((issue) => {
+    const key = studioFocusIdentity(issue);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function studioFocusesFromResult(result: ProjectApiResult): StudioIssueFocus[] {
+  const studio = result.studio;
+  return uniqueStudioIssueFocuses([
+    ...(studio?.issues || []),
+    ...(studio?.previewPreflight?.blockers || []),
+    ...(studio?.previewPreflight?.warnings || [])
+  ]);
+}
+
+function problemDefaultActionLabel(focus: StudioIssueFocus | undefined, actions: StudioProblemAction[]): string {
+  if (actions.length > 0 || focus?.defaultAction === "repair") return "수리 후보";
+  if (focus?.defaultAction === "preview-blocker") return "프리뷰 차단";
+  if (focus?.defaultAction === "focus") return "이동";
+  return "확인";
+}
+
+function buildStudioProblemRows(
+  studioIssues: StudioIssueFocus[],
+  fallbackIssues: ProjectIssue[],
+  problemActions: StudioProblemAction[]
+): StudioProblemRow[] {
+  const seen = new Set<string>();
+  const rows: StudioProblemRow[] = uniqueStudioIssueFocuses(studioIssues).map((focus) => {
+    const key = studioFocusIdentity(focus);
+    seen.add(key);
+    const actions = problemActions.filter((action) =>
+      action.issueId === focus.issueId
+      || (action.issueCode === focus.issueCode && action.targetPath === focus.path)
+    );
+    return {
+      actions,
+      defaultActionLabel: problemDefaultActionLabel(focus, actions),
+      focus,
+      issue: studioFocusToIssue(focus),
+      key
+    };
+  });
+
+  fallbackIssues.forEach((issue) => {
+    const identity = studioIssueIdentity(issue);
+    if (seen.has(identity)) {
+      return;
+    }
+    const actions = problemActions.filter((action) => action.issueCode === issue.code && action.targetPath === issue.path);
+    rows.push({
+      actions,
+      defaultActionLabel: problemDefaultActionLabel(undefined, actions),
+      issue,
+      key: identity
+    });
+    seen.add(identity);
+  });
+
+  return rows;
+}
+
 function resultIssues(result: ProjectApiResult): ProjectIssue[] {
   return result.issues
     || result.validation?.issues
@@ -387,7 +493,7 @@ function resultIssues(result: ProjectApiResult): ProjectIssue[] {
 }
 
 function revisionFromResult(result: ProjectApiResult): ProjectRevision | null {
-  return result.projectRevision || result.previewPreflight?.projectRevision || result.actualRevision || null;
+  return result.projectRevision || result.studio?.projectRevision || result.previewPreflight?.projectRevision || result.actualRevision || null;
 }
 
 function resultSelectedSceneId(result: ProjectApiResult): string {
@@ -448,13 +554,13 @@ function findIssueSceneId(issue: ProjectIssue, project: ProjectData | null): str
 function issuePanel(issue: ProjectIssue): StudioPanelId {
   const path = issue.path || "";
   if (issue.code === "conditional-choice-runtime-unsupported" || path.includes("condition") || path.includes("effects")) return "stats";
-  if (path.includes("choices") || issue.choiceIds?.length) return "choices";
-  if (path.includes("background") || path.includes("cgAssetId") || path.includes("characters")) return "assets";
-  if (path.includes("ending") || path.includes("next")) return "choices";
+  if (issue.code === "ending-has-outgoing" || issue.code === "invalid-ending" || issue.code === "duplicate-ending-id" || path.includes("ending")) return "scene";
+  if (issue.code === "background-required" || issue.code === "image-generation-incomplete" || path.includes("assets") || path.includes("generationJobs") || path.includes("background") || path.includes("cgAssetId") || path.includes("characters")) return "assets";
+  if (path.includes("choices") || issue.choiceIds?.length || issue.code === "missing-target" || issue.code === "mixed-outgoing" || path.includes("next")) return "choices";
   return "scene";
 }
 
-function canonicalStudioQuery(current: URLSearchParams, nextValues: { route?: string; scene?: string; panel?: StudioPanelId }): URLSearchParams {
+function canonicalStudioQuery(current: URLSearchParams, nextValues: { route?: string; scene?: string; panel?: StudioPanelId; problem?: string }): URLSearchParams {
   const next = new URLSearchParams(current);
   if (nextValues.route !== undefined) {
     if (nextValues.route) next.set("route", nextValues.route);
@@ -469,11 +575,11 @@ function canonicalStudioQuery(current: URLSearchParams, nextValues: { route?: st
   } else if (!panelTabs.some((tab) => tab.id === next.get("panel"))) {
     next.set("panel", "scene");
   }
+  if (nextValues.problem !== undefined) {
+    if (nextValues.problem) next.set("problem", nextValues.problem);
+    else next.delete("problem");
+  }
   return next;
-}
-
-function focusLater(ref: RefObject<HTMLElement | null>): void {
-  window.setTimeout(() => ref.current?.focus(), 0);
 }
 
 function revisionStatusText(revision: ProjectRevision | null): string {
@@ -510,11 +616,24 @@ export function StudioWorkspace({
   const [phase0Status, setPhase0Status] = useState("Phase 0 decision report 생성 전입니다.");
   const [phase0Busy, setPhase0Busy] = useState(false);
   const [localIssues, setLocalIssues] = useState<ProjectIssue[]>(() => preflightToIssues(previewPreflight));
+  const [localStudioIssues, setLocalStudioIssues] = useState<StudioIssueFocus[]>([]);
+  const [localProblemActions, setLocalProblemActions] = useState<StudioProblemAction[]>([]);
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const [routeSearchTerm, setRouteSearchTerm] = useState("");
+  const [focusedProblemId, setFocusedProblemId] = useState("");
+  const [focusedFieldKey, setFocusedFieldKey] = useState("");
+  const [focusRequestTick, setFocusRequestTick] = useState(0);
   const routeSearchRef = useRef<HTMLInputElement | null>(null);
   const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inspectorFirstFieldRef = useRef<HTMLElement | null>(null);
+  const fieldFocusRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingProblemFocusRef = useRef<{
+    fieldKey: string;
+    focus?: StudioIssueFocus;
+    panel: StudioPanelId;
+    problemId: string;
+    sceneId: string;
+  } | null>(null);
   const confirmedSceneChangeRef = useRef<string | null>(null);
   const uxSessionIdRef = useRef(`studio-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
 
@@ -525,6 +644,7 @@ export function StudioWorkspace({
   const activeRoute = routes.find((route) => route.id === activeRouteIdQuery) || routes[0] || null;
   const selectedSceneQuery = searchParams.get("scene");
   const selectedPanel = panelFromValue(searchParams.get("panel"));
+  const selectedProblemQuery = searchParams.get("problem") || "";
   const selectedScene = useMemo(() => {
     const routeEntry = scenes.find((scene) => scene.id === activeRoute?.entrySceneId) || null;
     return scenes.find((scene) => scene.id === selectedSceneQuery) || routeEntry || scenes[0] || null;
@@ -535,7 +655,9 @@ export function StudioWorkspace({
   const routingDirty = useMemo(() => JSON.stringify(sceneRoutingSnapshot(draftScene)) !== JSON.stringify(sceneRoutingSnapshot(draftBaseScene)), [draftSceneJson, draftBaseSceneJson]);
   const dirty = contentDirty || routingDirty;
   const preflightIssues = useMemo(() => preflightToIssues(previewPreflight), [previewPreflight]);
-  const visibleIssues = useMemo(() => mergedStudioIssues(localIssues, preflightIssues), [localIssues, preflightIssues]);
+  const fallbackIssues = useMemo(() => mergedStudioIssues(localIssues, preflightIssues), [localIssues, preflightIssues]);
+  const problemRows = useMemo(() => buildStudioProblemRows(localStudioIssues, fallbackIssues, localProblemActions), [fallbackIssues, localProblemActions, localStudioIssues]);
+  const visibleIssues = useMemo(() => problemRows.map((row) => row.issue), [problemRows]);
   const conditionRuntimeSupport = previewPreflight?.conditionRuntimeSupport || previewPreflight?.runtimeCapabilities?.conditionRuntimeSupport || null;
   const conditionSupportMode = conditionRuntimeSupport?.editorMode || "candidate_review_only";
   const conditionStrictPreviewText = conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated"
@@ -610,12 +732,116 @@ export function StudioWorkspace({
     });
   }
 
+  function setFocusTargets(keys: string[], element: HTMLElement | null): void {
+    keys.filter(Boolean).forEach((key) => {
+      if (element) {
+        fieldFocusRefs.current[key] = element;
+      } else {
+        delete fieldFocusRefs.current[key];
+      }
+    });
+  }
+
+  function focusedClass(...keys: Array<string | undefined>): string {
+    return keys.some((key) => key && key === focusedFieldKey) ? " focused" : "";
+  }
+
+  function applyStudioDtoState(result: ProjectApiResult, options: { clearWhenAbsent?: boolean } = {}): void {
+    const studioIssues = studioFocusesFromResult(result);
+    if (result.studio || studioIssues.length > 0) {
+      setLocalStudioIssues(studioIssues);
+    } else if (options.clearWhenAbsent) {
+      setLocalStudioIssues([]);
+    }
+    if (Array.isArray(result.problemActions)) {
+      setLocalProblemActions(result.problemActions);
+    } else if (options.clearWhenAbsent) {
+      setLocalProblemActions([]);
+    }
+  }
+
+  function focusProblemTarget(focus: StudioIssueFocus | undefined, panel: StudioPanelId): void {
+    const field = focus?.field || "";
+    const candidates = [
+      focus?.issueId ? `issue:${focus.issueId}` : "",
+      focus?.choiceId && field ? `choice:${focus.choiceId}:${field}` : "",
+      field ? `${panel}:${field}` : "",
+      field,
+      focus?.scriptBlockId || "",
+      focus?.sceneId ? `scene:${focus.sceneId}` : ""
+    ].filter(Boolean);
+    window.setTimeout(() => {
+      const target = candidates.map((key) => fieldFocusRefs.current[key]).find(Boolean)
+        || (panel === "scene" ? scriptTextareaRef.current : inspectorFirstFieldRef.current)
+        || scriptTextareaRef.current;
+      target?.focus();
+    }, 0);
+  }
+
   useEffect(() => {
     if (!projectDirectory) {
       return;
     }
     recordUXDecisionEvent({ eventName: "started", outcome: "started", inputMode: "manual" });
   }, [projectDirectory, projectId]);
+
+  useEffect(() => {
+    if (!projectDirectory || !activeRoute?.id || dirty || saveState === "saving" || unsupported) {
+      return;
+    }
+    let cancelled = false;
+    async function loadStudioContext(): Promise<void> {
+      try {
+        const result = await postJson("/api/project/studio/context", {
+          projectDirectory,
+          routeId: activeRoute?.id,
+          sceneId: selectedScene?.id,
+          problemId: selectedProblemQuery || undefined
+        });
+        if (cancelled) {
+          return;
+        }
+        if (isApiFailure(result)) {
+          return;
+        }
+        applyStudioDtoState(result);
+        setLocalIssues(resultIssues(result));
+        const nextRevision = revisionFromResult(result);
+        if (nextRevision) {
+          setLocalRevision(nextRevision);
+        }
+        if (result.project || result.previewPreflight) {
+          onProjectResult(result);
+        }
+      } catch {
+        // Studio context refresh is opportunistic; explicit validate/save surfaces failures.
+      }
+    }
+    void loadStudioContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRoute?.id, dirty, projectDirectory, saveState, selectedProblemQuery, selectedScene?.id, unsupported]);
+
+  useEffect(() => {
+    const pending = pendingProblemFocusRef.current;
+    if (!pending) {
+      return;
+    }
+    if (pending.sceneId && selectedScene?.id !== pending.sceneId) {
+      return;
+    }
+    if (selectedPanel !== pending.panel) {
+      return;
+    }
+    if (layout.inspectorCollapsed) {
+      return;
+    }
+    pendingProblemFocusRef.current = null;
+    setFocusedProblemId(pending.problemId);
+    setFocusedFieldKey(pending.fieldKey);
+    focusProblemTarget(pending.focus, pending.panel);
+  }, [draftScene?.id, focusRequestTick, layout.inspectorCollapsed, selectedPanel, selectedScene?.id]);
 
   useEffect(() => {
     setLocalIssues(preflightToIssues(previewPreflight));
@@ -740,7 +966,7 @@ export function StudioWorkspace({
     }
   }, [activeRoute?.id, searchParams, selectedPanel, selectedScene?.id, selectedSceneQuery, setSearchParams]);
 
-  function updateQuery(nextValues: { route?: string; scene?: string; panel?: StudioPanelId }, replace = false): void {
+  function updateQuery(nextValues: { route?: string; scene?: string; panel?: StudioPanelId; problem?: string }, replace = false): void {
     const next = canonicalStudioQuery(searchParams, nextValues);
     setSearchParams(next, { replace });
   }
@@ -1133,6 +1359,7 @@ export function StudioWorkspace({
     if (nextRevision) {
       setLocalRevision(nextRevision);
     }
+    applyStudioDtoState(result);
     setLocalIssues(resultIssues(result));
     onProjectResult(result);
     const nextSelectedSceneId = options.selectedSceneId || resultSelectedSceneId(result);
@@ -1167,6 +1394,7 @@ export function StudioWorkspace({
     if (issues.length > 0) {
       setLocalIssues(issues);
     }
+    applyStudioDtoState(result);
     const nextRevision = revisionFromResult(result);
     if (nextRevision) {
       setLocalRevision(nextRevision);
@@ -1192,6 +1420,7 @@ export function StudioWorkspace({
       if (result.project || result.previewPreflight || result.previewReadiness || result.exportPlan) {
         onProjectResult(result);
       }
+      applyStudioDtoState(result, { clearWhenAbsent: true });
       setLocalIssues(resultIssues(result));
       if (nextRevision) {
         setLocalRevision(nextRevision);
@@ -1352,25 +1581,79 @@ export function StudioWorkspace({
     setStatusText(ending ? "엔딩 변경이 초안에 반영되었습니다." : "엔딩 해제가 초안에 반영되었습니다.");
   }
 
-  function handleProblemFocus(issue: ProjectIssue): void {
-    const sceneId = findIssueSceneId(issue, project);
-    const nextPanel = issuePanel(issue);
+  function handleProblemFocus(row: StudioProblemRow, selectedAction?: StudioProblemAction): void {
+    const issue = row.issue;
+    const focus = row.focus;
+    const sceneId = focus?.sceneId || findIssueSceneId(issue, project);
+    const nextPanel = panelFromValue(focus?.inspectorPanel || issuePanel(issue));
     const nextSceneId = sceneId || selectedScene?.id || "";
     if (nextSceneId && nextSceneId !== selectedScene?.id && !confirmDiscardDirtyDraft()) {
       return;
     }
+    if (nextSceneId && nextSceneId !== selectedScene?.id) {
+      confirmedSceneChangeRef.current = nextSceneId;
+    }
+    const repairActionId = selectedAction?.actionId || row.actions[0]?.actionId || focus?.repairActionIds?.[0];
     recordUXDecisionEvent({
       eventName: "help_opened",
-      helpChannel: "static_tutorial",
-      issueCode: issue.code,
+      helpChannel: row.actions.length > 0 || focus?.defaultAction === "repair" ? "automatic_repair_suggestion" : "inline_guide",
+      issueCode: focus?.issueCode || issue.code,
+      repairActionId,
       outcome: "opened"
     });
-    updateQuery({ panel: nextPanel, scene: nextSceneId });
-    if (nextPanel === "scene") {
-      focusLater(scriptTextareaRef);
-    } else {
-      focusLater(inspectorFirstFieldRef);
+    const fieldKey = focus?.field || focus?.scriptBlockId || "";
+    setFocusedProblemId(row.key);
+    setFocusedFieldKey(fieldKey);
+    if (layout.inspectorCollapsed) {
+      updateLayout({ inspectorCollapsed: false });
     }
+    pendingProblemFocusRef.current = {
+      fieldKey,
+      focus,
+      panel: nextPanel,
+      problemId: row.key,
+      sceneId: nextSceneId
+    };
+    setFocusRequestTick((current) => current + 1);
+    updateQuery({
+      panel: nextPanel,
+      problem: row.key,
+      route: focus?.routeId || activeRoute?.id || "",
+      scene: nextSceneId
+    });
+  }
+
+  function renderProblemRow(row: StudioProblemRow, compact = false) {
+    const selected = row.key === selectedProblemQuery || row.key === focusedProblemId;
+    return (
+      <li className={`studio-problem-row ${selected ? "selected" : ""}`} data-problem-id={row.key} key={row.key}>
+        <button className="studio-problem-main" onClick={() => handleProblemFocus(row)} type="button">
+          <StatusChip tone={issueTone(row.issue)}>{row.issue.severity || "info"}</StatusChip>
+          <span>{issueText(row.issue)}</span>
+          <StatusChip tone={row.actions.length > 0 ? "warning" : "neutral"}>{row.defaultActionLabel}</StatusChip>
+        </button>
+        {!compact && row.actions.length > 0 ? (
+          <div className="studio-problem-actions" aria-label="수리 후보">
+            {row.actions.map((action) => (
+              <button
+                className={`studio-problem-action-chip ${action.destructive ? "destructive" : ""}`}
+                data-repair-candidate-action={action.actionId || "repair-action"}
+                disabled={Boolean(action.disabledReason)}
+                key={`${row.key}-${action.actionId || action.label}`}
+                onClick={() => handleProblemFocus(row, action)}
+                title={action.disabledReason || action.label || action.actionId || "수리 후보"}
+                type="button"
+              >
+                <span>{action.label || action.actionId || "수리 후보"}</span>
+                {action.requiresPreflight ? <small>프리플라이트 필요</small> : null}
+                {action.destructive ? <small>확인 필요</small> : null}
+                {action.disabledReason ? <small>{action.disabledReason}</small> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </li>
+    );
   }
 
   const selectedFixedPrompt = fixedPrompts.find((fixture) => fixture.promptId === selectedFixedPromptId) || fixedPrompts[0] || null;
@@ -1490,7 +1773,7 @@ export function StudioWorkspace({
           </DiagnosticDrawer>
           <DiagnosticDrawer summary="진단">
             <dl className="summary-list" data-contract-copy="진단 API 실패">
-              <div><dt>쿼리</dt><dd>?route={activeRoute?.id || "none"} · ?scene={selectedScene?.id || "none"} · ?panel={selectedPanel}</dd></div>
+              <div><dt>쿼리</dt><dd>?route={activeRoute?.id || "none"} · ?scene={selectedScene?.id || "none"} · ?panel={selectedPanel} · ?problem={selectedProblemQuery || "none"}</dd></div>
               <div><dt>리비전</dt><dd>{revisionStatusText(localRevision)}</dd></div>
               <div><dt>프리뷰 제한 사유</dt><dd>{previewCommandDisabledReason || "없음"}</dd></div>
               <div><dt>진단 범위</dt><dd>진단 패널</dd></div>
@@ -1612,17 +1895,24 @@ export function StudioWorkspace({
             </header>
             {draftScene ? (
               <div className="studio-editor-grid">
-                <label className="field-row">
+                <label className={`field-row${focusedClass("label", "scene:label")}`}>
                   <span>라벨</span>
-                  <input onChange={(event) => patchDraftScene({ label: event.target.value })} value={draftScene.label || ""} />
+                  <input onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => setFocusTargets(["label", "scene:label"], element)} value={draftScene.label || ""} />
                 </label>
-                <label className="field-row">
+                <label className={`field-row${focusedClass("speaker", "scene:speaker")}`}>
                   <span>화자</span>
-                  <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} value={draftScene.speaker || ""} />
+                  <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
                 </label>
-                <label className="field-row studio-editor-text">
+                <label className={`field-row studio-editor-text${focusedClass("text", `scene:${draftScene.id || ""}`)}`}>
                   <span>본문</span>
-                  <textarea ref={scriptTextareaRef} onChange={(event) => patchDraftScene({ text: event.target.value })} value={draftScene.text || ""} />
+                  <textarea
+                    ref={(element) => {
+                      scriptTextareaRef.current = element;
+                      setFocusTargets(["text", "scene:text", draftScene.id ? `scene:${draftScene.id}` : ""], element);
+                    }}
+                    onChange={(event) => patchDraftScene({ text: event.target.value })}
+                    value={draftScene.text || ""}
+                  />
                 </label>
               </div>
             ) : (
@@ -1665,21 +1955,28 @@ export function StudioWorkspace({
                   {selectedPanel === "scene" ? (
                     <section>
                       <h3>씬</h3>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("label", "scene:label")}`}>
                         <span>라벨</span>
-                        <input onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.label || ""} />
+                        <input
+                          onChange={(event) => patchDraftScene({ label: event.target.value })}
+                          ref={(element) => {
+                            inspectorFirstFieldRef.current = element;
+                            setFocusTargets(["label", "scene:label"], element);
+                          }}
+                          value={draftScene.label || ""}
+                        />
                       </label>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("speaker", "scene:speaker")}`}>
                         <span>화자</span>
-                        <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} value={draftScene.speaker || ""} />
+                        <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
                       </label>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("ending", "scene:ending")}`}>
                         <span>엔딩 제목</span>
-                        <input onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal" }), title: event.target.value } })} value={draftScene.ending?.title || ""} />
+                        <input onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal" }), title: event.target.value } })} ref={(element) => setFocusTargets(["ending", "scene:ending"], element)} value={draftScene.ending?.title || ""} />
                       </label>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("ending", "scene:ending")}`}>
                         <span>엔딩 종류</span>
-                        <select onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, title: "새 엔딩" }), kind: event.target.value } })} value={draftScene.ending?.kind || "normal"}>
+                        <select onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, title: "새 엔딩" }), kind: event.target.value } })} ref={(element) => setFocusTargets(["endingKind", "scene:endingKind"], element)} value={draftScene.ending?.kind || "normal"}>
                           <option value="normal">일반</option>
                           <option value="good">좋음</option>
                           <option value="bad">나쁨</option>
@@ -1703,12 +2000,15 @@ export function StudioWorkspace({
                   {selectedPanel === "choices" ? (
                     <section>
                       <h3>다음 연결</h3>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("next", "outgoing", "choices:next", "choices:outgoing")}`}>
                         <span>다음 대상</span>
                         <select
                           disabled={(draftScene.choices || []).length > 0 || Boolean(draftScene.ending)}
                           onChange={(event) => patchDraftScene({ next: event.target.value || undefined })}
-                          ref={(element) => { inspectorFirstFieldRef.current = element; }}
+                          ref={(element) => {
+                            inspectorFirstFieldRef.current = element;
+                            setFocusTargets(["next", "outgoing", "choices:next", "choices:outgoing"], element);
+                          }}
                           value={draftScene.next || ""}
                         >
                           <option value="">없음</option>
@@ -1727,13 +2027,13 @@ export function StudioWorkspace({
                       <ul className="studio-choice-list">
                         {(draftScene.choices || []).map((choice, index) => (
                           <li key={choice.id || index}>
-                            <label className="field-row">
+                            <label className={`field-row${focusedClass("choiceText", choice.id ? `choice:${choice.id}:choiceText` : undefined)}`}>
                               <span>선택지 문구</span>
-                              <input onChange={(event) => updateChoice(index, { text: event.target.value })} value={choice.text || ""} />
+                              <input onChange={(event) => updateChoice(index, { text: event.target.value })} ref={(element) => setFocusTargets(["choiceText", choice.id ? `choice:${choice.id}:choiceText` : ""], element)} value={choice.text || ""} />
                             </label>
-                            <label className="field-row">
+                            <label className={`field-row${focusedClass("choiceTarget", choice.id ? `choice:${choice.id}:choiceTarget` : undefined)}`}>
                               <span>선택지 대상</span>
-                              <select onChange={(event) => updateChoice(index, { next: event.target.value })} value={choice.next || ""}>
+                              <select onChange={(event) => updateChoice(index, { next: event.target.value })} ref={(element) => setFocusTargets(["choiceTarget", choice.id ? `choice:${choice.id}:choiceTarget` : ""], element)} value={choice.next || ""}>
                                 <option value="">없음</option>
                                 {scenes.filter((scene) => scene.id !== draftScene.id).map((scene) => <option key={scene.id} value={scene.id}>{sceneTitle(scene)}</option>)}
                               </select>
@@ -1745,7 +2045,15 @@ export function StudioWorkspace({
                   ) : null}
 
                   {selectedPanel === "stats" ? (
-                    <section data-condition-runtime-support={conditionSupportMode}>
+                    <section
+                      className={focusedClass("condition", "effects", "stats:condition", "stats:effects").trim()}
+                      data-condition-runtime-support={conditionSupportMode}
+                      ref={(element) => {
+                        inspectorFirstFieldRef.current = element;
+                        setFocusTargets(["condition", "effects", "stats:condition", "stats:effects"], element);
+                      }}
+                      tabIndex={-1}
+                    >
                       <h3>조건/효과 후보 검토</h3>
                       <p className="studio-disabled-note">
                         조건 판정 런타임 지원이 #105에서 확정되기 전까지 편집할 수 없습니다. 현재 미지원 상태입니다. {conditionStrictPreviewText}
@@ -1774,16 +2082,23 @@ export function StudioWorkspace({
                   {selectedPanel === "assets" ? (
                     <section>
                       <h3>에셋</h3>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("backgroundAssetId", "assets:backgroundAssetId")}`}>
                         <span>배경</span>
-                        <select onChange={(event) => patchDraftScene({ backgroundAssetId: event.target.value || undefined })} ref={(element) => { inspectorFirstFieldRef.current = element; }} value={draftScene.backgroundAssetId || ""}>
+                        <select
+                          onChange={(event) => patchDraftScene({ backgroundAssetId: event.target.value || undefined })}
+                          ref={(element) => {
+                            inspectorFirstFieldRef.current = element;
+                            setFocusTargets(["assets", "backgroundAssetId", "assets:assets", "assets:backgroundAssetId"], element);
+                          }}
+                          value={draftScene.backgroundAssetId || ""}
+                        >
                           <option value="">연결 없음</option>
                           {backgroundAssets.map((asset) => <option key={asset.id || asset.uri} value={asset.id || ""}>{assetLabel(asset)}</option>)}
                         </select>
                       </label>
-                      <label className="field-row">
+                      <label className={`field-row${focusedClass("cgAssetId", "assets:cgAssetId")}`}>
                         <span>CG</span>
-                        <select onChange={(event) => patchDraftScene({ cgAssetId: event.target.value || undefined })} value={draftScene.cgAssetId || ""}>
+                        <select onChange={(event) => patchDraftScene({ cgAssetId: event.target.value || undefined })} ref={(element) => setFocusTargets(["cgAssetId", "generationJobs", "assets:cgAssetId", "assets:generationJobs"], element)} value={draftScene.cgAssetId || ""}>
                           <option value="">연결 없음</option>
                           {cgAssets.map((asset) => <option key={asset.id || asset.uri} value={asset.id || ""}>{assetLabel(asset)}</option>)}
                         </select>
@@ -1797,9 +2112,9 @@ export function StudioWorkspace({
                       <ul className="studio-choice-list">
                         {(draftScene.characters || []).map((character, index) => (
                           <li key={`${character.characterId || "character"}-${index}`}>
-                            <label className="field-row">
+                            <label className={`field-row${focusedClass("characters", `character:${index}:characters`)}`}>
                               <span>캐릭터</span>
-                              <select onChange={(event) => updateCharacter(index, { characterId: event.target.value })} value={character.characterId || ""}>
+                              <select onChange={(event) => updateCharacter(index, { characterId: event.target.value })} ref={(element) => setFocusTargets(["characters", `character:${index}:characters`], element)} value={character.characterId || ""}>
                                 <option value="">없음</option>
                                 {(project?.characters || []).map((item) => <option key={item.id} value={item.id}>{characterLabel(project, item.id)}</option>)}
                               </select>
@@ -1824,14 +2139,7 @@ export function StudioWorkspace({
                       <h3>검증</h3>
                       <p className="studio-disabled-note">저장 실패, 검증 갱신 필요, API 실패 상태를 여기서 확인합니다.</p>
                       <ul className="studio-problem-list compact">
-                        {visibleIssues.map((issue, index) => (
-                          <li key={`${issue.path || issue.code || "issue"}-${index}`}>
-                            <button onClick={() => handleProblemFocus(issue)} type="button">
-                              <StatusChip tone={issueTone(issue)}>{issue.severity || "info"}</StatusChip>
-                              <span>{issueText(issue)}</span>
-                            </button>
-                          </li>
-                        ))}
+                        {problemRows.map((row) => renderProblemRow(row, true))}
                       </ul>
                       <h3>생성 결과 로그</h3>
                       <label className="field-row">
@@ -1901,16 +2209,9 @@ export function StudioWorkspace({
           </div>
         </div>
         {layout.problemsCollapsed ? null : (
-          visibleIssues.length > 0 ? (
+          problemRows.length > 0 ? (
             <ul className="studio-problem-list">
-              {visibleIssues.map((issue, index) => (
-                <li key={`${issue.path || issue.code || "issue"}-${index}`}>
-                  <button onClick={() => handleProblemFocus(issue)} type="button">
-                    <StatusChip tone={issueTone(issue)}>{issue.severity || "info"}</StatusChip>
-                    <span>{issueText(issue)}</span>
-                  </button>
-                </li>
-              ))}
+              {problemRows.map((row) => renderProblemRow(row))}
             </ul>
           ) : (
             <p className="page-muted">문제 없음. 저장 후 검증을 다시 실행하면 최신 상태가 표시됩니다.</p>

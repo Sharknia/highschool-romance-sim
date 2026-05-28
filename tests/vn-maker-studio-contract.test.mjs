@@ -113,11 +113,17 @@ const sceneIdIssueFocus = core.createStudioIssueFocus(project, {
 }, { routeId });
 assert.equal(sceneIndexIssueFocus.sceneId, "scene-middle");
 assert.equal(sceneIndexIssueFocus.targetSceneId, "scene-missing");
+assert.equal(sceneIndexIssueFocus.field, "choiceTarget");
 assert.equal(sceneBracketIssueFocus.sceneId, "scene-middle");
 assert.equal(sceneBracketIssueFocus.choiceId, "choice-missing");
 assert.equal(sceneIdIssueFocus.sceneId, "scene-middle");
 assert.equal(sceneIdIssueFocus.choiceId, "choice-good");
 assert.equal(sceneIdIssueFocus.inspectorPanel, "choices");
+
+const missingTargetPreflightFocus = studio.previewPreflight.blockers.find((issue) => issue.issueCode === "missing-target" && issue.choiceId === "choice-missing");
+assert.ok(missingTargetPreflightFocus);
+assert.equal(missingTargetPreflightFocus.field, "choiceTarget");
+assert.equal(missingTargetPreflightFocus.defaultAction, "repair");
 
 const tempRoot = await mkdtemp(join(tmpdir(), "vn-maker-studio-contract-"));
 const projectDirectory = join(tempRoot, "StudioContract.vnmaker");

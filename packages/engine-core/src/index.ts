@@ -1754,10 +1754,74 @@ function studioIssueId(issue: Pick<ValidationIssue, "severity" | "code" | "path"
   return `${issue.severity}:${issue.code || "validation-issue"}:${issue.path}:${issue.message}`;
 }
 
-function fieldFromIssuePath(path: string): string | undefined {
+function issuePathParts(path: string): string[] {
   const normalized = path.replace(/\]/g, "");
-  const parts = normalized.split(/[.[\]]+/).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : undefined;
+  return normalized.split(/[.[\]]+/).filter(Boolean);
+}
+
+function issuePathHas(path: string, part: string): boolean {
+  return issuePathParts(path).includes(part);
+}
+
+function isEndingIssueCode(code: string | undefined): boolean {
+  return code === "invalid-ending" || code === "duplicate-ending-id" || code === "ending-has-outgoing";
+}
+
+function isAssetIssueCode(code: string | undefined): boolean {
+  return code === "background-required" || code === "image-generation-incomplete";
+}
+
+function fieldForIssue(issue: Pick<ValidationIssue, "path" | "choiceIds"> & { code?: string }): string | undefined {
+  const path = issue.path || "";
+  const code = issue.code;
+  const parts = issuePathParts(path);
+  if (code === CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE || parts.includes("condition")) {
+    return "condition";
+  }
+  if (parts.includes("effects")) {
+    return "effects";
+  }
+  if (isEndingIssueCode(code) || parts.includes("ending")) {
+    return "ending";
+  }
+  if (code === "mixed-outgoing") {
+    return "outgoing";
+  }
+  if (code === "missing-target") {
+    return parts.includes("choices") || (issue.choiceIds || []).length > 0 ? "choiceTarget" : "next";
+  }
+  if (parts.includes("backgroundAssetId") || parts.includes("background")) {
+    return "backgroundAssetId";
+  }
+  if (code === "background-required") {
+    return "backgroundAssetId";
+  }
+  if (parts.includes("cgAssetId") || parts.includes("cg")) {
+    return "cgAssetId";
+  }
+  if (parts.includes("characters")) {
+    return "characters";
+  }
+  if (parts.includes("generationJobs") || code === "image-generation-incomplete") {
+    return "generationJobs";
+  }
+  if (parts.includes("assets")) {
+    return "assets";
+  }
+  if (parts.includes("next")) {
+    return "next";
+  }
+  if (code === "empty-choice-text") {
+    return "choiceText";
+  }
+  if (code === "duplicate-choice-id") {
+    return "choiceId";
+  }
+  const lastPart = parts[parts.length - 1];
+  if (!lastPart || /^\d+$/.test(lastPart) || lastPart === "scenes") {
+    return undefined;
+  }
+  return ["label", "speaker", "text"].includes(lastPart) ? lastPart : undefined;
 }
 
 function sceneIdFromIssuePath(project: VnMakerProject, path: string): string | undefined {
@@ -1784,16 +1848,24 @@ function choiceIdFromIssuePath(project: VnMakerProject, sceneId: string | undefi
 
 function studioPanelForIssue(issue: Pick<ValidationIssue, "path" | "choiceIds"> & { code?: string }): StudioInspectorPanelId {
   const path = issue.path || "";
-  if (issue.code === CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE || path.includes("condition") || path.includes("effects")) {
+  if (issue.code === CONDITION_RUNTIME_UNSUPPORTED_REASON_CODE || issuePathHas(path, "condition") || issuePathHas(path, "effects")) {
     return "stats";
   }
-  if (path.includes("choices") || (issue.choiceIds || []).length > 0) {
-    return "choices";
+  if (isEndingIssueCode(issue.code) || issuePathHas(path, "ending")) {
+    return "scene";
   }
-  if (path.includes("background") || path.includes("cgAssetId") || path.includes("characters")) {
+  if (
+    isAssetIssueCode(issue.code)
+    || issuePathHas(path, "assets")
+    || issuePathHas(path, "generationJobs")
+    || issuePathHas(path, "background")
+    || issuePathHas(path, "backgroundAssetId")
+    || issuePathHas(path, "cgAssetId")
+    || issuePathHas(path, "characters")
+  ) {
     return "assets";
   }
-  if (path.includes("ending") || path.includes("next")) {
+  if (path.includes("choices") || (issue.choiceIds || []).length > 0 || issue.code === "missing-target" || issue.code === "mixed-outgoing" || issuePathHas(path, "next")) {
     return "choices";
   }
   return "scene";
@@ -1823,9 +1895,8 @@ export function createStudioIssueFocus(
     ? "repair"
     : severity === "error"
       ? "preview-blocker"
-      : code === "validation-issue"
-        ? "none"
-        : "focus";
+      : "focus";
+  const field = fieldForIssue({ path: issue.path, code, choiceIds: issue.choiceIds });
 
   return {
     issueId: studioIssueId({ severity, code: code as ValidationIssueCode, path: issue.path, message: issue.message }),
@@ -1836,7 +1907,7 @@ export function createStudioIssueFocus(
     ...(options.routeId ? { routeId: options.routeId } : {}),
     ...(sceneId ? { sceneId } : {}),
     ...(choiceId ? { choiceId } : {}),
-    ...(fieldFromIssuePath(issue.path) ? { field: fieldFromIssuePath(issue.path) } : {}),
+    ...(field ? { field } : {}),
     inspectorPanel: studioPanelForIssue({ path: issue.path, code, choiceIds: issue.choiceIds }),
     ...(sceneId ? { scriptBlockId: `scene:${sceneId}` } : {}),
     defaultAction,
