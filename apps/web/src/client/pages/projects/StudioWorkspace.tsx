@@ -80,6 +80,8 @@ type ProblemFilter = "all" | "errors" | "warnings" | "currentScene";
 type ValidationRunState = "idle" | "running" | "current" | "stale";
 type StagePreviewMode = "edit" | "play";
 type ScriptBlockKind = "SceneMetaStrip" | "DialogueBlock" | "NarrationBlock" | "StageDirectionBlock" | "ChoiceSummaryBlock" | "EndingBlock";
+type GenerationAssistMode = "ready" | "running" | "review" | "protocolReplay" | "unavailable";
+type GenerationAssistSourceType = "actualPatch" | "mockReplay" | "protocolReplay" | "unavailableGeneration";
 type StudioStructuralOperation =
   | { type: "deleteScene"; sceneId: string; mode?: "failIfReferenced" | "unlinkReferences" }
   | { type: "duplicateScene"; sourceSceneId: string; newSceneId?: string; label?: string }
@@ -473,6 +475,58 @@ function generationSourceText(log: GenerationResultLog | null): string {
   if (log.sourceType === "actual") return `실제 생성 · ${log.adapter || "어댑터 확인 필요"}`;
   if (log.sourceType === "mock") return `목 생성 · ${log.adapter || "어댑터 확인 필요"}`;
   return `사용 불가 · ${log.skippedReason || "사유 없음"}`;
+}
+
+function generationAssistSourceType(log: GenerationResultLog | null, hasProtocolReplay: boolean): GenerationAssistSourceType {
+  if (log?.sourceType === "actual") return "actualPatch";
+  if (log?.sourceType === "mock") return "mockReplay";
+  if (hasProtocolReplay) return "protocolReplay";
+  return "unavailableGeneration";
+}
+
+function generationAssistSourceLabel(sourceType: GenerationAssistSourceType): string {
+  if (sourceType === "actualPatch") return "실제 patch";
+  if (sourceType === "mockReplay") return "목 replay";
+  if (sourceType === "protocolReplay") return "프로토콜 replay";
+  return "생성 사용 불가";
+}
+
+function generationAssistTone(sourceType: GenerationAssistSourceType): "success" | "warning" | "neutral" {
+  if (sourceType === "actualPatch") return "success";
+  if (sourceType === "mockReplay" || sourceType === "protocolReplay") return "warning";
+  return "neutral";
+}
+
+function actualPatchBadge(active: boolean) {
+  return (
+    <span aria-current={active ? "true" : undefined} data-generation-source-type="actualPatch">
+      <StatusChip tone={active ? "success" : "neutral"}>실제 patch</StatusChip>
+    </span>
+  );
+}
+
+function mockReplayBadge(active: boolean) {
+  return (
+    <span aria-current={active ? "true" : undefined} data-generation-source-type="mockReplay">
+      <StatusChip tone={active ? "warning" : "neutral"}>목 replay</StatusChip>
+    </span>
+  );
+}
+
+function protocolReplayBadge(active: boolean) {
+  return (
+    <span aria-current={active ? "true" : undefined} data-generation-source-type="protocolReplay">
+      <StatusChip tone={active ? "warning" : "neutral"}>프로토콜 replay</StatusChip>
+    </span>
+  );
+}
+
+function unavailableGenerationBadge(active: boolean) {
+  return (
+    <span aria-current={active ? "true" : undefined} data-generation-source-type="unavailableGeneration">
+      <StatusChip tone="neutral">생성 사용 불가</StatusChip>
+    </span>
+  );
 }
 
 function saveStateLabel(saveState: StudioSaveState, dirty: boolean): string {
@@ -1842,10 +1896,108 @@ export function StudioWorkspace({
             ))}
           </ul>
         ) : null}
-        <DiagnosticDrawer summary="Phase 0 판정 원문">
-          <pre data-contract-copy="Phase 0 decision report">{phase0Report ? JSON.stringify({ phase0DecisionReport: phase0Report, eventLog: phase0EventLog }, null, 2) : "Phase 0 판정 원문 없음"}</pre>
+      </section>
+    );
+  }
+
+  function rawGenerationDiagnostics(): Record<string, unknown> {
+    return {
+      generation: {
+        status: generationStatus,
+        log: generationLog,
+        selectedFixedPromptId: selectedFixedPrompt?.promptId || selectedFixedPromptId || "",
+        fixedPromptCount: fixedPrompts.length
+      },
+      phase0: {
+        status: phase0Status,
+        phase0DecisionReport: phase0Report,
+        eventLog: phase0EventLog
+      },
+      selectedIds: {
+        projectId,
+        routeId: activeRoute?.id || "",
+        sceneId: selectedScene?.id || "",
+        panel: selectedPanel,
+        problemId: selectedProblemQuery || ""
+      },
+      source: {
+        mode: generationAssistMode,
+        type: currentGenerationAssistSourceType,
+        label: generationAssistSourceLabel(currentGenerationAssistSourceType)
+      }
+    };
+  }
+
+  function ManualAuthoringPrimaryFlow() {
+    return (
+      <section data-generation-assist-surface="ManualAuthoringPrimaryFlow">
+        <h3>수동 제작</h3>
+        <p className="studio-disabled-note">수동 제작이 기본 흐름입니다. 생성 보조는 선택형 drawer이며 자연어 event patch와 고정 프롬프트 replay를 그 안에서만 다룹니다.</p>
+      </section>
+    );
+  }
+
+  function GenerationDiagnosticsSurface() {
+    return (
+      <section data-generation-assist-surface="GenerationDiagnosticsSurface">
+        <h3>QA 진단</h3>
+        <p className="studio-disabled-note" data-contract-copy="Problems Panel validation issue flow">Problems Panel validation issue flow와 생성 보조 replay 원문은 분리합니다.</p>
+        <dl className="summary-list">
+          <div><dt>선택 프롬프트</dt><dd>{selectedFixedPrompt?.promptId || selectedFixedPromptId || "선택 없음"}</dd></div>
+          <div><dt>현재 route</dt><dd>{activeRoute?.id || "없음"}</dd></div>
+          <div><dt>현재 scene</dt><dd>{selectedScene?.id || "없음"}</dd></div>
+          <div><dt>현재 problem</dt><dd>{selectedProblemQuery || "없음"}</dd></div>
+        </dl>
+        <DiagnosticDrawer summary="원문 API envelope">
+          <pre data-contract-copy="Phase 0 decision report">{JSON.stringify(rawGenerationDiagnostics(), null, 2)}</pre>
         </DiagnosticDrawer>
       </section>
+    );
+  }
+
+  function renderGenerationAssistDrawer() {
+    return (
+      <DiagnosticDrawer summary="생성 보조 / QA">
+        <section data-generation-assist-surface="StudioGenerationAssistDrawer">
+          <ManualAuthoringPrimaryFlow />
+          <section>
+            <h3>생성 결과 로그</h3>
+            <p className="studio-disabled-note">실제 patch, 목 replay, 프로토콜 replay, 생성 사용 불가 상태를 같은 검증 문제 목록에 섞지 않고 구분합니다.</p>
+            <div className="button-row">
+              {actualPatchBadge(currentGenerationAssistSourceType === "actualPatch")}
+              {mockReplayBadge(currentGenerationAssistSourceType === "mockReplay")}
+              {protocolReplayBadge(currentGenerationAssistSourceType === "protocolReplay")}
+              {unavailableGenerationBadge(currentGenerationAssistSourceType === "unavailableGeneration")}
+            </div>
+            <label className="field-row">
+              <span>고정 프롬프트</span>
+              <select onChange={(event) => setSelectedFixedPromptId(event.target.value)} value={selectedFixedPrompt?.promptId || ""}>
+                {fixedPrompts.map((fixture) => (
+                  <option key={fixture.promptId} value={fixture.promptId}>{fixture.promptId}</option>
+                ))}
+              </select>
+            </label>
+            <p className="studio-disabled-note">{selectedFixedPrompt?.promptText || generationStatus}</p>
+            <div className="button-row">
+              <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<Play size={16} />} onClick={() => void replayFixedPrompt("actual")} variant="primary">
+                실제 재생
+              </Button>
+              <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<RefreshCw size={16} />} onClick={() => void replayFixedPrompt("mock")}>
+                목 재생
+              </Button>
+            </div>
+            <dl className="summary-list">
+              <div><dt>상태</dt><dd>{generationStatus}</dd></div>
+              <div><dt>보조 모드</dt><dd>{generationAssistMode}</dd></div>
+              <div><dt>분류</dt><dd><StatusChip tone={generationClassificationTone(generationLog?.classification)}>{generationLog?.classification || "실행 전"}</StatusChip></dd></div>
+              <div><dt>소스</dt><dd><span data-generation-source-type={currentGenerationAssistSourceType}><StatusChip tone={generationAssistTone(currentGenerationAssistSourceType)}>{generationAssistSourceLabel(currentGenerationAssistSourceType)}</StatusChip></span> · {generationSourceText(generationLog)}</dd></div>
+              <div><dt>결과 ID</dt><dd>{generationLog?.resultId || "기록 없음"}</dd></div>
+            </dl>
+          </section>
+          {renderPhase0ProtocolPanel()}
+          <GenerationDiagnosticsSurface />
+        </section>
+      </DiagnosticDrawer>
     );
   }
 
@@ -2808,6 +2960,16 @@ export function StudioWorkspace({
   }
 
   const selectedFixedPrompt = fixedPrompts.find((fixture) => fixture.promptId === selectedFixedPromptId) || fixedPrompts[0] || null;
+  const generationAssistMode: GenerationAssistMode = generationBusy
+    ? "running"
+    : generationLog
+      ? "review"
+      : phase0Report || phase0EventLog
+        ? "protocolReplay"
+        : fixedPrompts.length > 0
+          ? "ready"
+          : "unavailable";
+  const currentGenerationAssistSourceType = generationAssistSourceType(generationLog, Boolean(phase0Report || phase0EventLog));
   const rootStyle = {
     "--studio-inspector-width": `${layout.inspectorCollapsed ? 48 : layout.inspectorWidth}px`,
     "--studio-problems-height": `${layout.problemsCollapsed ? 34 : layout.problemsHeight}px`,
@@ -3367,37 +3529,13 @@ export function StudioWorkspace({
                         <div><dt>Warnings</dt><dd>{warningProblemCount}</dd></div>
                         <div><dt>Current Scene</dt><dd>{currentSceneProblemCount}</dd></div>
                       </dl>
-                      <h3>생성 결과 로그</h3>
-                      <label className="field-row">
-                        <span>고정 프롬프트</span>
-                        <select onChange={(event) => setSelectedFixedPromptId(event.target.value)} value={selectedFixedPrompt?.promptId || ""}>
-                          {fixedPrompts.map((fixture) => (
-                            <option key={fixture.promptId} value={fixture.promptId}>{fixture.promptId}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <p className="studio-disabled-note">{selectedFixedPrompt?.promptText || generationStatus}</p>
-                      <div className="button-row">
-                        <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<Play size={16} />} onClick={() => void replayFixedPrompt("actual")} variant="primary">
-                          실제 재생
-                        </Button>
-                        <Button disabled={generationBusy || fixedPrompts.length === 0} icon={<RefreshCw size={16} />} onClick={() => void replayFixedPrompt("mock")}>
-                          목 재생
-                        </Button>
-                      </div>
-                      <dl className="summary-list">
-                        <div><dt>상태</dt><dd>{generationStatus}</dd></div>
-                        <div><dt>분류</dt><dd><StatusChip tone={generationClassificationTone(generationLog?.classification)}>{generationLog?.classification || "실행 전"}</StatusChip></dd></div>
-                        <div><dt>소스</dt><dd>{generationSourceText(generationLog)}</dd></div>
-                        <div><dt>결과 ID</dt><dd>{generationLog?.resultId || "기록 없음"}</dd></div>
-                      </dl>
-                      {renderPhase0ProtocolPanel()}
+                      {renderGenerationAssistDrawer()}
                     </section>
                   ) : null}
                 </div>
               ) : selectedPanel === "validation" ? (
                 <div className="studio-inspector-body">
-                  {renderPhase0ProtocolPanel()}
+                  {renderGenerationAssistDrawer()}
                 </div>
               ) : (
                 <EmptyState title="Inspector 대상 없음" description="씬을 만들거나 선택하면 편집 필드가 표시됩니다." />
