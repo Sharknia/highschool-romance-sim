@@ -793,6 +793,34 @@ assert.match(studioWorkspaceSource, /setLocalRouteSelection\(result\.studio\.rou
   assert.match(studioWorkspaceSource, pattern, `StudioWorkspace Problems Panel 허브에 '${requiredText}' 흐름이 있어야 합니다.`);
 });
 [
+  "StudioStructuralOperation",
+  "applyStudioStructuralMutation",
+  "confirmStructuralMutation",
+  "structuralImpactText",
+  "sceneStructureModeText",
+  "duplicateSelectedScene",
+  "deleteSelectedScene",
+  "setSelectedSceneAsRouteEntry",
+  "duplicateChoiceViaMutation",
+  "deleteChoiceViaMutation",
+  "moveChoiceViaMutation",
+  "clearChoiceTargetViaMutation",
+  "studio-scene-actions",
+  "studio-choice-actions",
+  "data-structural-action",
+  "deleteScene",
+  "duplicateScene",
+  "deleteChoice",
+  "duplicateChoice",
+  "reorderChoice",
+  "clearChoiceTarget",
+  "setRouteEntry",
+  "구조 편집은 즉시 저장"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace 구조 편집 허브에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+[
   "conditionRuntimeSupport",
   "strictPreviewStatus",
   "strictPreviewSuccess",

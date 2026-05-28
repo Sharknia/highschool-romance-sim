@@ -2503,6 +2503,38 @@ a {
   font-size: 0.94rem;
 }
 
+.studio-scene-actions,
+.studio-choice-actions {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 9px;
+  background: #171c1d;
+}
+
+.studio-scene-actions > div:first-child,
+.studio-choice-actions {
+  align-items: center;
+}
+
+.studio-scene-actions small,
+.studio-choice-actions span {
+  min-width: 0;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.studio-scene-actions .button-row,
+.studio-choice-actions .button-row {
+  gap: 6px;
+}
+
+.studio-choice-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .studio-choice-list {
   padding: 0;
 }

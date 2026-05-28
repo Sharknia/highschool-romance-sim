@@ -1,9 +1,14 @@
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   CheckCircle2,
+  Copy,
   Eye,
+  Flag,
   GitCompareArrows,
   GitBranch,
+  Link2Off,
   LocateFixed,
   Maximize2,
   MousePointerClick,
@@ -18,6 +23,7 @@ import {
   Save,
   Search,
   Settings,
+  Trash2,
   Undo2,
   ZoomIn,
   ZoomOut
@@ -72,6 +78,15 @@ type StudioCommandAddKind = "start" | "scene" | "choice";
 type StudioLayoutResizeTarget = "route" | "inspector" | "problems";
 type ProblemFilter = "all" | "errors" | "warnings" | "currentScene";
 type ValidationRunState = "idle" | "running" | "current" | "stale";
+type StudioStructuralOperation =
+  | { type: "deleteScene"; sceneId: string; mode?: "failIfReferenced" | "unlinkReferences" }
+  | { type: "duplicateScene"; sourceSceneId: string; newSceneId?: string; label?: string }
+  | { type: "deleteChoice"; sceneId: string; choiceId: string }
+  | { type: "duplicateChoice"; sceneId: string; choiceId: string; newChoiceId?: string; text?: string }
+  | { type: "reorderChoice"; sceneId: string; choiceId: string; toIndex: number }
+  | { type: "clearChoiceTarget"; sceneId: string; choiceId: string }
+  | { type: "unlinkSceneTarget"; sourceSceneId: string; targetSceneId: string; edgeType?: "next" | "choice" | "all" }
+  | { type: "setRouteEntry"; routeId: string; sceneId: string };
 
 const dirtyDraftDiscardMessage = "저장하지 않은 씬 변경 사항이 있습니다. 변경 사항을 버리고 이동할까요?";
 
@@ -222,6 +237,29 @@ function sceneSummaryText(scene?: ProjectScene | null): string {
   return "요약 없음";
 }
 
+function sceneStructureModeText(scene: ProjectScene | null, activeRoute: ProjectRoute | null): string {
+  if (!scene) return "씬 선택 필요";
+  if (activeRoute?.entrySceneId === scene.id) return "시작 씬";
+  if (scene.ending) return "엔딩 씬";
+  return "일반 씬";
+}
+
+function choiceTargetText(choice: SceneChoice, project: ProjectData | null): string {
+  if (!choice.next) return "target 없음";
+  const target = (project?.scenes || []).find((scene) => scene.id === choice.next);
+  return target ? sceneTitle(target) : `missing target: ${choice.next}`;
+}
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
 function assetLabel(asset?: ProjectAsset | null): string {
   if (!asset) return "연결 없음";
   return asset.label || "이름 없는 에셋";
@@ -367,6 +405,28 @@ function studioPreviewPath(projectId: string, routeId?: string, sceneId?: string
 
 function problemCountLabel(problemCount: number): string {
   return problemCount === 0 ? "문제 0건" : `문제 ${problemCount}건`;
+}
+
+function structuralImpactText(operation: StudioStructuralOperation, project: ProjectData | null): string {
+  if (operation.type === "deleteScene") {
+    const scene = (project?.scenes || []).find((item) => item.id === operation.sceneId);
+    return `씬 삭제: ${sceneTitle(scene)} · 참조는 unlinkReferences 정책으로 해제됩니다.`;
+  }
+  if (operation.type === "duplicateScene") {
+    const scene = (project?.scenes || []).find((item) => item.id === operation.sourceSceneId);
+    return `씬 복제: ${sceneTitle(scene)}의 선택지와 엔딩 설정을 새 ID로 복사합니다.`;
+  }
+  if (operation.type === "deleteChoice") return `선택지 삭제: ${operation.choiceId}`;
+  if (operation.type === "duplicateChoice") return `선택지 복제: ${operation.choiceId}`;
+  if (operation.type === "reorderChoice") return `선택지 정렬: ${operation.choiceId} -> ${operation.toIndex + 1}번째`;
+  if (operation.type === "clearChoiceTarget") return `target 해제: ${operation.choiceId}의 연결을 missing target 경고 상태로 전환합니다.`;
+  if (operation.type === "unlinkSceneTarget") return `씬 연결 해제: ${operation.sourceSceneId} -> ${operation.targetSceneId}`;
+  if (operation.type === "setRouteEntry") return `시작 씬 변경: ${operation.routeId} route의 entry를 ${operation.sceneId}로 변경합니다.`;
+  return "구조 편집";
+}
+
+function structuralOperationRequiresConfirm(operation: StudioStructuralOperation): boolean {
+  return ["deleteScene", "deleteChoice", "clearChoiceTarget", "unlinkSceneTarget"].includes(operation.type);
 }
 
 function preflightToIssues(preflight: ProjectPreviewPreflight | null): ProjectIssue[] {
@@ -1225,6 +1285,11 @@ export function StudioWorkspace({
   useEffect(() => {
     function handleStudioShortcuts(event: KeyboardEvent): void {
       const commandPressed = event.metaKey || event.ctrlKey;
+      if (!commandPressed && event.key === "Delete" && selectedScene?.id && !isEditableEventTarget(event.target)) {
+        event.preventDefault();
+        void deleteSelectedScene();
+        return;
+      }
       if (!commandPressed) {
         return;
       }
@@ -1810,6 +1875,136 @@ export function StudioWorkspace({
     return validateStudio();
   }
 
+  function confirmStructuralMutation(label: string, operations: StudioStructuralOperation[]): boolean {
+    if (dirty && !confirmDiscardDirtyDraft()) {
+      return false;
+    }
+    if (!operations.some(structuralOperationRequiresConfirm)) {
+      return true;
+    }
+    const impacts = operations.map((operation) => `- ${structuralImpactText(operation, project)}`).join("\n");
+    return window.confirm(`${label}\n\n영향 범위\n${impacts}\n\n구조 편집은 즉시 저장됩니다. 계속할까요?`);
+  }
+
+  async function applyStudioStructuralMutation(
+    operations: StudioStructuralOperation[],
+    fallbackStatus: string,
+    options: { selectedSceneId?: string } = {}
+  ): Promise<ProjectRevision | null> {
+    if (operations.length === 0) {
+      setStatusText("적용할 구조 편집이 없습니다.");
+      return null;
+    }
+    if (!confirmStructuralMutation(fallbackStatus, operations)) {
+      setStatusText("구조 편집을 취소했습니다.");
+      return null;
+    }
+    const expectedProjectRevision = await ensureRevision();
+    if (!expectedProjectRevision) {
+      setSaveState("failed");
+      setStatusText("저장 실패: 최신 projectRevision을 확인할 수 없습니다.");
+      return null;
+    }
+    setSaveState("saving");
+    setStatusText("구조 편집을 적용하는 중입니다.");
+    try {
+      const result = await postJson("/api/project/studio/mutate", {
+        expectedProjectRevision,
+        operations,
+        projectDirectory,
+        routeId: activeRoute?.id,
+        sceneId: options.selectedSceneId || selectedScene?.id || draftScene?.id
+      });
+      if (isApiFailure(result)) {
+        applyFailedResult(result, fallbackStatus);
+        return null;
+      }
+      applySuccessfulResult(result, `${fallbackStatus} 구조 편집은 즉시 저장되었습니다.`, {
+        preserveContext: true,
+        selectedSceneId: options.selectedSceneId
+      });
+      return revisionFromResult(result);
+    } catch (error) {
+      setSaveState("apiFailure");
+      setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  async function duplicateSelectedScene(): Promise<void> {
+    if (!selectedScene?.id) {
+      setStatusText("복제할 씬을 먼저 선택해야 합니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "duplicateScene", sourceSceneId: selectedScene.id }
+    ], "씬 복제 완료.");
+  }
+
+  async function deleteSelectedScene(): Promise<void> {
+    if (!selectedScene?.id) {
+      setStatusText("삭제할 씬을 먼저 선택해야 합니다.");
+      return;
+    }
+    if (scenes.length <= 1) {
+      setStatusText("마지막 씬은 삭제할 수 없습니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "deleteScene", sceneId: selectedScene.id, mode: "unlinkReferences" }
+    ], "씬 삭제 완료.");
+  }
+
+  async function setSelectedSceneAsRouteEntry(): Promise<void> {
+    if (!activeRoute?.id || !selectedScene?.id) {
+      setStatusText("시작 씬으로 지정할 route와 씬이 필요합니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "setRouteEntry", routeId: activeRoute.id, sceneId: selectedScene.id }
+    ], "시작 씬 지정 완료.", { selectedSceneId: selectedScene.id });
+  }
+
+  async function duplicateChoiceViaMutation(choice: SceneChoice): Promise<void> {
+    if (!selectedScene?.id || !choice.id) {
+      setStatusText("복제할 선택지를 먼저 선택해야 합니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "duplicateChoice", sceneId: selectedScene.id, choiceId: choice.id }
+    ], "선택지 복제 완료.", { selectedSceneId: selectedScene.id });
+  }
+
+  async function deleteChoiceViaMutation(choice: SceneChoice): Promise<void> {
+    if (!selectedScene?.id || !choice.id) {
+      setStatusText("삭제할 선택지를 먼저 선택해야 합니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "deleteChoice", sceneId: selectedScene.id, choiceId: choice.id }
+    ], "선택지 삭제 완료.", { selectedSceneId: selectedScene.id });
+  }
+
+  async function moveChoiceViaMutation(choice: SceneChoice, toIndex: number): Promise<void> {
+    if (!selectedScene?.id || !choice.id) {
+      setStatusText("정렬할 선택지를 먼저 선택해야 합니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "reorderChoice", sceneId: selectedScene.id, choiceId: choice.id, toIndex }
+    ], "선택지 정렬 완료.", { selectedSceneId: selectedScene.id });
+  }
+
+  async function clearChoiceTargetViaMutation(choice: SceneChoice): Promise<void> {
+    if (!selectedScene?.id || !choice.id) {
+      setStatusText("target을 해제할 선택지를 먼저 선택해야 합니다.");
+      return;
+    }
+    await applyStudioStructuralMutation([
+      { type: "clearChoiceTarget", sceneId: selectedScene.id, choiceId: choice.id }
+    ], "선택지 target 해제 완료.", { selectedSceneId: selectedScene.id });
+  }
+
   async function saveStudioDraft(): Promise<void> {
     if (!draftScene) {
       setStatusText("저장할 씬이 없습니다.");
@@ -1922,6 +2117,13 @@ export function StudioWorkspace({
     if (!draftScene?.id) {
       setStatusText("엔딩을 설정할 씬을 먼저 선택해야 합니다.");
       return;
+    }
+    if (ending && (draftScene.next || (draftScene.choices || []).length > 0)) {
+      const confirmed = window.confirm("엔딩 설정은 이 씬의 다음 연결과 선택지를 해제합니다. 초안에 반영할까요?");
+      if (!confirmed) {
+        setStatusText("엔딩 설정을 취소했습니다.");
+        return;
+      }
     }
     setDraftScene((current) => {
       if (!current) return current;
@@ -2750,6 +2952,23 @@ export function StudioWorkspace({
                   {selectedPanel === "scene" ? (
                     <section>
                       <h3>씬</h3>
+                      <div className="studio-scene-actions" aria-label="씬 구조 편집">
+                        <div>
+                          <StatusChip tone={draftScene.ending ? "warning" : activeRoute?.entrySceneId === draftScene.id ? "success" : "neutral"}>{sceneStructureModeText(draftScene, activeRoute)}</StatusChip>
+                          <small>구조 편집은 즉시 저장됩니다. 엔딩 입력과 이름/본문 같은 초안 편집은 저장 버튼으로 반영합니다.</small>
+                        </div>
+                        <div className="button-row">
+                          <Button data-structural-action="setRouteEntry" disabled={saveState === "saving" || !activeRoute?.id || activeRoute.entrySceneId === draftScene.id} icon={<Flag size={16} />} onClick={() => void setSelectedSceneAsRouteEntry()} title="현재 route의 시작 씬으로 지정">
+                            시작 지정
+                          </Button>
+                          <Button data-structural-action="duplicateScene" disabled={saveState === "saving"} icon={<Copy size={16} />} onClick={() => void duplicateSelectedScene()} title="현재 씬 복제">
+                            복제
+                          </Button>
+                          <Button data-structural-action="deleteScene" disabled={saveState === "saving" || scenes.length <= 1} icon={<Trash2 size={16} />} onClick={() => void deleteSelectedScene()} title={scenes.length <= 1 ? "마지막 씬은 삭제할 수 없습니다." : "Delete 키로도 삭제 확인을 열 수 있습니다."} variant="danger">
+                            삭제
+                          </Button>
+                        </div>
+                      </div>
                       <label className={`field-row${focusedClass("label", "scene:label")}`}>
                         <span>라벨</span>
                         <input
@@ -2777,11 +2996,12 @@ export function StudioWorkspace({
                           <option value="bad">나쁨</option>
                         </select>
                       </label>
+                      <p className="studio-disabled-note">엔딩으로 설정하면 다음 연결과 선택지를 해제할지 먼저 확인합니다.</p>
                       <div className="button-row">
-                        <Button disabled={saveState === "saving"} icon={<CheckCircle2 size={16} />} onClick={() => applyDraftEnding(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal", title: "새 엔딩" })}>
+                        <Button data-structural-action="setEndingDraft" disabled={saveState === "saving"} icon={<CheckCircle2 size={16} />} onClick={() => applyDraftEnding(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal", title: "새 엔딩" })}>
                           엔딩 적용
                         </Button>
-                        <Button disabled={saveState === "saving" || !draftScene.ending} icon={<RefreshCw size={16} />} onClick={() => applyDraftEnding(null)} variant="ghost">
+                        <Button data-structural-action="unsetEndingDraft" disabled={saveState === "saving" || !draftScene.ending} icon={<RefreshCw size={16} />} onClick={() => applyDraftEnding(null)} variant="ghost">
                           엔딩 해제
                         </Button>
                       </div>
@@ -2833,6 +3053,16 @@ export function StudioWorkspace({
                                 {scenes.filter((scene) => scene.id !== draftScene.id).map((scene) => <option key={scene.id} value={scene.id}>{sceneTitle(scene)}</option>)}
                               </select>
                             </label>
+                            <div className="studio-choice-actions" aria-label={`${choice.text || choice.id || "선택지"} 구조 편집`}>
+                              <span>{choiceTargetText(choice, project)}</span>
+                              <div className="button-row">
+                                <Button data-structural-action="reorderChoice" disabled={saveState === "saving" || dirty || index <= 0 || !choice.id} icon={<ArrowUp size={14} />} iconOnly onClick={() => void moveChoiceViaMutation(choice, index - 1)} title={dirty ? "저장 후 정렬할 수 있습니다." : "위로 이동"} />
+                                <Button data-structural-action="reorderChoice" disabled={saveState === "saving" || dirty || index >= (draftScene.choices || []).length - 1 || !choice.id} icon={<ArrowDown size={14} />} iconOnly onClick={() => void moveChoiceViaMutation(choice, index + 1)} title={dirty ? "저장 후 정렬할 수 있습니다." : "아래로 이동"} />
+                                <Button data-structural-action="duplicateChoice" disabled={saveState === "saving" || dirty || !choice.id} icon={<Copy size={14} />} iconOnly onClick={() => void duplicateChoiceViaMutation(choice)} title={dirty ? "저장 후 복제할 수 있습니다." : "선택지 복제"} />
+                                <Button data-structural-action="clearChoiceTarget" disabled={saveState === "saving" || dirty || !choice.id || !choice.next} icon={<Link2Off size={14} />} iconOnly onClick={() => void clearChoiceTargetViaMutation(choice)} title={dirty ? "저장 후 target을 해제할 수 있습니다." : "target 해제"} />
+                                <Button data-structural-action="deleteChoice" disabled={saveState === "saving" || dirty || !choice.id} icon={<Trash2 size={14} />} iconOnly onClick={() => void deleteChoiceViaMutation(choice)} title={dirty ? "저장 후 삭제할 수 있습니다." : "선택지 삭제"} variant="danger" />
+                              </div>
+                            </div>
                           </li>
                         ))}
                       </ul>
