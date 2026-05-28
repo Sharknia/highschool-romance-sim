@@ -739,6 +739,35 @@ assert.match(projectDetailViewSource, /if \(activeTab === "studio"\)[\s\S]{0,220
 assert.doesNotMatch(studioWorkspaceSource, /conditionDraft|effectsDraft|setCondition|setEffects/, "조건/효과는 #105 전까지 프론트 임시 canonical 편집 모델을 만들면 안 됩니다.");
 assert.doesNotMatch(studioWorkspaceSource, /analyzeRouteGraph|routeGraphIssueToValidationIssue/, "StudioWorkspace는 route graph/domain 판단을 재구현하지 말고 API DTO를 표시해야 합니다.");
 [
+  "StudioRouteGraphView",
+  "StudioRouteSelection",
+  "StudioRouteGraphNode",
+  "StudioRouteGraphEdge",
+  "localRouteGraph",
+  "localRouteSelection",
+  "routeGraphZoom",
+  "flowLegendCollapsed",
+  "renderFlowStatusLegend",
+  "renderRouteGraphEdge",
+  "focusRouteGraphEdge",
+  "fitSelectedRouteNode",
+  "fitRouteGraph",
+  "FlowStatusLegend",
+  "SceneNode",
+  "ChoiceEdge",
+  "route graph DTO",
+  "studio-route-graph",
+  "studio-route-edge",
+  "studio-flow-legend",
+  "data-route-node-id",
+  "data-route-edge-kind"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace route graph UI에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+assert.match(studioWorkspaceSource, /setLocalRouteGraph\(result\.studio\.routeGraph/, "StudioWorkspace는 API Studio DTO의 routeGraph를 로컬 route map 상태로 반영해야 합니다.");
+assert.match(studioWorkspaceSource, /setLocalRouteSelection\(result\.studio\.routeSelection/, "StudioWorkspace는 API Studio DTO의 routeSelection을 로컬 route map 상태로 반영해야 합니다.");
+[
   "conditionRuntimeSupport",
   "strictPreviewStatus",
   "strictPreviewSuccess",

@@ -4,6 +4,9 @@ import {
   Eye,
   GitCompareArrows,
   GitBranch,
+  LocateFixed,
+  Maximize2,
+  MousePointerClick,
   ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
@@ -15,7 +18,9 @@ import {
   Save,
   Search,
   Settings,
-  Undo2
+  Undo2,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +39,10 @@ import type {
   ProjectRevision,
   StudioIssueFocus,
   StudioProblemAction,
+  StudioRouteGraphEdge,
+  StudioRouteGraphNode,
+  StudioRouteGraphView,
+  StudioRouteSelection,
   Phase0DecisionReport,
   GenerationResultLog,
   TestPromptFixture,
@@ -325,18 +334,18 @@ function studioCommandAddAction(input: { draftScene: ProjectScene | null; hasSce
     return { kind: "start", label: "시작 씬 만들기" };
   }
   if (!input.draftScene) {
-    return { disabledReason: "먼저 씬을 선택하세요.", kind: "scene", label: "씬 추가" };
+    return { kind: "start", label: "독립 씬 만들기" };
   }
   if (input.draftScene.ending) {
-    return { disabledReason: "엔딩 씬에는 다음 씬이나 분기 target을 추가할 수 없습니다.", kind: "scene", label: "씬 추가" };
+    return { disabledReason: "엔딩 씬에는 다음 씬이나 분기 target을 추가할 수 없습니다.", kind: "scene", label: "현재 씬 뒤 새 씬" };
   }
   if ((input.draftScene.choices || []).length > 0) {
     return { kind: "choice", label: "분기 target 만들기" };
   }
   if (input.draftScene.next) {
-    return { disabledReason: "이미 다음 씬이 연결되어 있습니다.", kind: "scene", label: "씬 추가" };
+    return { disabledReason: "이미 다음 씬이 연결되어 있습니다.", kind: "scene", label: "현재 씬 뒤 새 씬" };
   }
-  return { kind: "scene", label: "씬 추가" };
+  return { kind: "scene", label: "현재 씬 뒤 새 씬" };
 }
 
 function studioPreviewPath(projectId: string, routeId?: string, sceneId?: string): string {
@@ -379,6 +388,60 @@ interface StudioProblemRow {
   focus?: StudioIssueFocus;
   issue: ProjectIssue;
   key: string;
+}
+
+interface RouteGraphNodeView {
+  incomingEdges: StudioRouteGraphEdge[];
+  node: StudioRouteGraphNode;
+  outgoingEdges: StudioRouteGraphEdge[];
+  problemCount: number;
+  scene: ProjectScene | null;
+}
+
+function fallbackRouteGraphNode(scene: ProjectScene, activeRoute: ProjectRoute | null, reachable = true): StudioRouteGraphNode {
+  return {
+    id: scene.id,
+    label: sceneTitle(scene),
+    summary: sceneSummaryText(scene),
+    routeId: activeRoute?.id,
+    entry: activeRoute?.entrySceneId === scene.id,
+    reachable,
+    unreachable: !reachable,
+    ending: Boolean(scene.ending)
+  };
+}
+
+function routeGraphEdgeKindLabel(edge: StudioRouteGraphEdge): string {
+  if (edge.kind === "route-entry") return "RouteEntry";
+  if (edge.kind === "choice") return "ChoiceEdge";
+  if (edge.kind === "next") return "NextEdge";
+  return "Edge";
+}
+
+function routeGraphEdgeActionLabel(edge: StudioRouteGraphEdge): string {
+  if (edge.kind === "choice") return "선택지 편집";
+  if (edge.kind === "next") return "next 편집";
+  if (edge.kind === "route-entry") return "시작 씬 보기";
+  return "edge 보기";
+}
+
+function routeGraphEdgeText(edge: StudioRouteGraphEdge, targetLabel: string): string {
+  const label = edge.label || (edge.kind === "choice" ? edge.choiceId : edge.kind) || "edge";
+  return `${routeGraphEdgeKindLabel(edge)} · ${label} -> ${targetLabel}`;
+}
+
+function routeGraphNodeProblemCount(node: StudioRouteGraphNode, issues: ProjectIssue[]): number {
+  return issues.filter((issue) => (issue.sceneIds || []).includes(node.id || "") || issue.targetSceneId === node.id).length;
+}
+
+function routeGraphNodeSeverity(node: StudioRouteGraphNode, problemCount: number): "danger" | "warning" | "neutral" {
+  if (node.problemSeverity === "error") return "danger";
+  if (node.problemSeverity === "warning") return "warning";
+  return problemCount > 0 ? "danger" : "neutral";
+}
+
+function routeGraphZoomLabel(zoom: number): string {
+  return `${zoom}%`;
 }
 
 function studioFocusToIssue(focus: StudioIssueFocus): ProjectIssue {
@@ -635,6 +698,8 @@ export function StudioWorkspace({
   const [localStudioIssues, setLocalStudioIssues] = useState<StudioIssueFocus[]>([]);
   const [localProblemActions, setLocalProblemActions] = useState<StudioProblemAction[]>([]);
   const [localRepairActions, setLocalRepairActions] = useState<ProjectRepairAction[]>(repairActions);
+  const [localRouteSelection, setLocalRouteSelection] = useState<StudioRouteSelection | null>(null);
+  const [localRouteGraph, setLocalRouteGraph] = useState<StudioRouteGraphView | null>(null);
   const [studioRepairPreview, setStudioRepairPreview] = useState<ProjectRepairPreview | null>(null);
   const [studioRepairHistoryEntry, setStudioRepairHistoryEntry] = useState<ProjectRepairHistoryEntry | null>(null);
   const [studioRepairHistory, setStudioRepairHistory] = useState<ProjectRepairHistoryEntry[]>([]);
@@ -643,6 +708,8 @@ export function StudioWorkspace({
   const [studioRepairBusy, setStudioRepairBusy] = useState(false);
   const [localRevision, setLocalRevision] = useState<ProjectRevision | null>(projectRevision || previewPreflight?.projectRevision || null);
   const [routeSearchTerm, setRouteSearchTerm] = useState("");
+  const [routeGraphZoom, setRouteGraphZoom] = useState(100);
+  const [flowLegendCollapsed, setFlowLegendCollapsed] = useState(false);
   const [focusedProblemId, setFocusedProblemId] = useState("");
   const [focusedFieldKey, setFocusedFieldKey] = useState("");
   const [focusRequestTick, setFocusRequestTick] = useState(0);
@@ -657,15 +724,20 @@ export function StudioWorkspace({
     problemId: string;
     sceneId: string;
   } | null>(null);
+  const pendingRouteGraphFocusRef = useRef<{
+    fieldKey: string;
+    panel: StudioPanelId;
+    sceneId: string;
+  } | null>(null);
   const confirmedSceneChangeRef = useRef<string | null>(null);
   const uxSessionIdRef = useRef(`studio-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
 
   const projectId = project?.id || routeProjectId || "";
   const scenes = project?.scenes || [];
   const routes = project?.routes || [];
-  const activeRouteIdQuery = searchParams.get("route");
+  const activeRouteIdQuery = searchParams.get("route") || localRouteSelection?.routeId || localRouteGraph?.routeId || "";
   const activeRoute = routes.find((route) => route.id === activeRouteIdQuery) || routes[0] || null;
-  const selectedSceneQuery = searchParams.get("scene");
+  const selectedSceneQuery = searchParams.get("scene") || localRouteSelection?.selectedSceneId || localRouteGraph?.selectedSceneId || "";
   const selectedPanel = panelFromValue(searchParams.get("panel"));
   const selectedProblemQuery = searchParams.get("problem") || "";
   const selectedScene = useMemo(() => {
@@ -724,16 +796,92 @@ export function StudioWorkspace({
     });
     return ordered;
   }, [activeRoute?.entrySceneId, scenes]);
-  const filteredRouteMapScenes = useMemo(() => {
-    const term = routeSearchTerm.trim().toLowerCase();
-    if (!term) {
-      return routeMapScenes;
+  const activeRouteGraph = useMemo(() => {
+    if (!localRouteGraph) {
+      return null;
     }
-    return routeMapScenes.filter((scene) => {
-      const haystack = `${sceneTitle(scene)} ${sceneSummaryText(scene)} ${scene.id || ""}`.toLowerCase();
-      return haystack.includes(term);
+    if (!activeRoute?.id || localRouteGraph.routeId === activeRoute.id) {
+      return localRouteGraph;
+    }
+    return null;
+  }, [activeRoute?.id, localRouteGraph]);
+  const routeGraphNodes = useMemo<StudioRouteGraphNode[]>(() => {
+    if (activeRouteGraph?.nodes?.length) {
+      return activeRouteGraph.nodes;
+    }
+    return routeMapScenes.map((scene, index) => fallbackRouteGraphNode(scene, activeRoute, index < routeMapScenes.length));
+  }, [activeRoute, activeRouteGraph, routeMapScenes]);
+  const routeGraphEdges = useMemo<StudioRouteGraphEdge[]>(() => {
+    if (activeRouteGraph?.edges?.length) {
+      return activeRouteGraph.edges;
+    }
+    const edges: StudioRouteGraphEdge[] = [];
+    if (activeRoute?.entrySceneId) {
+      edges.push({
+        id: `fallback:${activeRoute.id}:entry:${activeRoute.entrySceneId}`,
+        kind: "route-entry",
+        targetSceneId: activeRoute.entrySceneId,
+        label: activeRoute.title || activeRoute.id,
+        missingTarget: !scenes.some((scene) => scene.id === activeRoute.entrySceneId)
+      });
+    }
+    scenes.forEach((scene) => {
+      if (scene.next) {
+        edges.push({
+          id: `fallback:${scene.id}:next:${scene.next}`,
+          kind: "next",
+          sourceSceneId: scene.id,
+          targetSceneId: scene.next,
+          label: "next",
+          missingTarget: !scenes.some((candidate) => candidate.id === scene.next)
+        });
+      }
+      (scene.choices || []).forEach((choice) => {
+        edges.push({
+          id: `fallback:${scene.id}:choice:${choice.id}:${choice.next}`,
+          kind: "choice",
+          sourceSceneId: scene.id,
+          targetSceneId: choice.next,
+          choiceId: choice.id,
+          label: choice.text || choice.id,
+          missingTarget: !scenes.some((candidate) => candidate.id === choice.next)
+        });
+      });
     });
-  }, [routeMapScenes, routeSearchTerm]);
+    return edges;
+  }, [activeRoute, activeRouteGraph, scenes]);
+  const routeGraphNodeViews = useMemo<RouteGraphNodeView[]>(() => {
+    const term = routeSearchTerm.trim().toLowerCase();
+    const nodesById = new Map(routeGraphNodes.map((node) => [node.id || "", node]));
+    return routeGraphNodes
+      .map((node) => {
+        const scene = scenes.find((item) => item.id === node.id) || null;
+        const outgoingEdges = routeGraphEdges.filter((edge) => edge.sourceSceneId === node.id);
+        const incomingEdges = routeGraphEdges.filter((edge) => edge.targetSceneId === node.id && edge.sourceSceneId !== node.id);
+        return {
+          incomingEdges,
+          node,
+          outgoingEdges,
+          problemCount: routeGraphNodeProblemCount(node, visibleIssues),
+          scene
+        };
+      })
+      .filter((view) => {
+        if (!term) {
+          return true;
+        }
+        const edgeText = [...view.outgoingEdges, ...view.incomingEdges].map((edge) => {
+          const target = nodesById.get(edge.targetSceneId || "");
+          return `${edge.label || ""} ${edge.choiceId || ""} ${edge.targetSceneId || ""} ${target?.label || ""}`;
+        }).join(" ");
+        const haystack = `${view.node.label || ""} ${view.node.summary || ""} ${view.node.id || ""} ${edgeText}`.toLowerCase();
+        return haystack.includes(term);
+      });
+  }, [routeGraphEdges, routeGraphNodes, routeSearchTerm, scenes, visibleIssues]);
+  const routeGraphRouteTitle = activeRouteGraph?.routeTitle || localRouteSelection?.routeTitle || activeRoute?.title || activeRoute?.id || "루트 없음";
+  const routeGraphSelectedSceneId = selectedScene?.id || activeRouteGraph?.selectedSceneId || localRouteSelection?.selectedSceneId || "";
+  const routeGraphProblemCount = activeRouteGraph?.markers?.problemSceneIds?.length || problemCount;
+  const routeGraphDataSourceText = activeRouteGraph ? "route graph DTO" : "fallback route graph DTO 대기";
 
   function recordUXDecisionEvent(event: Record<string, unknown>): void {
     if (!projectDirectory) {
@@ -783,6 +931,16 @@ export function StudioWorkspace({
     }
     if (Array.isArray(result.repairActions)) {
       setLocalRepairActions(result.repairActions);
+    }
+    if (result.studio?.routeSelection) {
+      setLocalRouteSelection(result.studio.routeSelection);
+    } else if (options.clearWhenAbsent) {
+      setLocalRouteSelection(null);
+    }
+    if (result.studio?.routeGraph) {
+      setLocalRouteGraph(result.studio.routeGraph);
+    } else if (options.clearWhenAbsent) {
+      setLocalRouteGraph(null);
     }
     if (result.previewPreflight) {
       setLocalPreflightIssues(preflightToIssues(result.previewPreflight));
@@ -876,6 +1034,30 @@ export function StudioWorkspace({
     setFocusedProblemId(pending.problemId);
     setFocusedFieldKey(pending.fieldKey);
     focusProblemTarget(pending.focus, pending.panel);
+  }, [draftScene?.id, focusRequestTick, layout.inspectorCollapsed, selectedPanel, selectedScene?.id]);
+
+  useEffect(() => {
+    const pending = pendingRouteGraphFocusRef.current;
+    if (!pending) {
+      return;
+    }
+    if (pending.sceneId && selectedScene?.id !== pending.sceneId) {
+      return;
+    }
+    if (selectedPanel !== pending.panel) {
+      return;
+    }
+    if (layout.inspectorCollapsed) {
+      return;
+    }
+    pendingRouteGraphFocusRef.current = null;
+    setFocusedFieldKey(pending.fieldKey);
+    window.setTimeout(() => {
+      const target = fieldFocusRefs.current[pending.fieldKey]
+        || inspectorFirstFieldRef.current
+        || scriptTextareaRef.current;
+      target?.focus();
+    }, 0);
   }, [draftScene?.id, focusRequestTick, layout.inspectorCollapsed, selectedPanel, selectedScene?.id]);
 
   useEffect(() => {
@@ -1076,6 +1258,63 @@ export function StudioWorkspace({
       setStatusText("루트 맵 검색으로 이동했습니다.");
     }
     window.setTimeout(() => routeSearchRef.current?.focus(), 0);
+  }
+
+  function updateRouteGraphZoom(nextZoom: number): void {
+    setRouteGraphZoom(Math.min(140, Math.max(80, nextZoom)));
+  }
+
+  function fitSelectedRouteNode(): void {
+    if (layout.routeCollapsed) {
+      updateLayout({ routeCollapsed: false });
+    }
+    const selectedLabel = selectedScene ? sceneTitle(selectedScene) : "선택 씬 없음";
+    setRouteSearchTerm("");
+    setStatusText(`선택 씬 맞춤: ${selectedLabel}`);
+  }
+
+  function fitRouteGraph(): void {
+    if (layout.routeCollapsed) {
+      updateLayout({ routeCollapsed: false });
+    }
+    setRouteGraphZoom(100);
+    setRouteSearchTerm("");
+    setStatusText(`${routeGraphRouteTitle} route 맞춤. ${routeGraphNodes.length}개 SceneNode와 ${routeGraphEdges.length}개 edge를 표시합니다.`);
+  }
+
+  function focusRouteGraphEdge(edge: StudioRouteGraphEdge): void {
+    const sceneId = edge.sourceSceneId || edge.targetSceneId || "";
+    if (sceneId && sceneId !== selectedScene?.id && !confirmDiscardDirtyDraft()) {
+      return;
+    }
+    const panel: StudioPanelId = edge.kind === "choice" || edge.kind === "next" ? "choices" : "scene";
+    const fieldKey = edge.kind === "choice" && edge.choiceId
+      ? `choice:${edge.choiceId}:choiceTarget`
+      : edge.kind === "next"
+        ? "choices:next"
+        : "scene:label";
+    if (sceneId && sceneId !== selectedScene?.id) {
+      confirmedSceneChangeRef.current = sceneId;
+    }
+    if (layout.inspectorCollapsed) {
+      updateLayout({ inspectorCollapsed: false });
+    }
+    pendingRouteGraphFocusRef.current = { fieldKey, panel, sceneId };
+    setFocusedFieldKey(fieldKey);
+    setFocusRequestTick((current) => current + 1);
+    updateQuery({
+      panel,
+      route: activeRoute?.id || "",
+      scene: sceneId || selectedScene?.id || "",
+      problem: selectedProblemQuery
+    });
+    recordUXDecisionEvent({
+      eventName: "help_opened",
+      helpChannel: edge.kind === "choice" ? "ChoiceEdge" : edge.kind === "next" ? "NextEdge" : "SceneNode",
+      outcome: "opened",
+      repairActionId: edge.id
+    });
+    setStatusText(`${routeGraphEdgeKindLabel(edge)}를 선택했습니다. ${routeGraphEdgeActionLabel(edge)} 위치로 이동합니다.`);
   }
 
   function runSaveCommand(): void {
@@ -1809,6 +2048,99 @@ export function StudioWorkspace({
     }
   }
 
+  function renderFlowStatusLegend() {
+    return (
+      <section className={`studio-flow-legend ${flowLegendCollapsed ? "collapsed" : ""}`} aria-label="FlowStatusLegend">
+        <button onClick={() => setFlowLegendCollapsed((current) => !current)} type="button">
+          <GitBranch aria-hidden="true" size={14} />
+          <span>FlowStatusLegend</span>
+          <small>{flowLegendCollapsed ? "펼치기" : "접기"}</small>
+        </button>
+        {flowLegendCollapsed ? null : (
+          <dl>
+            <div><dt>error</dt><dd>프리뷰를 막는 문제 또는 missing target</dd></div>
+            <div><dt>warning</dt><dd>검토가 필요한 preflight 경고</dd></div>
+            <div><dt>ending</dt><dd>도달 가능한 엔딩 SceneNode</dd></div>
+            <div><dt>conditional</dt><dd>조건/효과 후보가 있는 ChoiceEdge</dd></div>
+            <div><dt>dirty</dt><dd>저장 전 draft가 route graph DTO보다 앞선 상태</dd></div>
+          </dl>
+        )}
+      </section>
+    );
+  }
+
+  function renderRouteGraphEdge(edge: StudioRouteGraphEdge, mode: "incoming" | "outgoing") {
+    const targetNode = routeGraphNodes.find((node) => node.id === edge.targetSceneId);
+    const targetScene = scenes.find((scene) => scene.id === edge.targetSceneId) || null;
+    const targetLabel = targetNode?.label || sceneTitle(targetScene) || edge.targetSceneId || "대상 없음";
+    const sourceScene = scenes.find((scene) => scene.id === edge.sourceSceneId) || null;
+    const sourceLabel = edge.sourceSceneId ? sceneTitle(sourceScene) : routeGraphRouteTitle;
+    return (
+      <li className={`studio-route-edge ${edge.kind || "edge"} ${edge.missingTarget ? "missing" : ""}`} data-route-edge-kind={edge.kind || "edge"} key={`${mode}-${edge.id || edge.kind}-${edge.sourceSceneId || "route"}-${edge.targetSceneId}`}>
+        <button onClick={() => focusRouteGraphEdge(edge)} type="button">
+          <MousePointerClick aria-hidden="true" size={13} />
+          <span>{routeGraphEdgeText(edge, targetLabel)}</span>
+          <small>{mode === "incoming" ? `${sourceLabel}에서 들어옴` : `${targetLabel}로 이동`}</small>
+          {edge.missingTarget ? <StatusChip tone="danger">missing target</StatusChip> : null}
+        </button>
+      </li>
+    );
+  }
+
+  function renderRouteGraphNode(view: RouteGraphNodeView, index: number) {
+    const node = view.node;
+    const scene = view.scene;
+    const selected = routeGraphSelectedSceneId === node.id;
+    const nodeSeverity = routeGraphNodeSeverity(node, view.problemCount);
+    const choicesCount = (scene?.choices || []).length;
+    const hasConditionalChoice = (scene?.choices || []).some((choice) => Boolean(choice.condition) || Boolean(choice.effects));
+    const hasDirtyDraft = dirty && selectedScene?.id === node.id;
+    const routeEntryEdges = view.incomingEdges.filter((edge) => edge.kind === "route-entry");
+    return (
+      <li className={`studio-route-node-card ${selected ? "selected" : ""} ${node.unreachable ? "unreachable" : ""} severity-${nodeSeverity}`} data-route-node-id={node.id || "unknown"} key={node.id || index}>
+        <button
+          className="studio-node"
+          onClick={() => selectScene(node.id)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            if (node.id) {
+              selectScene(node.id);
+            }
+            setStatusText(`${node.label || node.id || "SceneNode"} context action: ${commandAddAction.label}`);
+          }}
+          onDoubleClick={() => {
+            if (node.id) {
+              selectScene(node.id);
+            }
+            setPanel("scene");
+          }}
+          type="button"
+        >
+          <span className="studio-node-index">{index + 1}</span>
+          <span>
+            <strong>SceneNode · {node.label || node.id || "씬"}</strong>
+            <small>{node.summary || sceneSummaryText(scene)}</small>
+          </span>
+          <span className="studio-node-badges">
+            {node.entry ? <StatusChip tone="success">시작</StatusChip> : null}
+            {node.ending ? <StatusChip tone="warning">ending</StatusChip> : null}
+            {choicesCount > 0 ? <StatusChip>선택지 {choicesCount}</StatusChip> : null}
+            {hasConditionalChoice ? <StatusChip tone="warning">conditional</StatusChip> : null}
+            {node.unreachable ? <StatusChip tone="danger">unreachable</StatusChip> : null}
+            {view.problemCount > 0 ? <StatusChip tone={nodeSeverity}>{view.problemCount}</StatusChip> : null}
+            {hasDirtyDraft ? <StatusChip tone="warning">dirty</StatusChip> : null}
+          </span>
+        </button>
+        {[...routeEntryEdges, ...view.outgoingEdges].length > 0 ? (
+          <ul className="studio-route-edge-list">
+            {routeEntryEdges.map((edge) => renderRouteGraphEdge(edge, "incoming"))}
+            {view.outgoingEdges.map((edge) => renderRouteGraphEdge(edge, "outgoing"))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  }
+
   function handleProblemFocus(row: StudioProblemRow, selectedAction?: StudioProblemAction): void {
     const issue = row.issue;
     const focus = row.focus;
@@ -2105,42 +2437,44 @@ export function StudioWorkspace({
             <strong>루트 맵</strong>
             <Button icon={layout.routeCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />} iconOnly onClick={() => updateLayout({ routeCollapsed: !layout.routeCollapsed })} title="루트 패널 접기" />
           </div>
-          {layout.routeCollapsed ? null : (
-            <>
+          {layout.routeCollapsed ? (
+            <div className="studio-route-collapsed-summary">
+              <strong>{routeGraphRouteTitle}</strong>
+              <small>{selectedScene ? sceneTitle(selectedScene) : "선택 씬 없음"}</small>
+              <StatusChip tone={routeGraphProblemCount > 0 ? "danger" : "success"}>{routeGraphProblemCount}</StatusChip>
+            </div>
+          ) : (
+            <div className="studio-route-map-content">
+              <div className="studio-route-graph-toolbar">
+                <div>
+                  <strong>{routeGraphRouteTitle}</strong>
+                  <small>{routeGraphDataSourceText}</small>
+                </div>
+                <StatusChip tone={routeGraphProblemCount > 0 ? "danger" : "success"}>문제 {routeGraphProblemCount}</StatusChip>
+                <div className="button-row">
+                  <Button icon={<LocateFixed size={14} />} iconOnly onClick={fitSelectedRouteNode} title="선택 씬 맞춤" />
+                  <Button icon={<Maximize2 size={14} />} iconOnly onClick={fitRouteGraph} title="route 맞춤" />
+                  <Button disabled={routeGraphZoom <= 80} icon={<ZoomOut size={14} />} iconOnly onClick={() => updateRouteGraphZoom(routeGraphZoom - 10)} title="축소" />
+                  <span className="studio-route-zoom">{routeGraphZoomLabel(routeGraphZoom)}</span>
+                  <Button disabled={routeGraphZoom >= 140} icon={<ZoomIn size={14} />} iconOnly onClick={() => updateRouteGraphZoom(routeGraphZoom + 10)} title="확대" />
+                </div>
+              </div>
               <label className="studio-route-search">
                 <Search aria-hidden="true" size={15} />
                 <input
                   aria-label="루트 맵 씬 검색"
                   onChange={(event) => setRouteSearchTerm(event.target.value)}
-                  placeholder="씬 검색"
+                  placeholder="SceneNode, ChoiceEdge 검색"
                   ref={routeSearchRef}
                   value={routeSearchTerm}
                 />
               </label>
-              {filteredRouteMapScenes.length > 0 ? (
-                <ol className="studio-node-list">
-                  {filteredRouteMapScenes.map((scene, index) => {
-                    const sceneProblemCount = visibleIssues.filter((issue) => findIssueSceneId(issue, project) === scene.id).length;
-                    return (
-                      <li key={scene.id || index}>
-                        <button className={`studio-node ${selectedScene?.id === scene.id ? "selected" : ""}`} onClick={() => selectScene(scene.id)} type="button">
-                          <span className="studio-node-index">{index + 1}</span>
-                          <span>
-                            <strong>{sceneTitle(scene)}</strong>
-                            <small>{sceneSummaryText(scene)}</small>
-                          </span>
-                          <span className="studio-node-badges">
-                            {activeRoute?.entrySceneId === scene.id ? <StatusChip tone="success">시작</StatusChip> : null}
-                            {scene.ending ? <StatusChip tone="warning">엔딩</StatusChip> : null}
-                            {(scene.choices || []).length > 0 ? <StatusChip>선택지 {(scene.choices || []).length}</StatusChip> : null}
-                            {sceneProblemCount > 0 ? <StatusChip tone="danger">{sceneProblemCount}</StatusChip> : null}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
+              {renderFlowStatusLegend()}
+              {routeGraphNodeViews.length > 0 ? (
+                <ol className="studio-node-list studio-route-graph" style={{ "--route-graph-zoom": routeGraphZoom / 100 } as CSSProperties}>
+                  {routeGraphNodeViews.map((view, index) => renderRouteGraphNode(view, index))}
                 </ol>
-              ) : routeMapScenes.length > 0 ? (
+              ) : routeGraphNodes.length > 0 ? (
                 <p className="page-muted">검색 결과가 없습니다.</p>
               ) : (
                 <EmptyState
@@ -2149,7 +2483,7 @@ export function StudioWorkspace({
                   description="첫 장면을 만들면 루트 맵과 스테이지 미리보기가 동시에 갱신됩니다."
                 />
               )}
-            </>
+            </div>
           )}
         </aside>
         <button
