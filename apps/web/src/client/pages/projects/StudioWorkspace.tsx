@@ -70,6 +70,8 @@ type SceneCharacter = NonNullable<ProjectScene["characters"]>[number];
 type SceneChoice = NonNullable<ProjectScene["choices"]>[number];
 type StudioCommandAddKind = "start" | "scene" | "choice";
 type StudioLayoutResizeTarget = "route" | "inspector" | "problems";
+type ProblemFilter = "all" | "errors" | "warnings" | "currentScene";
+type ValidationRunState = "idle" | "running" | "current" | "stale";
 
 const dirtyDraftDiscardMessage = "저장하지 않은 씬 변경 사항이 있습니다. 변경 사항을 버리고 이동할까요?";
 
@@ -151,6 +153,13 @@ const panelTabs: Array<{ id: StudioPanelId; label: string }> = [
   { id: "stats", label: "조건" },
   { id: "assets", label: "에셋" },
   { id: "validation", label: "검증" }
+];
+
+const problemFilterTabs: Array<{ id: ProblemFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "errors", label: "Errors" },
+  { id: "warnings", label: "Warnings" },
+  { id: "currentScene", label: "Current Scene" }
 ];
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -444,6 +453,34 @@ function routeGraphZoomLabel(zoom: number): string {
   return `${zoom}%`;
 }
 
+function validationTimestampText(lastValidationAt: string): string {
+  return lastValidationAt ? `ValidationTimestamp ${lastValidationAt}` : "ValidationTimestamp 검증 전";
+}
+
+function problemRowLocationText(row: StudioProblemRow, project: ProjectData | null): string {
+  const sceneId = row.focus?.sceneId || findIssueSceneId(row.issue, project);
+  const scene = project?.scenes?.find((item) => item.id === sceneId) || null;
+  const panel = row.focus?.inspectorPanel || issuePanel(row.issue);
+  return scene ? `${sceneTitle(scene)} · ${panel}` : panel;
+}
+
+function problemRowAffectedObjectText(row: StudioProblemRow): string {
+  if (row.focus?.choiceId || row.issue.choiceIds?.[0]) {
+    return `choice ${row.focus?.choiceId || row.issue.choiceIds?.[0]}`;
+  }
+  if (row.focus?.targetSceneId || row.issue.targetSceneId) {
+    return `target ${row.focus?.targetSceneId || row.issue.targetSceneId}`;
+  }
+  return row.issue.path || row.issue.code || "프로젝트";
+}
+
+function problemRowStatusText(row: StudioProblemRow): string {
+  if (row.actions.length > 0 || row.focus?.defaultAction === "repair") return "수리 가능";
+  if (row.issue.severity === "error") return "해결 필요";
+  if (row.issue.severity === "warning") return "검토 필요";
+  return "확인";
+}
+
 function studioFocusToIssue(focus: StudioIssueFocus): ProjectIssue {
   return {
     code: focus.issueCode,
@@ -710,6 +747,9 @@ export function StudioWorkspace({
   const [routeSearchTerm, setRouteSearchTerm] = useState("");
   const [routeGraphZoom, setRouteGraphZoom] = useState(100);
   const [flowLegendCollapsed, setFlowLegendCollapsed] = useState(false);
+  const [problemFilter, setProblemFilter] = useState<ProblemFilter>("all");
+  const [lastValidationAt, setLastValidationAt] = useState("");
+  const [validationRunState, setValidationRunState] = useState<ValidationRunState>("idle");
   const [focusedProblemId, setFocusedProblemId] = useState("");
   const [focusedFieldKey, setFocusedFieldKey] = useState("");
   const [focusRequestTick, setFocusRequestTick] = useState(0);
@@ -752,13 +792,35 @@ export function StudioWorkspace({
   const fallbackIssues = useMemo(() => mergedStudioIssues(localIssues, localPreflightIssues), [localIssues, localPreflightIssues]);
   const problemRows = useMemo(() => buildStudioProblemRows(localStudioIssues, fallbackIssues, localProblemActions), [fallbackIssues, localProblemActions, localStudioIssues]);
   const visibleIssues = useMemo(() => problemRows.map((row) => row.issue), [problemRows]);
+  const errorProblemCount = visibleIssues.filter((issue) => issue.severity === "error").length;
+  const warningProblemCount = visibleIssues.filter((issue) => issue.severity === "warning").length;
+  const currentSceneProblemCount = problemRows.filter((row) => (row.focus?.sceneId || findIssueSceneId(row.issue, project)) === selectedScene?.id).length;
+  const filteredProblemRows = useMemo(() => {
+    if (problemFilter === "errors") {
+      return problemRows.filter((row) => row.issue.severity === "error");
+    }
+    if (problemFilter === "warnings") {
+      return problemRows.filter((row) => row.issue.severity === "warning");
+    }
+    if (problemFilter === "currentScene") {
+      return problemRows.filter((row) => (row.focus?.sceneId || findIssueSceneId(row.issue, project)) === selectedScene?.id);
+    }
+    return problemRows;
+  }, [problemFilter, problemRows, project, selectedScene?.id]);
+  const problemPanelState = validationRunState === "running"
+    ? "running"
+    : dirty
+      ? "stale"
+      : problemRows.length === 0
+        ? "noProblems"
+        : validationRunState;
   const conditionRuntimeSupport = previewPreflight?.conditionRuntimeSupport || previewPreflight?.runtimeCapabilities?.conditionRuntimeSupport || null;
   const conditionSupportMode = conditionRuntimeSupport?.editorMode || "candidate_review_only";
   const conditionStrictPreviewText = conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated"
     ? "condition preview not evaluated"
     : "조건 판정 상태 확인 전";
   const problemCount = visibleIssues.length;
-  const errorCount = visibleIssues.filter((issue) => issue.severity === "error").length;
+  const errorCount = errorProblemCount;
   const undoStudioRepairEntry = activeRepairHistoryEntry(studioRepairHistoryEntry);
   const previewDisabledReason = errorCount > 0
     ? `문제 ${errorCount}건을 먼저 해결해야 합니다.`
@@ -947,6 +1009,10 @@ export function StudioWorkspace({
     } else if (options.clearWhenAbsent) {
       setLocalPreflightIssues([]);
     }
+    if (result.validation || result.previewPreflight || result.studio) {
+      setLastValidationAt(new Date().toISOString());
+      setValidationRunState("current");
+    }
   }
 
   function focusProblemTarget(focus: StudioIssueFocus | undefined, panel: StudioPanelId): void {
@@ -977,6 +1043,12 @@ export function StudioWorkspace({
   useEffect(() => {
     setLocalRepairActions(repairActions);
   }, [repairActions]);
+
+  useEffect(() => {
+    if (dirty) {
+      setValidationRunState("stale");
+    }
+  }, [dirty]);
 
   useEffect(() => {
     if (!projectDirectory || !activeRoute?.id || dirty || saveState === "saving" || unsupported) {
@@ -1258,6 +1330,11 @@ export function StudioWorkspace({
       setStatusText("루트 맵 검색으로 이동했습니다.");
     }
     window.setTimeout(() => routeSearchRef.current?.focus(), 0);
+  }
+
+  function openProblemsPanel(): void {
+    updateLayout({ problemsCollapsed: false });
+    setStatusText(`Problems Panel을 열었습니다. ${problemCountLabel(problemCount)}`);
   }
 
   function updateRouteGraphZoom(nextZoom: number): void {
@@ -1684,9 +1761,11 @@ export function StudioWorkspace({
   async function validateStudio(): Promise<ProjectRevision | null> {
     if (dirty) {
       setSaveState("dirty");
+      setValidationRunState("stale");
       setStatusText("저장하지 않은 씬 변경 사항이 있습니다. 저장 후 검증을 실행하세요.");
       return null;
     }
+    setValidationRunState("running");
     setStatusText("검증을 실행하는 중입니다.");
     try {
       const result = await postJson("/api/project/validate", { projectDirectory });
@@ -1701,9 +1780,12 @@ export function StudioWorkspace({
       }
       if (isApiFailure(result)) {
         setSaveState("apiFailure");
+        setValidationRunState("idle");
         setStatusText(`API 실패: ${result.message || result.error || "검증을 실행하지 못했습니다."}`);
         return null;
       }
+      setLastValidationAt(new Date().toISOString());
+      setValidationRunState("current");
       setStatusText(resultIssues(result).length > 0 ? "검증 갱신 필요: 문제 확인 결과가 갱신되었습니다." : "검증 완료. 문제 없음.");
       if (resultIssues(result).some((issue) => issue.severity === "error")) {
         recordUXDecisionEvent({
@@ -1715,6 +1797,7 @@ export function StudioWorkspace({
       return nextRevision;
     } catch (error) {
       setSaveState("apiFailure");
+      setValidationRunState("idle");
       setStatusText(`API 실패: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
@@ -2048,6 +2131,44 @@ export function StudioWorkspace({
     }
   }
 
+  function renderProblemFilterTabs() {
+    const counts: Record<ProblemFilter, number> = {
+      all: problemRows.length,
+      errors: errorProblemCount,
+      warnings: warningProblemCount,
+      currentScene: currentSceneProblemCount
+    };
+    return (
+      <div aria-label="ProblemFilterTabs" className="studio-problem-filter-tabs" role="tablist">
+        {problemFilterTabs.map((tab) => (
+          <button
+            aria-selected={problemFilter === tab.id}
+            className={problemFilter === tab.id ? "selected" : ""}
+            data-problem-filter={tab.id}
+            key={tab.id}
+            onClick={() => setProblemFilter(tab.id)}
+            role="tab"
+            type="button"
+          >
+            <span>{tab.label}</span>
+            <small>{counts[tab.id]}</small>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderProblemPanelState() {
+    return (
+      <div className={`studio-problem-state ${problemPanelState}`}>
+        <span>{validationTimestampText(lastValidationAt)}</span>
+        {problemPanelState === "running" ? <strong>검증 실행 중</strong> : null}
+        {problemPanelState === "stale" ? <strong>검증 stale · 저장 후 다시 실행하세요.</strong> : null}
+        {problemPanelState === "noProblems" ? <strong>문제 없음</strong> : null}
+      </div>
+    );
+  }
+
   function renderFlowStatusLegend() {
     return (
       <section className={`studio-flow-legend ${flowLegendCollapsed ? "collapsed" : ""}`} aria-label="FlowStatusLegend">
@@ -2183,15 +2304,37 @@ export function StudioWorkspace({
     });
   }
 
+  function handleProblemRowDefaultAction(row: StudioProblemRow): void {
+    const repairAction = repairActionsForRow(row).find((action) => !action.disabledReason);
+    if (repairAction) {
+      void previewStudioRepairAction(repairAction);
+      return;
+    }
+    handleProblemFocus(row);
+  }
+
+  function handleProblemRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, row: StudioProblemRow): void {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    handleProblemRowDefaultAction(row);
+  }
+
   function renderProblemRow(row: StudioProblemRow, compact = false) {
     const selected = row.key === selectedProblemQuery || row.key === focusedProblemId;
     const fullRepairActions = repairActionsForRow(row);
     return (
       <li className={`studio-problem-row ${selected ? "selected" : ""}`} data-problem-id={row.key} key={row.key}>
-        <button className="studio-problem-main" onClick={() => handleProblemFocus(row)} type="button">
-          <StatusChip tone={issueTone(row.issue)}>{row.issue.severity || "info"}</StatusChip>
-          <span>{issueText(row.issue)}</span>
-          <StatusChip tone={fullRepairActions.length > 0 || row.actions.length > 0 ? "warning" : "neutral"}>{row.defaultActionLabel}</StatusChip>
+        <button aria-label={`ProblemRow ${problemRowLocationText(row, project)} ${row.issue.message || row.issue.code || "문제"}`} className="studio-problem-main studio-problem-row-grid" onClick={() => handleProblemFocus(row)} onKeyDown={(event) => handleProblemRowKeyDown(event, row)} type="button">
+          <span className="studio-problem-severity"><StatusChip tone={issueTone(row.issue)}>{row.issue.severity || "info"}</StatusChip></span>
+          <span className="studio-problem-location">
+            <strong>{problemRowLocationText(row, project)}</strong>
+            <small>{problemRowAffectedObjectText(row)}</small>
+          </span>
+          <span className="studio-problem-message">{row.issue.message || issueText(row.issue)}</span>
+          <span className="studio-problem-action">{row.defaultActionLabel}</span>
+          <span className="studio-problem-status"><StatusChip tone={fullRepairActions.length > 0 || row.actions.length > 0 ? "warning" : issueTone(row.issue)}>{problemRowStatusText(row)}</StatusChip></span>
         </button>
         {!compact && (fullRepairActions.length > 0 || row.actions.length > 0) ? (
           <div className="studio-problem-actions" aria-label="수리 후보">
@@ -2374,7 +2517,9 @@ export function StudioWorkspace({
           <StatusChip tone={saveState === "failed" || saveState === "apiFailure" ? "danger" : dirty ? "warning" : "success"}>
             {saveStateLabel(saveState, dirty)}
           </StatusChip>
-          <StatusChip tone={problemCount > 0 ? (errorCount > 0 ? "danger" : "warning") : "success"}>{problemCountLabel(problemCount)}</StatusChip>
+          <button className="studio-problem-count-button" onClick={openProblemsPanel} type="button">
+            <StatusChip tone={problemCount > 0 ? (errorCount > 0 ? "danger" : "warning") : "success"}>{problemCountLabel(problemCount)}</StatusChip>
+          </button>
           <span className="studio-command-status">{statusText}</span>
         </div>
         <div className="studio-command-actions">
@@ -2787,11 +2932,14 @@ export function StudioWorkspace({
                   {selectedPanel === "validation" ? (
                     <section>
                       <h3>검증</h3>
-                      <p className="studio-disabled-note">저장 실패, 검증 갱신 필요, API 실패 상태를 여기서 확인합니다.</p>
-                      <ul className="studio-problem-list compact">
-                        {problemRows.map((row) => renderProblemRow(row, true))}
-                      </ul>
-                      {renderStudioRepairPanel(true)}
+                      <p className="studio-disabled-note">Problems Panel은 해결 허브이고, 이 탭은 선택 씬/프로젝트 검증 요약과 진단을 분리해 표시합니다.</p>
+                      {renderProblemPanelState()}
+                      <dl className="summary-list">
+                        <div><dt>전체 문제</dt><dd>{problemCount}</dd></div>
+                        <div><dt>Errors</dt><dd>{errorProblemCount}</dd></div>
+                        <div><dt>Warnings</dt><dd>{warningProblemCount}</dd></div>
+                        <div><dt>Current Scene</dt><dd>{currentSceneProblemCount}</dd></div>
+                      </dl>
                       <h3>생성 결과 로그</h3>
                       <label className="field-row">
                         <span>고정 프롬프트</span>
@@ -2852,6 +3000,11 @@ export function StudioWorkspace({
         )}
         <div className="studio-panel-toolbar">
           <strong>문제 패널</strong>
+          <span className="studio-problem-summary-rail">
+            <StatusChip tone={errorProblemCount > 0 ? "danger" : "neutral"}>E {errorProblemCount}</StatusChip>
+            <StatusChip tone={warningProblemCount > 0 ? "warning" : "neutral"}>W {warningProblemCount}</StatusChip>
+            <StatusChip tone={currentSceneProblemCount > 0 ? "warning" : "neutral"}>현재 {currentSceneProblemCount}</StatusChip>
+          </span>
           <div className="button-row">
             <Button disabled={saveState === "saving" || dirty} icon={<ListChecks size={16} />} onClick={() => void validateStudio()} title={dirty ? "저장 후 검증을 실행하세요." : "다시 검증"} variant="ghost">
               다시 검증
@@ -2861,10 +3014,14 @@ export function StudioWorkspace({
         </div>
         {layout.problemsCollapsed ? null : (
           <>
-            {problemRows.length > 0 ? (
+            {renderProblemPanelState()}
+            {renderProblemFilterTabs()}
+            {filteredProblemRows.length > 0 ? (
               <ul className="studio-problem-list">
-                {problemRows.map((row) => renderProblemRow(row))}
+                {filteredProblemRows.map((row) => renderProblemRow(row))}
               </ul>
+            ) : problemRows.length > 0 ? (
+              <p className="page-muted">선택한 필터에 해당하는 문제가 없습니다.</p>
             ) : (
               <p className="page-muted">문제 없음. 저장 후 검증을 다시 실행하면 최신 상태가 표시됩니다.</p>
             )}

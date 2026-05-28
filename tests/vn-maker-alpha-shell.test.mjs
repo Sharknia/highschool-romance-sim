@@ -768,6 +768,31 @@ assert.doesNotMatch(studioWorkspaceSource, /analyzeRouteGraph|routeGraphIssueToV
 assert.match(studioWorkspaceSource, /setLocalRouteGraph\(result\.studio\.routeGraph/, "StudioWorkspace는 API Studio DTO의 routeGraph를 로컬 route map 상태로 반영해야 합니다.");
 assert.match(studioWorkspaceSource, /setLocalRouteSelection\(result\.studio\.routeSelection/, "StudioWorkspace는 API Studio DTO의 routeSelection을 로컬 route map 상태로 반영해야 합니다.");
 [
+  "ProblemFilterTabs",
+  "ProblemRow",
+  "ValidationTimestamp",
+  "problemFilter",
+  "setProblemFilter",
+  "filteredProblemRows",
+  "problemPanelState",
+  "lastValidationAt",
+  "validationRunState",
+  "renderProblemFilterTabs",
+  "renderProblemPanelState",
+  "handleProblemRowKeyDown",
+  "problemRowLocationText",
+  "problemRowAffectedObjectText",
+  "problemRowStatusText",
+  "openProblemsPanel",
+  "studio-problem-filter-tabs",
+  "studio-problem-row-grid",
+  "studio-problem-summary-rail",
+  "data-problem-filter"
+].forEach((requiredText) => {
+  const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(studioWorkspaceSource, pattern, `StudioWorkspace Problems Panel 허브에 '${requiredText}' 흐름이 있어야 합니다.`);
+});
+[
   "conditionRuntimeSupport",
   "strictPreviewStatus",
   "strictPreviewSuccess",

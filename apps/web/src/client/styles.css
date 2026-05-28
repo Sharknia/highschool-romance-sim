@@ -2547,6 +2547,73 @@ a {
   grid-template-rows: auto;
 }
 
+.studio-problem-count-button {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.studio-problem-summary-rail {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.studio-problem-state {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  padding: 6px 8px;
+  color: var(--color-text-muted);
+}
+
+.studio-problem-state strong,
+.studio-problem-state span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-problem-state.running {
+  color: #f6deb1;
+}
+
+.studio-problem-state.stale {
+  color: #ffd0d0;
+}
+
+.studio-problem-filter-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+}
+
+.studio-problem-filter-tabs button {
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 6px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+  cursor: pointer;
+}
+
+.studio-problem-filter-tabs button.selected,
+.studio-problem-filter-tabs button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-strong);
+  background: #102621;
+}
+
 .studio-problem-list {
   align-content: start;
 }
@@ -2571,7 +2638,7 @@ a {
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 88px minmax(120px, 0.9fr) minmax(180px, 1.4fr) minmax(96px, 0.6fr) 112px;
   gap: 8px;
   align-items: start;
   border: 1px solid var(--color-border);
@@ -2589,9 +2656,34 @@ a {
   outline: none;
 }
 
-.studio-problem-main span:nth-child(2) {
+.studio-problem-row-grid span,
+.studio-problem-row-grid strong,
+.studio-problem-row-grid small {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.studio-problem-location,
+.studio-problem-severity,
+.studio-problem-message,
+.studio-problem-action,
+.studio-problem-status {
+  min-width: 0;
+}
+
+.studio-problem-location small {
+  display: block;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 1366px), (max-height: 768px) {
+  .studio-problem-main {
+    grid-template-columns: 76px minmax(120px, 1fr) minmax(160px, 1.3fr) 96px;
+  }
+
+  .studio-problem-status {
+    grid-column: 2 / -1;
+  }
 }
 
 .studio-problem-actions {
