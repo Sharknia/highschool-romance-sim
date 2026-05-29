@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -21,6 +21,10 @@ const missingRecentProjectDirectory = join(tempRoot, "MissingRecent.vnmaker");
 const mismatchRecentProjectDirectory = join(tempRoot, "MismatchRecent.vnmaker");
 const heroineContractDirectory = join(tempRoot, "HeroineContract.vnmaker");
 const stagedPortraitDirectory = join(tempRoot, "StagedPortrait.vnmaker");
+const twinLinearProjectDirectory = join(tempRoot, "TwinLinear.vnmaker");
+const sourceHeroineLibraryDirectory = join(tempRoot, "SourceHeroineLibrary.vnmaker");
+const targetSnapshotProjectDirectory = join(tempRoot, "TargetSnapshot.vnmaker");
+const portraitQualityDirectory = join(tempRoot, "PortraitQuality.vnmaker");
 const recentProjectIndexFile = join(tempRoot, "recent-projects.json");
 const useCases = useCasesModule.createVnMakerUseCases({
   recentProjectIndexFile,
@@ -477,6 +481,206 @@ assert.equal(created.projectId, created.project.id);
 assert.equal(created.targetRoute, `/projects/${created.project.id}/overview`);
 assert.equal(created.project.characters.length, 1);
 
+const twinUseCases = useCasesModule.createVnMakerUseCases({
+  recentProjectIndexFile: join(tempRoot, "twin-linear-recent-projects.json"),
+  image: {
+    async generateImageAsset(input) {
+      return {
+        job: {
+          id: input.jobId || `job-${input.kind}`,
+          kind: input.kind,
+          targetId: input.targetId,
+          prompt: input.prompt,
+          style: input.style,
+          provider: "image-generation-adapter",
+          status: "completed",
+          outputAssetId: input.outputAssetId
+        },
+        asset: {
+          id: input.outputAssetId || `asset-${input.kind}`,
+          kind: input.kind,
+          label: `generated ${input.kind}`,
+          uri: `${input.publicPathPrefix}/${input.outputAssetId || `asset-${input.kind}`}.png`,
+          source: "generated",
+          generationJobId: input.jobId || `job-${input.kind}`
+        },
+        image: {
+          mimeType: "image/png",
+          b64Json: Buffer.from("fake image").toString("base64"),
+          dataUrl: `data:image/png;base64,${Buffer.from("fake image").toString("base64")}`,
+          uri: `${input.publicPathPrefix}/${input.outputAssetId || `asset-${input.kind}`}.png`
+        },
+        raw: { item: { type: "test" } }
+      };
+    }
+  }
+});
+const twinHeroine = core.createHeroineProfile({
+  id: "twin",
+  name: "트윈",
+  description: "트윈 QA용 히로인",
+  personality: "차분하지만 장난기 있다.",
+  speechStyle: "짧고 선명하게 말한다.",
+  appearance: "푸른 리본을 단 교복 차림."
+});
+const twinLinearCreated = await twinUseCases.createProjectFromHeroine({
+  projectDirectory: twinLinearProjectDirectory,
+  heroine: twinHeroine,
+  title: "트윈 Linear",
+  premise: "선택지 없는 next 기반 루트도 export smoke를 통과해야 한다."
+});
+assert.equal(twinLinearCreated.ok, true);
+assert.equal(twinLinearCreated.project.scenes[0].text, "트윈과의 이야기가 시작되려 한다.");
+await twinUseCases.generateImage({
+  projectDirectory: twinLinearProjectDirectory,
+  jobId: "job-twin-portrait"
+});
+await twinUseCases.generateImage({
+  projectDirectory: twinLinearProjectDirectory,
+  kind: "background",
+  targetId: twinLinearCreated.project.id,
+  prompt: "twin linear classroom background",
+  outputAssetId: "asset-twin-linear-background"
+});
+const twinLinearExport = await twinUseCases.exportProject({ projectDirectory: twinLinearProjectDirectory });
+assert.equal(twinLinearExport.ok, true);
+assert.equal(twinLinearExport.smoke.ok, true);
+assert.equal(twinLinearExport.smoke.checks.choice, true);
+assert.equal(twinLinearExport.smoke.checks.choiceNavigation, true);
+
+const sourceAssetUseCases = useCasesModule.createVnMakerUseCases({
+  defaultProjectDirectory: sourceHeroineLibraryDirectory,
+  recentProjectIndexFile: join(tempRoot, "source-heroine-recent-projects.json"),
+  image: {
+    async generateImageAsset(input) {
+      await mkdir(input.outputDirectory, { recursive: true });
+      const filePath = join(input.outputDirectory, `${input.outputAssetId}.png`);
+      await writeFile(filePath, Buffer.from("portrait file with transparent alpha"));
+      return {
+        job: {
+          id: input.jobId || `job-${input.kind}`,
+          kind: input.kind,
+          targetId: input.targetId,
+          prompt: input.prompt,
+          style: input.style,
+          provider: "image-generation-adapter",
+          status: "completed",
+          outputAssetId: input.outputAssetId
+        },
+        asset: {
+          id: input.outputAssetId,
+          kind: input.kind,
+          label: `generated ${input.kind}`,
+          uri: `${input.publicPathPrefix}/${input.outputAssetId}.png`,
+          source: "generated",
+          generationJobId: input.jobId || `job-${input.kind}`,
+          provenance: { adapter: "image-generation-adapter" }
+        },
+        image: {
+          mimeType: "image/png",
+          filePath,
+          uri: `${input.publicPathPrefix}/${input.outputAssetId}.png`,
+          quality: { hasAlpha: true, transparentBackground: true }
+        }
+      };
+    }
+  }
+});
+await sourceAssetUseCases.createProject({
+  starter: {
+    id: "source-heroine-library",
+    title: "Source Heroine Library",
+    premise: "히로인 원본 포트레이트를 보관한다."
+  }
+});
+const sourceTwinCreated = await sourceAssetUseCases.createHeroine({
+  heroine: twinHeroine
+});
+assert.equal(sourceTwinCreated.ok, true);
+const sourceTwinPortrait = await sourceAssetUseCases.generateHeroinePortrait({
+  heroineId: "twin",
+  expectedHeroineRevision: sourceTwinCreated.heroineRevision
+});
+assert.equal(sourceTwinPortrait.ok, true);
+assert.equal(existsSync(join(sourceHeroineLibraryDirectory, "assets", "generated", "asset-twin-portrait.png")), true);
+await sourceAssetUseCases.createProject({
+  projectDirectory: targetSnapshotProjectDirectory,
+  blank: true,
+  starter: {
+    id: "target-snapshot",
+    title: "Target Snapshot",
+    premise: "원본 히로인 asset을 프로젝트 스냅샷으로 복사한다."
+  }
+});
+const assignedTwinSnapshot = await sourceAssetUseCases.assignHeroineSnapshot({
+  projectDirectory: targetSnapshotProjectDirectory,
+  heroineId: "twin"
+});
+assert.equal(assignedTwinSnapshot.ok, true);
+const assignedPortrait = assignedTwinSnapshot.project.assets.find((asset) => asset.id === "asset-twin-portrait");
+assert.equal(assignedPortrait?.source, "generated");
+assert.equal(assignedPortrait?.uri, "/generated-assets/asset-twin-portrait.png");
+assert.equal(assignedPortrait?.provenance?.adapter, "image-generation-adapter");
+assert.equal(existsSync(join(targetSnapshotProjectDirectory, "assets", "generated", "asset-twin-portrait.png")), true);
+
+const qualityGateUseCases = useCasesModule.createVnMakerUseCases({
+  defaultProjectDirectory: portraitQualityDirectory,
+  recentProjectIndexFile: join(tempRoot, "portrait-quality-recent-projects.json"),
+  image: {
+    async generateImageAsset(input) {
+      return {
+        job: {
+          id: input.jobId || `job-${input.kind}`,
+          kind: input.kind,
+          targetId: input.targetId,
+          prompt: input.prompt,
+          style: input.style,
+          provider: "image-generation-adapter",
+          status: "completed",
+          outputAssetId: input.outputAssetId
+        },
+        asset: {
+          id: input.outputAssetId,
+          kind: input.kind,
+          label: `generated ${input.kind}`,
+          uri: `${input.publicPathPrefix}/${input.outputAssetId}.png`,
+          source: "generated",
+          generationJobId: input.jobId || `job-${input.kind}`
+        },
+        image: {
+          mimeType: "image/png",
+          b64Json: Buffer.from("opaque portrait").toString("base64"),
+          quality: { hasAlpha: false, transparentBackground: false }
+        }
+      };
+    }
+  }
+});
+await qualityGateUseCases.createProject({
+  starter: {
+    id: "portrait-quality",
+    title: "Portrait Quality",
+    premise: "포트레이트 품질 실패를 generated success로 저장하지 않는다."
+  }
+});
+const qualityHeroineCreated = await qualityGateUseCases.createHeroine({
+  heroine: {
+    id: "opaque",
+    name: "오파크",
+    description: "품질 게이트 실패용 히로인",
+    personality: "테스트",
+    speechStyle: "테스트",
+    appearance: "불투명 배경"
+  }
+});
+assert.equal(qualityHeroineCreated.ok, true);
+const opaquePortrait = await qualityGateUseCases.generateHeroinePortrait({
+  heroineId: "opaque",
+  expectedHeroineRevision: qualityHeroineCreated.heroineRevision
+});
+assert.equal(opaquePortrait.ok, false);
+assert.equal(opaquePortrait.code, "PORTRAIT_QUALITY_FAILED");
+
 await assert.rejects(
   () => useCases.createProjectFromHeroine({
     projectDirectory,
@@ -749,6 +953,10 @@ const starterBackgroundProject = await useCases.createProject({
 });
 assert.equal(starterBackgroundProject.ok, true);
 assert.equal(starterBackgroundProject.project.assets.filter((asset) => asset.kind === "background").length, 1);
+await useCases.generateImage({
+  projectDirectory: starterBackgroundProjectDirectory,
+  jobId: "job-haru-portrait"
+});
 const starterBackgroundGenerated = await useCases.generateImage({
   projectDirectory: starterBackgroundProjectDirectory,
   kind: "background",

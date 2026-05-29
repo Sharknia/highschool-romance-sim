@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   DEFAULT_EMOTION_TAGS,
   DEFAULT_HEROINE_PORTRAIT_STYLE,
+  analyzeProjectReadiness,
   analyzeRouteGraph,
   buildProjectHtml,
   conditionEvaluationTraceForProject,
@@ -105,6 +106,7 @@ export type HeroineActionFailureCode =
   | "HEROINE_NOT_FOUND"
   | "HEROINE_ID_CONFLICT"
   | "HEROINE_REVISION_CONFLICT"
+  | "PORTRAIT_QUALITY_FAILED"
   | "OAUTH_REQUIRED"
   | "IMAGE_GENERATION_UNAVAILABLE"
   | "SERVER_ERROR";
@@ -180,6 +182,13 @@ export interface ProjectImageGenerationResult {
     uri?: string;
     codexSavedPath?: string | null;
     revisedPrompt?: string | null;
+    quality?: {
+      hasAlpha?: boolean;
+      transparentBackground?: boolean;
+      width?: number;
+      height?: number;
+      issues?: string[];
+    };
   };
   raw?: unknown;
 }
@@ -998,6 +1007,17 @@ function requiredDataBlockersFor(project: VnMakerProject): ProjectExportPlanDto[
   return blockers;
 }
 
+function readinessBlockersFor(project: VnMakerProject, target: "preview" | "export"): ProjectExportPlanDto["blockers"] {
+  return analyzeProjectReadiness(project, target).issues
+    .filter((issue) => issue.severity === "error")
+    .map((issue) => ({
+      kind: "requiredData" as const,
+      id: issue.assetId,
+      message: issue.message,
+      tab: issue.tab === "export" ? "export" : issue.tab === "preview" ? "studio" : issue.tab
+    }));
+}
+
 function previewReadinessFor(
   project: VnMakerProject,
   validation: { ok?: boolean; issues?: ValidationIssue[] },
@@ -1109,6 +1129,7 @@ function exportPlanFor(
   const incompleteImageJobs = project.generationJobs.filter((job) => (job.kind === "background" || job.kind === "cg") && job.status !== "completed");
   const blockers: ProjectExportPlanDto["blockers"] = [
     ...requiredDataBlockersFor(project),
+    ...readinessBlockersFor(project, "export"),
     ...validationSummary.errors.map((issue) => ({
       kind: "validation" as const,
       message: issue.message,
@@ -2564,7 +2585,7 @@ function sourceProjectDirectoryFrom(input: unknown, fallback: string): string {
   const record = asRecord(input);
   return typeof record.sourceProjectDirectory === "string" && record.sourceProjectDirectory.trim()
     ? record.sourceProjectDirectory
-    : projectDirectoryFrom(input, fallback);
+    : fallback;
 }
 
 function optionalProjectId(input: unknown): string | undefined {
@@ -2639,6 +2660,40 @@ async function recordSourceHeroineReuse(
     store.recordHeroineReuse(record.heroineId, project, options.targetProjectDirectory);
   } finally {
     store.close();
+  }
+}
+
+function heroineAssetIds(heroine: HeroineProfile): string[] {
+  return [...new Set([
+    heroine.defaultPortraitAssetId || "",
+    ...heroine.portraitAssetIds,
+    ...Object.values(heroine.expressionAssetIds || {})
+  ].filter(Boolean))];
+}
+
+function mergeHeroineSnapshotAssets(project: VnMakerProject, sourceProject: VnMakerProject | null, heroine: HeroineProfile): VnMakerProject {
+  if (!sourceProject) {
+    return project;
+  }
+  const sourceAssetsById = new Map(sourceProject.assets.map((asset) => [asset.id, asset]));
+  const snapshotAssetIds = new Set(heroineAssetIds(heroine));
+  if (snapshotAssetIds.size === 0) {
+    return project;
+  }
+  return {
+    ...project,
+    assets: project.assets.map((asset) => snapshotAssetIds.has(asset.id) && sourceAssetsById.has(asset.id)
+      ? { ...sourceAssetsById.get(asset.id)! }
+      : asset)
+  };
+}
+
+async function copyHeroineSnapshotAssets(targetStore: ProjectStore, sourceStore: ProjectStore | null, heroine: HeroineProfile): Promise<void> {
+  if (!sourceStore || sourceStore.paths.projectDirectory === targetStore.paths.projectDirectory) {
+    return;
+  }
+  for (const assetId of heroineAssetIds(heroine)) {
+    await targetStore.importAssetFrom(sourceStore, assetId);
   }
 }
 
@@ -3982,6 +4037,50 @@ function imageFallbackReasonFromError(error: unknown): "OAUTH_REQUIRED" | "IMAGE
   return null;
 }
 
+function generatedImageQuality(result: ProjectImageGenerationResult): NonNullable<ProjectImageGenerationResult["image"]>["quality"] | undefined {
+  return result.image?.quality;
+}
+
+function portraitQualityIssues(result: ProjectImageGenerationResult): string[] {
+  if (result.dummy || result.asset.source === "mock" || result.asset.source === "dummy") {
+    return [];
+  }
+  if (result.asset.kind !== "portrait" && result.asset.kind !== "expression") {
+    return [];
+  }
+  const quality = generatedImageQuality(result);
+  const issues = [...(quality?.issues || [])];
+  if (quality?.hasAlpha === false) {
+    issues.push("알파 채널이 없어 스테이지에서 불투명 배경으로 보일 수 있습니다.");
+  }
+  if (quality?.transparentBackground === false) {
+    issues.push("투명 배경이 확인되지 않았습니다.");
+  }
+  return [...new Set(issues)];
+}
+
+function withPortraitQualityProvenance(result: ProjectImageGenerationResult, issues: string[]): ProjectImageGenerationResult {
+  if (result.asset.kind !== "portrait" && result.asset.kind !== "expression") {
+    return result;
+  }
+  const quality = generatedImageQuality(result);
+  return {
+    ...result,
+    asset: {
+      ...result.asset,
+      provenance: {
+        ...(result.asset.provenance || {}),
+        qualityStatus: issues.length > 0 ? "failed" : quality ? "passed" : "unchecked",
+        ...(issues.length > 0 ? { qualityIssues: issues } : {}),
+        ...(quality?.hasAlpha !== undefined ? { hasAlpha: quality.hasAlpha } : {}),
+        ...(quality?.transparentBackground !== undefined ? { transparentBackground: quality.transparentBackground } : {}),
+        ...(quality?.width !== undefined ? { width: quality.width } : {}),
+        ...(quality?.height !== undefined ? { height: quality.height } : {})
+      }
+    }
+  };
+}
+
 async function generateImageWithFallback(
   image: ProjectImageGenerationAdapter,
   imageFallback: ProjectImageGenerationAdapter | undefined,
@@ -4037,18 +4136,27 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       const record = asRecord(input);
       const projectDirectory = projectDirectoryFrom(input, defaultProjectDirectory);
       assertProjectIdCanBeCreated(input);
-      const heroine = record.heroine
-        ? requiredHeroine(input)
-        : await heroineFromLibrary(input, defaultProjectDirectory);
+      let sourceStore: ProjectStore | null = null;
+      let heroine: HeroineProfile | undefined;
+      if (record.heroine) {
+        heroine = requiredHeroine(input);
+      } else {
+        const sourceDirectory = sourceProjectDirectoryFrom(input, defaultProjectDirectory);
+        sourceStore = await openProjectStore(sourceDirectory);
+        heroine = sourceStore.listHeroines().find((item) => item.id === record.heroineId);
+      }
       if (!heroine) {
+        if (sourceStore) {
+          sourceStore.close();
+        }
         throw new InputValidationError("heroine 입력이 필요합니다.", [{ severity: "error", path: "heroineId", message: "히로인 라이브러리에서 찾을 수 없습니다." }]);
       }
-      const project = createProjectFromHeroine({
+      const project = mergeHeroineSnapshotAssets(createProjectFromHeroine({
         id: typeof record.projectId === "string" ? record.projectId : undefined,
         title: typeof record.title === "string" ? record.title : undefined,
         premise: typeof record.premise === "string" ? record.premise : undefined,
         heroine
-      });
+      }), sourceStore ? sourceStore.requireProject() : null, heroine);
       await assertProjectCreationTargetAvailable(projectDirectory, project);
       const store = await createProjectWorkspace({
         projectDirectory,
@@ -4056,6 +4164,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
       });
       try {
         store.saveHeroine(heroine);
+        await copyHeroineSnapshotAssets(store, sourceStore, heroine);
         const savedProject = store.requireProject();
         store.recordHeroineReuse(heroine.id, savedProject);
         const validation = store.validateAndStore();
@@ -4078,6 +4187,9 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           validation
         }, { project: savedProject, validation });
       } finally {
+        if (sourceStore) {
+          sourceStore.close();
+        }
         store.close();
       }
     },
@@ -4085,21 +4197,27 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
     async assignHeroineSnapshot(input: unknown) {
       const record = asRecord(input);
       const store = await ensureProjectStore(input, defaultProjectDirectory);
+      let sourceStore: ProjectStore | null = null;
       try {
         const project = store.requireProject();
-        const heroine = optionalHeroine(input)
+        let heroine = optionalHeroine(input)
           || store.listHeroines().find((item) => item.id === record.heroineId);
+        if (!heroine && typeof record.heroineId === "string" && record.heroineId.trim()) {
+          sourceStore = await openProjectStore(sourceProjectDirectoryFrom(input, defaultProjectDirectory));
+          heroine = sourceStore.listHeroines().find((item) => item.id === record.heroineId);
+        }
         if (!heroine) {
           throw new InputValidationError("heroine 입력이 필요합니다.", [{ severity: "error", path: "heroineId", message: "히로인 라이브러리에서 찾을 수 없습니다." }]);
         }
         assertCanAssignHeroineSnapshot(project, store.paths.projectDirectory);
-        const nextProject = createProjectFromHeroine({
+        const nextProject = mergeHeroineSnapshotAssets(createProjectFromHeroine({
           id: project.id,
           title: project.title,
           premise: project.premise,
           heroine
-        });
+        }), sourceStore?.requireProject() || null, heroine);
         const savedProject = store.saveProject(nextProject);
+        await copyHeroineSnapshotAssets(store, sourceStore, heroine);
         store.recordHeroineReuse(heroine.id, savedProject);
         const validation = store.validateAndStore();
         return withStoreActionState("assignHeroineSnapshot", store, {
@@ -4109,6 +4227,7 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           validation
         }, { project: savedProject, validation });
       } finally {
+        sourceStore?.close();
         store.close();
       }
     },
@@ -5556,6 +5675,18 @@ export function createVnMakerUseCases(options: VnMakerUseCaseOptions = {}) {
           result = withWorkspacePreviewUri(await generateImageWithFallback(options.image, options.imageFallback, generationInput));
         } catch (error) {
           return heroineImageGenerationFailure(input, error);
+        }
+        const qualityIssues = portraitQualityIssues(result);
+        result = withPortraitQualityProvenance(result, qualityIssues);
+        if (qualityIssues.length > 0) {
+          return heroineFailure(input, "PORTRAIT_QUALITY_FAILED", `포트레이트 품질 확인에 실패했습니다: ${qualityIssues.join(" ")}`, {
+            issues: qualityIssues.map((message) => ({
+              severity: "error",
+              path: "portrait.quality",
+              message,
+              domain: "asset"
+            }))
+          });
         }
         await store.storeGenerationResult(result);
 

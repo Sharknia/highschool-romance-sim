@@ -500,6 +500,21 @@ try {
   assert.equal(apiGeneratedImage.body.asset.provenance.packVersion, alphaSandbox.ALPHA_SANDBOX_PACK_VERSION);
   assert.equal(existsSync(join(apiProjectDirectory, "assets", "generated", `${apiPlannedCgJob.outputAssetId}.png`)), true);
 
+  const apiPortraitImage = await sandboxApi({
+    method: "POST",
+    path: "/api/generation/images",
+    body: {
+      projectDirectory: apiProjectDirectory,
+      kind: "portrait",
+      targetId: apiRoute.heroineId,
+      prompt: "alpha sandbox heroine portrait",
+      outputAssetId: "asset-alpha-sandbox-haru-portrait"
+    }
+  });
+  assert.equal(apiPortraitImage.status, 200);
+  assert.equal(apiPortraitImage.body.asset.kind, "portrait");
+  assert.equal(apiPortraitImage.body.asset.source, "mock");
+
   const apiBackgroundImage = await sandboxApi({
     method: "POST",
     path: "/api/generation/images",
@@ -656,6 +671,17 @@ try {
   assert.equal(cliGeneratedImage.asset.provenance.adapter, core.MOCK_IMAGE_PACK_ADAPTER);
   assert.equal(cliGeneratedImage.dummy, true);
   assert.equal(cliGeneratedImage.raw.provenance, alphaSandbox.ALPHA_SANDBOX_PROVENANCE);
+
+  const cliPortraitImage = runCli("generate-image", {
+    projectDirectory: cliProjectDirectory,
+    kind: "portrait",
+    targetId: cliRoute.heroineId,
+    prompt: "alpha sandbox cli portrait",
+    outputAssetId: "asset-alpha-sandbox-haru-portrait"
+  }, cliEnv);
+  assert.equal(cliPortraitImage.ok, true);
+  assert.equal(cliPortraitImage.asset.kind, "portrait");
+  assert.equal(cliPortraitImage.asset.source, "mock");
 
   const cliGenerateBackground = runCli("generate-image", {
     projectDirectory: cliProjectDirectory,
