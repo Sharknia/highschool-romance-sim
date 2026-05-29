@@ -153,7 +153,7 @@ export function HeroineCreatePage() {
       dirty={dirty}
       draft={draft}
       existingIds={existingIds}
-      eyebrow="New Heroine"
+      eyebrow="새 히로인"
       mode="create"
       onBackToList={() => navigate("/heroines")}
       onCancel={cancel}

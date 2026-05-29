@@ -97,7 +97,7 @@ export function createSettingsStatusViewModel({
       lastCheckedText: formatLastChecked(lastCheckedAt),
       recentFailureText: "",
       technicalDetailText: String(session?.technicalDetail || ""),
-      nextActionText: "Alpha 이미지 생성은 실제 Codex app-server imageGeneration 결과를 사용합니다.",
+      nextActionText: "이미지 생성은 Codex 연결을 통해 프로젝트 에셋으로 저장됩니다.",
       primaryActionLabel: "상태 갱신",
       canLogout: true
     };
@@ -134,7 +134,7 @@ export function createSettingsStatusViewModel({
     lastCheckedText: formatLastChecked(lastCheckedAt),
     recentFailureText,
     technicalDetailText: String(session?.technicalDetail || ""),
-    nextActionText: session?.nextAction ? String(session.nextAction) : "브라우저 로그인 또는 device flow 로그인을 시작하세요.",
+    nextActionText: session?.nextAction ? String(session.nextAction).replace(/ 또는 device flow 로그인/g, "") : "브라우저 로그인을 시작하세요.",
     primaryActionLabel: "상태 갱신",
     canLogout: false
   };

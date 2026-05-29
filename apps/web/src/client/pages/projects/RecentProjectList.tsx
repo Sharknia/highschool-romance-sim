@@ -56,6 +56,11 @@ function projectStatusSummary(entry: RecentProject): string {
   return entry.missing ? "프로젝트 폴더를 찾을 수 없습니다." : validationLabel(entry.validationState);
 }
 
+function projectLocationSummary(entry: RecentProject): string {
+  const normalized = entry.projectDirectory.replace(/\\/g, "/").replace(/\/+$/g, "");
+  return normalized.split("/").filter(Boolean).pop() || "저장 위치 확인 필요";
+}
+
 function renderProjectField(label: string, value: string, compact = false) {
   return (
     <span className={compact ? "recent-project-field recent-project-field-compact" : "recent-project-field"} title={compact ? value : undefined}>
@@ -187,7 +192,7 @@ export function ProjectList({
           title: entry.title,
           description: (
             <>
-              {renderProjectField("저장 위치", entry.projectDirectory, true)}
+              {renderProjectField("저장 폴더", projectLocationSummary(entry), true)}
               {renderProjectField("현재 상태", projectCurrentState(entry))}
               {renderProjectField("상태 요약", projectStatusSummary(entry))}
               {renderProjectField("최근 수정", formatRecentProjectDate(entry.lastValidatedAt))}

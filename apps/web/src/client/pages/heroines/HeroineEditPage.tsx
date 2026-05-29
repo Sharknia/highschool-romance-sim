@@ -150,7 +150,7 @@ export function HeroineEditPage() {
       dirty={dirty}
       draft={draft}
       error={state === "error"}
-      eyebrow="Edit Heroine"
+      eyebrow="히로인 수정"
       loading={state === "loading"}
       mode="edit"
       notFound={state === "notFound"}

@@ -78,7 +78,7 @@ export function HeroineDetailPage() {
     <section className="app-page heroine-page" aria-labelledby="heroineDetailTitle">
       <header className="page-hero">
         <div>
-          <p className="eyebrow">Heroine Detail</p>
+          <p className="eyebrow">히로인 원본</p>
           <h1 id="heroineDetailTitle">{heroine?.name || "히로인 상세"}</h1>
           <p>이 화면은 라이브러리 원본 히로인을 확인합니다.</p>
         </div>
@@ -110,7 +110,7 @@ export function HeroineDetailPage() {
         <section className="heroine-detail-layout">
           <article className="page-panel">
             <EntitySummaryHeader
-              eyebrow="Library Source"
+              eyebrow="라이브러리 원본"
               title={heroine.name}
               status={<StatusChip tone={heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0] ? "success" : "neutral"}>{heroine.defaultPortraitUri || heroine.portraitAssetUris?.[0] ? "포트레이트 있음" : "원본 정보"}</StatusChip>}
               description={heroine.description}
