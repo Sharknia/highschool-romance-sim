@@ -1,0 +1,4 @@
+interface:
+  display_name: "Complete PR Issue Cleanup"
+  short_description: "PR 병합 후 이슈와 작업트리를 정리합니다"
+  default_prompt: "Use $complete-pr-issue-cleanup to merge the ready PR, verify Issues and Project status, clean up branches/worktrees, and report the final state."
