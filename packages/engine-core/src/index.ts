@@ -623,6 +623,12 @@ export interface VnMakerAssetProvenance {
   sourceGeneratedBy?: string;
   license?: string;
   sourceUri?: string;
+  qualityStatus?: "unchecked" | "passed" | "failed";
+  qualityIssues?: string[];
+  hasAlpha?: boolean;
+  transparentBackground?: boolean;
+  width?: number;
+  height?: number;
 }
 
 export interface VnMakerGenerationJob {
@@ -653,6 +659,31 @@ export interface ValidationIssue {
   sceneIds?: string[];
   choiceIds?: string[];
   targetSceneId?: string;
+}
+
+export type ProjectReadinessTarget = "preview" | "export" | "smoke";
+export type ProjectReadinessIssueCode =
+  | "asset-reference-missing"
+  | "asset-placeholder"
+  | "asset-uri-missing"
+  | "portrait-quality-failed";
+
+export interface ProjectReadinessIssue {
+  code: ProjectReadinessIssueCode;
+  severity: ValidationSeverity;
+  domain: "asset";
+  target: ProjectReadinessTarget;
+  tab: "heroine" | "background" | "studio" | "preview" | "export";
+  message: string;
+  assetId: string;
+  assetKind?: AssetKind;
+  sceneId?: string;
+}
+
+export interface ProjectReadinessResult {
+  target: ProjectReadinessTarget;
+  ok: boolean;
+  issues: ProjectReadinessIssue[];
 }
 
 export type RouteGraphIssueCode =
@@ -1014,6 +1045,21 @@ function validateOptionalBoolean(record: Record<string, unknown>, key: string, p
   }
 }
 
+function validateOptionalNumber(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): void {
+  if (record[key] !== undefined && typeof record[key] !== "number") {
+    addSchemaIssue(issues, path, "number여야 합니다.");
+  }
+}
+
+function validateOptionalStringArray(record: Record<string, unknown>, key: string, path: string, issues: ValidationIssue[]): void {
+  if (record[key] === undefined) {
+    return;
+  }
+  if (!Array.isArray(record[key]) || !(record[key] as unknown[]).every((item) => typeof item === "string")) {
+    addSchemaIssue(issues, path, "문자열 배열이어야 합니다.");
+  }
+}
+
 function validateSceneEnding(value: unknown, path: string, issues: ValidationIssue[]): void {
   if (value === undefined) {
     return;
@@ -1105,6 +1151,18 @@ function validateAssetProvenanceShape(value: unknown, path: string, issues: Vali
   ["adapter", "fallbackReason", "packId", "packVersion", "sourceGeneratedBy", "license", "sourceUri"].forEach((key) => {
     validateOptionalString(value, key, `${path}.${key}`, issues);
   });
+  validateOptionalString(value, "qualityStatus", `${path}.qualityStatus`, issues);
+  validateOptionalStringArray(value, "qualityIssues", `${path}.qualityIssues`, issues);
+  validateOptionalBoolean(value, "hasAlpha", `${path}.hasAlpha`, issues);
+  validateOptionalBoolean(value, "transparentBackground", `${path}.transparentBackground`, issues);
+  validateOptionalNumber(value, "width", `${path}.width`, issues);
+  validateOptionalNumber(value, "height", `${path}.height`, issues);
+  if (
+    typeof value.qualityStatus === "string"
+    && !["unchecked", "passed", "failed"].includes(value.qualityStatus)
+  ) {
+    addSchemaIssue(issues, `${path}.qualityStatus`, `지원하지 않는 품질 상태입니다: ${value.qualityStatus}`);
+  }
 }
 
 function parseVnMakerGenerationJob(value: unknown): DtoParseResult<VnMakerGenerationJob> {
@@ -1718,6 +1776,110 @@ function previewNextAction(blocker: PreflightBlockerDto | undefined): string {
     : "문제 패널에서 blocker를 확인하세요.";
 }
 
+function assetReadinessTab(kind: AssetKind): ProjectReadinessIssue["tab"] {
+  if (kind === "portrait" || kind === "expression") {
+    return "heroine";
+  }
+  if (kind === "background" || kind === "cg") {
+    return "background";
+  }
+  return "studio";
+}
+
+function referencedSceneAssets(project: VnMakerProject): Array<{ assetId: string; sceneId: string; kind?: AssetKind }> {
+  const references: Array<{ assetId: string; sceneId: string; kind?: AssetKind }> = [];
+  project.scenes.forEach((scene) => {
+    if (scene.backgroundAssetId) {
+      references.push({ assetId: scene.backgroundAssetId, sceneId: scene.id, kind: "background" });
+    }
+    if (scene.cgAssetId) {
+      references.push({ assetId: scene.cgAssetId, sceneId: scene.id, kind: "cg" });
+    }
+    scene.characters.forEach((character) => {
+      if (character.assetId) {
+        references.push({ assetId: character.assetId, sceneId: scene.id, kind: "portrait" });
+      }
+    });
+  });
+  return references;
+}
+
+export function analyzeProjectReadiness(project: VnMakerProject, target: ProjectReadinessTarget = "export"): ProjectReadinessResult {
+  const assetsById = new Map(project.assets.map((asset) => [asset.id, asset]));
+  const issues: ProjectReadinessIssue[] = [];
+  const seen = new Set<string>();
+
+  referencedSceneAssets(project).forEach((reference) => {
+    const key = reference.assetId;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const asset = assetsById.get(reference.assetId);
+    const kind = asset?.kind || reference.kind;
+    const tab = assetReadinessTab(kind || "other");
+    if (!asset) {
+      issues.push({
+        code: "asset-reference-missing",
+        severity: "error",
+        domain: "asset",
+        target,
+        tab,
+        message: `씬에서 참조하는 에셋을 찾을 수 없습니다: ${reference.assetId}`,
+        assetId: reference.assetId,
+        assetKind: kind,
+        sceneId: reference.sceneId
+      });
+      return;
+    }
+    if (asset.source === "placeholder") {
+      issues.push({
+        code: "asset-placeholder",
+        severity: "error",
+        domain: "asset",
+        target,
+        tab,
+        message: `${asset.label || asset.id} 에셋이 아직 생성/연결되지 않았습니다.`,
+        assetId: asset.id,
+        assetKind: asset.kind,
+        sceneId: reference.sceneId
+      });
+    }
+    if ((target === "export" || target === "smoke") && asset.source !== "placeholder" && !asset.uri) {
+      issues.push({
+        code: "asset-uri-missing",
+        severity: "error",
+        domain: "asset",
+        target,
+        tab,
+        message: `${asset.label || asset.id} 에셋의 내보내기 경로가 없습니다.`,
+        assetId: asset.id,
+        assetKind: asset.kind,
+        sceneId: reference.sceneId
+      });
+    }
+    if ((asset.kind === "portrait" || asset.kind === "expression") && asset.provenance?.qualityStatus === "failed") {
+      issues.push({
+        code: "portrait-quality-failed",
+        severity: "error",
+        domain: "asset",
+        target,
+        tab: "heroine",
+        message: `${asset.label || asset.id} 스프라이트 품질 확인이 실패했습니다.`,
+        assetId: asset.id,
+        assetKind: asset.kind,
+        sceneId: reference.sceneId
+      });
+    }
+  });
+
+  return {
+    target,
+    ok: issues.every((issue) => issue.severity !== "error"),
+    issues
+  };
+}
+
 export function createPreviewPreflight(
   project: VnMakerProject,
   validation: { ok?: boolean; issues?: ValidationIssue[] },
@@ -2182,6 +2344,22 @@ function characterToHeroineContext(character: VnMakerCharacter): EventExpansionR
   };
 }
 
+function hasHangulFinalConsonant(value: string): boolean {
+  const last = [...value.trim()].at(-1);
+  if (!last) {
+    return false;
+  }
+  const code = last.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) {
+    return false;
+  }
+  return (code - 0xac00) % 28 !== 0;
+}
+
+function koreanParticle(value: string, withFinalConsonant: string, withoutFinalConsonant: string): string {
+  return hasHangulFinalConsonant(value) ? withFinalConsonant : withoutFinalConsonant;
+}
+
 export function createProjectFromHeroine(input: CreateProjectFromHeroineInput): VnMakerProject {
   const title = input.title || `${input.heroine.name} 프로젝트`;
   const id = input.id || normalizeId(title);
@@ -2211,7 +2389,7 @@ export function createProjectFromHeroine(input: CreateProjectFromHeroineInput): 
         id: openingSceneId,
         label: `${input.heroine.name} 루트 시작`,
         speaker: "나",
-        text: `${input.heroine.name}와의 이야기가 시작되려 한다.`,
+        text: `${input.heroine.name}${koreanParticle(input.heroine.name, "과", "와")}의 이야기가 시작되려 한다.`,
         characters: [{ characterId: input.heroine.id, expression: "normal", assetId: portraitAssetId, position: "center" }],
         choices: [],
         next: defaultEndingSceneId

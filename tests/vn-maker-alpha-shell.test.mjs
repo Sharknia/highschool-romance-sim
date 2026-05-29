@@ -390,9 +390,10 @@ const applyRepairResultStateBranch = applyRepairResultStateStart >= 0 && applyRe
   'eventName: "previewed"',
   'eventName: "validation_failed"',
   "moderator_hint",
-  "actual preview evidence",
-  "condition preview not_evaluated",
-  "fake/mock preview"
+  "runtime-preview-stage",
+  "advancePreviewScene",
+  "currentPreviewScene.backgroundAsset",
+  "currentPreviewScene.characters"
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `ProjectDetailView는 repair/preview UX event emission '${requiredText}'를 가져야 합니다.`);
@@ -917,7 +918,7 @@ assert.doesNotMatch(studioWorkspaceSource, /blocks\s*:\s*\[/, "Script block UI�
   "conditionRuntimeSupport",
   "strictPreviewStatus",
   "strictPreviewSuccess",
-  "condition preview not evaluated"
+  "조건 미리보기는 아직 실행 판정에 포함하지 않습니다."
 ].forEach((requiredText) => {
   const pattern = new RegExp(requiredText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   assert.match(projectDetailViewSource, pattern, `ProjectDetailView는 #105 strict preview와 preflight 성공 지표를 분리 표시해야 합니다: ${requiredText}`);
@@ -925,7 +926,7 @@ assert.doesNotMatch(studioWorkspaceSource, /blocks\s*:\s*\[/, "Script block UI�
 [
   "conditionRuntimeSupport",
   "candidate_review_only",
-  "condition preview not evaluated",
+  "not_evaluated",
   "confirmDiscardDirtyDraft",
   "draftBaseScene",
   "confirmedSceneChangeRef",

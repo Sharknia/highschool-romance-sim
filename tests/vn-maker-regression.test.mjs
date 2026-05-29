@@ -140,11 +140,18 @@ function projectWithPreviewBackground(sourceProject, assetId) {
     kind: "background",
     label: "프리뷰 배경",
     uri: "data:image/png;base64,",
-    source: "placeholder"
+    source: "generated"
   };
   return {
     ...sourceProject,
-    assets: [...sourceProject.assets.filter((asset) => asset.id !== assetId), backgroundAsset],
+    assets: [
+      ...sourceProject.assets
+        .filter((asset) => asset.id !== assetId)
+        .map((asset) => asset.kind === "portrait" || asset.kind === "expression"
+          ? { ...asset, uri: asset.uri || "data:image/png;base64,", source: "generated" }
+          : asset),
+      backgroundAsset
+    ],
     scenes: sourceProject.scenes.map((scene) => ({
       ...scene,
       backgroundAssetId: assetId
@@ -2684,12 +2691,27 @@ const cliDeleteHeroine = JSON.parse(cliDeleteHeroineOutput);
 assert.equal(cliDeleteHeroine.ok, true);
 assert.equal(cliDeleteHeroine.snapshotPolicy, "projectSnapshotsPreserved");
 
-const alphaProject = core.createProjectFromHeroine({
+const alphaBaseProject = core.createProjectFromHeroine({
   id: "alpha-haru",
   title: "하루 Alpha",
   premise: "도서관에서 시작하는 짧은 로맨틱 코미디",
   heroine: haruHeroine
 });
+const alphaProject = {
+  ...alphaBaseProject,
+  assets: alphaBaseProject.assets.map((asset) => asset.id === "asset-haru-portrait"
+    ? {
+        ...asset,
+        uri: "data:image/png;base64,",
+        source: "generated",
+        provenance: {
+          qualityStatus: "passed",
+          hasAlpha: true,
+          transparentBackground: true
+        }
+      }
+    : asset)
+};
 assert.equal(alphaProject.characters.length, 1);
 assert.equal(alphaProject.routes.length, 1);
 assert.equal(alphaProject.routes[0].heroineId, "haru");

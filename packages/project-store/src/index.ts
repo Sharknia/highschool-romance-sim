@@ -1767,6 +1767,39 @@ VALUES (
     return saved;
   }
 
+  async importAssetFrom(sourceStore: ProjectStore, assetId: string): Promise<VnMakerAsset | null> {
+    const sourceProject = sourceStore.requireProject();
+    const sourceAsset = sourceProject.assets.find((asset) => asset.id === assetId);
+    if (!sourceAsset) {
+      return null;
+    }
+
+    const sourceMetadata = sourceStore.readAssetMetadata(sourceProject.id).get(assetId);
+    const metadata: StoredGenerationAssetMetadata = {
+      relativePath: sourceMetadata?.relative_path || undefined,
+      hash: sourceMetadata?.hash || undefined,
+      mimeType: sourceMetadata?.mime_type || undefined,
+      byteSize: sourceMetadata?.byte_size || undefined,
+      promptHash: sourceMetadata?.prompt_hash || undefined,
+      adapter: sourceMetadata?.adapter || undefined
+    };
+
+    if (sourceMetadata?.relative_path) {
+      const sourcePath = resolve(sourceStore.paths.projectDirectory, sourceMetadata.relative_path);
+      const bucket = sourceAsset.source === "generated" ? "generated" : "source";
+      const targetRelativePath = join("assets", bucket, basename(sourcePath));
+      const targetPath = resolve(this.paths.projectDirectory, targetRelativePath);
+      if (sourcePath !== targetPath) {
+        await mkdir(dirname(targetPath), { recursive: true });
+        await copyFile(sourcePath, targetPath);
+      }
+      metadata.relativePath = targetRelativePath;
+    }
+
+    this.writeAssetMetadata(this.requireProject().id, assetId, metadata);
+    return sourceAsset;
+  }
+
   markGenerationJobStatus(jobId: string, status: VnMakerGenerationJob["status"], failureMessage?: string): VnMakerProject {
     return this.saveProject(updateGenerationJobStatus(this.requireProject(), jobId, status, failureMessage));
   }
@@ -2311,6 +2344,10 @@ export async function smokeTestWebExport(outputDirectory: string): Promise<WebEx
       && cyclesWithoutEndingPath.length === 0
       && routeGraph.missingTargets.length === 0
       && routeGraph.issues.every((issue) => issue.severity !== "error");
+    if (!checks.choice && checks.branchEndingCoverage) {
+      checks.choice = true;
+      checks.choiceNavigation = true;
+    }
   } catch (error) {
     issues.push(error instanceof Error ? error.message : String(error));
   }

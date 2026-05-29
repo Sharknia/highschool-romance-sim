@@ -2,9 +2,9 @@ import type { ApiResult } from "../../api/types";
 
 export const detailTabs = [
   { id: "overview", label: "개요" },
-  { id: "heroine", label: "히로인" },
-  { id: "background", label: "배경 화면 생성" },
-  { id: "studio", label: "제작" },
+  { id: "heroine", label: "출연 캐릭터" },
+  { id: "background", label: "배경/에셋" },
+  { id: "studio", label: "스토리 제작" },
   { id: "preview", label: "프리뷰" },
   { id: "export", label: "내보내기" }
 ] as const;

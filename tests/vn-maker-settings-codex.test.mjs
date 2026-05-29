@@ -98,7 +98,7 @@ try {
   assert.equal(disconnected.imageGenerationText, "이미지 생성 불가");
   assert.equal(disconnected.fallbackPolicyText, "패키징 목 이미지 사용");
   assert.equal(disconnected.recentFailureText, "Codex 연결이 필요합니다.");
-  assert.equal(disconnected.nextActionText, "브라우저 로그인 또는 device flow 로그인을 시작하세요.");
+  assert.equal(disconnected.nextActionText, "브라우저 로그인을 시작하세요.");
   assert.equal(disconnected.canLogout, false);
 
   const failed = createSettingsStatusViewModel({

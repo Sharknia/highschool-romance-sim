@@ -113,7 +113,7 @@ export function HeroineListPage() {
     <section className="app-page heroine-page" aria-labelledby="heroinesTitle">
       <header className="page-hero">
         <div>
-          <p className="eyebrow">Heroines</p>
+          <p className="eyebrow">캐릭터 라이브러리</p>
           <h1 id="heroinesTitle">히로인 관리</h1>
           <p>라이브러리 원본 히로인을 최근 수정순으로 확인하고 상세 정보로 이동합니다.</p>
         </div>

@@ -15,14 +15,14 @@ function deviceLoginMessage(result: CodexLoginResponse): ReactNode {
   return verificationUrl
     ? (
       <span>
-        device flow 로그인 시작:{" "}
+        기기 인증 시작:{" "}
         <a href={verificationUrl} target="_blank" rel="noopener noreferrer">
           {verificationUrl}
         </a>
         {userCode}
       </span>
     )
-    : "device flow 로그인 요청을 시작했습니다. Codex 인증 안내를 확인하세요.";
+    : "기기 인증 요청을 시작했습니다. Codex 인증 안내를 확인하세요.";
 }
 
 export function SettingsStartPage() {
@@ -104,10 +104,10 @@ export function SettingsStartPage() {
   return (
     <section className="app-page" aria-labelledby="settingsTitle">
       <PageHeader
-        eyebrow="Settings"
+        eyebrow="설정"
         titleId="settingsTitle"
         title="설정"
-        description="전역 API 연결 상태와 Alpha 제작 환경을 확인합니다."
+        description="Codex 연결, 이미지 생성, 로컬 저장 위치를 관리합니다."
         primaryAction={(
           <>
             <Button icon={<RefreshCw size={16} />} onClick={refreshCodexStatus} disabled={busy} variant="primary">
@@ -129,16 +129,12 @@ export function SettingsStartPage() {
           <dl className="settings-list">
             <div><dt>연결</dt><dd><StatusChip tone={statusView.statusTone}>{statusView.connectionText}</StatusChip></dd></div>
             <div><dt>계정</dt><dd>{statusView.accountText}</dd></div>
-            <div><dt>mode</dt><dd>{statusView.modeText}</dd></div>
             <div><dt>요금제</dt><dd>{statusView.planText}</dd></div>
             <div><dt>갱신</dt><dd>{statusView.lastCheckedText}</dd></div>
           </dl>
           <div className="button-row compact">
             <Button icon={<UploadCloud size={16} />} onClick={startBrowserCodexLogin} disabled={busy} variant="primary">
               브라우저 로그인
-            </Button>
-            <Button icon={<Terminal size={16} />} onClick={startDeviceFlowLogin} disabled={busy}>
-              device flow 로그인
             </Button>
             <Button icon={<LogOut size={16} />} onClick={logoutCodexConnection} disabled={busy || !statusView.canLogout} variant="quiet">
               로그아웃
@@ -157,7 +153,7 @@ export function SettingsStartPage() {
           <h2>생성 기본값</h2>
           <dl className="settings-list">
             <div><dt>이미지</dt><dd>{statusView.imageGenerationText}</dd></div>
-            <div><dt>fallback</dt><dd>{statusView.fallbackPolicyText}</dd></div>
+            <div><dt>대체 이미지</dt><dd>{statusView.fallbackPolicyText}</dd></div>
             <div><dt>대상</dt><dd>portrait, background, cg, expression</dd></div>
             <div><dt>결과</dt><dd>생성 결과는 프로젝트 에셋과 작업 결과에 연결합니다.</dd></div>
           </dl>
@@ -177,8 +173,16 @@ export function SettingsStartPage() {
         </article>
       </section>
 
-      <DiagnosticDrawer summary="raw 진단">
+      <DiagnosticDrawer summary="연결 세부 정보">
+        <div className="button-row compact">
+          <Button icon={<Terminal size={16} />} onClick={startDeviceFlowLogin} disabled={busy}>
+            device flow 로그인
+          </Button>
+        </div>
         <dl className="summary-list detail-summary">
+          <div><dt>raw 진단</dt><dd>개발자 확인용 원본 연결 상태입니다.</dd></div>
+          <div><dt>mode</dt><dd>{statusView.modeText}</dd></div>
+          <div><dt>fallback</dt><dd>{statusView.fallbackPolicyText}</dd></div>
           <div><dt>기술 상세</dt><dd>{statusView.technicalDetailText || "기술 상세 없음"}</dd></div>
           <div><dt>최근 action</dt><dd>{actionMessage || actionError || "action 없음"}</dd></div>
         </dl>

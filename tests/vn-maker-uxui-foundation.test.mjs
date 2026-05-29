@@ -135,7 +135,8 @@ const useCasesSource = readText("packages/use-cases/src/index.ts");
 assert.match(projectDetailSource, /DiagnosticDrawer/, "프로젝트 상세는 raw 저장 위치와 ID를 공통 DiagnosticDrawer로 접어야 합니다.");
 assert.match(projectDetailSource, /ReadinessPanel/, "프로젝트 상세 프리뷰/내보내기는 공통 ReadinessPanel을 사용해야 합니다.");
 assert.match(projectDetailSource, /tabShellStatus/, "프로젝트 상세 탭 라벨은 탭별 완료/필요/차단 상태를 표시해야 합니다.");
-assert.match(projectDetailSource, /tab === "studio"[\s\S]*return "준비 중"/, "준비 중인 제작 탭은 워크플로 단계 완료 상태를 그대로 표시하지 않아야 합니다.");
+assert.match(projectDetailSource, /tab === "studio"[\s\S]*workflowStepStateLabel\(step\?\.state\)/, "제작 탭은 workflow 단계 상태와 같은 모델에서 준비/완료를 표시해야 합니다.");
+assert.doesNotMatch(projectDetailSource, /tab === "studio"[\s\S]*return "준비 중"/, "제작 완료 후에도 탭 배지를 준비 중으로 고정하면 안 됩니다.");
 assert.match(projectDetailSource, /displayWorkflowStep/, "프로젝트 개요는 raw workflow 단계 대신 표시용 단계 상태를 사용해야 합니다.");
 assert.match(projectDetailSource, /visibleWorkflowSteps/, "프로젝트 개요 단계 요약은 표시용 workflow steps로 집계해야 합니다.");
 assert.doesNotMatch(projectDetailSource, /summary\.steps\?\.filter\(\(step\) => step\.state === "done"\)/, "프로젝트 개요 완료 집계는 raw workflow step state를 그대로 세면 안 됩니다.");
@@ -145,7 +146,7 @@ assert.match(projectDetailSource, /AssetStatePanel/, "프로젝트 배경/이미
 assert.match(projectDetailSource, /snapshot-comparison-grid/, "프로젝트 히로인 탭은 스냅샷과 라이브러리 원본 비교 레이아웃을 명시해야 합니다.");
 assert.match(projectDetailSource, /배경 대상 진단/, "배경 탭의 raw 대상 정보는 진단 drawer에 있어야 합니다.");
 assert.match(projectDetailSource, /배경 생성 작업 진단/, "배경 탭의 job/asset/backgroundAssetId는 진단 drawer에 있어야 합니다.");
-assert.match(projectDetailSource, /생성된 배경 경로는 진단에서 확인/, "배경 탭의 긴 에셋 URI는 기본 본문이 아니라 진단 drawer에서 확인되어야 합니다.");
+assert.match(projectDetailSource, /currentBackgroundAsset\?\.uri \|\| activeBackgroundJob\?\.asset\?\.uri/, "완료된 배경 작업은 기본 본문에서도 사용자용 산출물 위치를 표시해야 합니다.");
 assert.match(projectDetailSource, /backgroundConnectionText/, "배경 기본 본문은 raw asset id 대신 사용자용 연결 상태를 보여야 합니다.");
 assert.match(projectDetailSource, /backgroundSceneConnectionText/, "배경 기본 본문은 backgroundAssetId 대신 사용자용 장면 연결 상태를 보여야 합니다.");
 assert.match(projectDetailSource, /backgroundAssetDisplayLabel/, "배경 기본 본문은 생성 provenance가 섞인 에셋 라벨을 사용자용 라벨로 정리해야 합니다.");

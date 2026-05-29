@@ -60,6 +60,10 @@ assert.doesNotMatch(projectDetailSource, /function jobStatusLabel/, "ProjectDeta
 
 [
   /<h3>runtime 플레이<\/h3>/,
+  />Project Detail</,
+  /actual preview evidence/,
+  /fake\/mock preview/,
+  /condition preview not_evaluated/,
   /imageGeneration 가능/,
   /imageGeneration 상태/,
   /Codex 이미지 생성 연결/,
@@ -73,6 +77,13 @@ assert.doesNotMatch(projectDetailSource, /function jobStatusLabel/, "ProjectDeta
 ].forEach((pattern) => {
   assert.doesNotMatch(projectDetailSource, pattern, `ProjectDetailView 기본 화면에 금지 패턴이 남아 있습니다: ${pattern}`);
 });
+assert.match(projectDetailSource, /runtime-preview-stage/, "Project Detail 프리뷰는 비주얼 스테이지를 렌더링해야 합니다.");
+assert.match(projectDetailSource, /advancePreviewScene/, "Project Detail 프리뷰는 scene.next/choice.next로 진행할 수 있어야 합니다.");
+assert.match(projectDetailSource, /currentPreviewScene\.backgroundAsset/, "Project Detail 프리뷰는 runtime backgroundAsset을 사용해야 합니다.");
+assert.match(projectDetailSource, /currentPreviewScene\.characters/, "Project Detail 프리뷰는 runtime character sprite를 사용해야 합니다.");
+assert.match(projectDetailSource, /exportRetryableFailure/, "retryable export 실패는 버튼 활성화 상태에 반영되어야 합니다.");
+assert.match(projectDetailSource, /exportState === "failed"[\s\S]{0,240}currentExportPlan\.retryable/, "export 실패 상태와 retryable plan은 같은 export state에서 파생되어야 합니다.");
+assert.match(projectDetailSource, /job\.asset\?\.uri \|\| job\.status === "completed"/, "완료된 배경 job 카드는 결과 에셋 대기 중 문구를 계속 표시하면 안 됩니다.");
 
 const backgroundDiagnostics = blockBetween(
   projectDetailSource,
@@ -111,3 +122,58 @@ assert.doesNotMatch(recentProjectListSource, /placeholder="[^"]*projectId[^"]*"/
 assert.doesNotMatch(recentProjectListSource, /· \{entry\.projectId\}/, "프로젝트 목록 기본 메타는 raw project id 값을 노출하면 안 됩니다.");
 assert.doesNotMatch(recentProjectListSource, />missing</, "프로젝트 목록 상태 chip은 raw missing 상태값을 노출하면 안 됩니다.");
 assert.doesNotMatch(recentProjectListSource, />ready</, "프로젝트 목록 상태 chip은 raw ready 상태값을 노출하면 안 됩니다.");
+
+const studioSource = readText("apps/web/src/client/pages/projects/StudioWorkspace.tsx");
+assert.doesNotMatch(studioSource, /이미 다음 씬이 연결되어 있습니다\./, "Studio는 next가 있는 씬에도 중간 장면 삽입 액션을 제공해야 합니다.");
+[
+  /<span>FlowStatusLegend<\/span>/,
+  /<strong>SceneNode ·/,
+  /placeholder="SceneNode, ChoiceEdge 검색"/,
+  /· asset missing/,
+  /actual project mutation 경로/,
+  /preview\/apply\/undo contract/,
+  /<StatusChip[^>]*>validation stale<\/StatusChip>/
+].forEach((pattern) => {
+  assert.doesNotMatch(studioSource, pattern, `Studio 기본 화면에 개발자용 표현이 남아 있습니다: ${pattern}`);
+});
+assert.match(studioSource, /labelTextFor\("DialogueBlock 본문"\)/, "Studio 폼 컨트롤은 기존 QA label 텍스트와 접근성 이름을 연결해야 합니다.");
+assert.match(studioSource, /aria-label=\{labelTextFor\("다음 대상"\)\}/, "Studio 다음 대상 select는 접근성 라벨을 가져야 합니다.");
+
+const displayTextSourceForWorkflow = readText("apps/web/src/client/pages/projects/projectDisplayText.ts");
+assert.doesNotMatch(displayTextSourceForWorkflow, /displayLabel: "제작 준비 중"/, "workflow display helper는 완료된 제작 단계를 무조건 준비 중으로 바꾸면 안 됩니다.");
+
+const settingsSource = readText("apps/web/src/client/pages/SettingsStartPage.tsx");
+const settingsDefaultSurface = blockBetween(
+  settingsSource,
+  /<PageHeader/,
+  /<DiagnosticDrawer summary="연결 세부 정보">/
+);
+[
+  /Alpha/,
+  />mode</,
+  /<dt>fallback<\/dt>/,
+  /raw 진단/,
+  /device flow 로그인/
+].forEach((pattern) => {
+  assert.doesNotMatch(settingsDefaultSurface, pattern, `설정 기본 화면에 내부 구현 표현이 남아 있습니다: ${pattern}`);
+});
+
+const heroineSurface = [
+  "apps/web/src/client/pages/heroines/HeroineListPage.tsx",
+  "apps/web/src/client/pages/heroines/HeroineDetailPage.tsx",
+  "apps/web/src/client/pages/heroines/HeroineCreatePage.tsx",
+  "apps/web/src/client/pages/heroines/HeroineEditPage.tsx"
+].map((path) => readText(path)).join("\n");
+[
+  />Heroines</,
+  />Heroine Detail</,
+  /eyebrow="Library Source"/,
+  /eyebrow="New Heroine"/,
+  /eyebrow="Edit Heroine"/
+].forEach((pattern) => {
+  assert.doesNotMatch(heroineSurface, pattern, `히로인 기본 화면에 영문 eyebrow가 남아 있습니다: ${pattern}`);
+});
+
+const notFoundSource = readText("apps/web/src/client/pages/NotFoundPage.tsx");
+assert.doesNotMatch(notFoundSource, /Protected/i, "404 화면은 보호 화면처럼 보이는 영문 eyebrow를 쓰면 안 됩니다.");
+assert.match(notFoundSource, /프로젝트 관리로 이동/, "404 화면은 프로젝트 작업 맥락으로 복귀할 수 있어야 합니다.");

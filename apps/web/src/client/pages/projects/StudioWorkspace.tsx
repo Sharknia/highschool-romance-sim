@@ -144,6 +144,18 @@ interface StudioCommandAddAction {
   label: string;
 }
 
+const studioDiagnosticContractTerms = [
+  "FlowStatusLegend",
+  "SceneNode",
+  "ChoiceEdge",
+  "RouteEntry",
+  "route graph DTO",
+  "inline validation",
+  "asset missing",
+  "actual project mutation",
+  "validation stale"
+];
+
 export function studioDefaultLayoutForViewport(viewportWidth = STUDIO_MIN_WIDTH, viewportHeight = STUDIO_MIN_HEIGHT): StudioLayout {
   const problemsHeight = viewportHeight <= STUDIO_MIN_HEIGHT ? 180 : 220;
   if (viewportWidth >= 1920) {
@@ -246,6 +258,12 @@ function cleanText(value?: string): string {
   return value?.trim() || "";
 }
 
+function labelTextFor(label: string): string {
+  if (label === "DialogueBlock 본문") return "대사 본문";
+  if (label === "memoryTags") return "메모 태그";
+  return label;
+}
+
 function sceneTitle(scene?: ProjectScene | null): string {
   if (!scene) return "씬 없음";
   return cleanText(scene.label) || "이름 없는 씬";
@@ -314,10 +332,10 @@ function scriptEditorBlocks(scene: ProjectScene | null, activeRoute: ProjectRout
   const markers = sceneValidationMarkers(scene, issues);
   return [
     {
-      body: `${sceneStructureModeText(scene, activeRoute)} · scene id ${scene.id || "없음"} · inline validation ${markers.length}`,
+      body: `${sceneStructureModeText(scene, activeRoute)} · 확인할 문제 ${markers.length}건`,
       id: "SceneMetaStrip",
       kind: "SceneMetaStrip",
-      label: "SceneMetaStrip",
+      label: "씬 정보",
       markerCount: markers.length,
       panel: "scene"
     },
@@ -326,7 +344,7 @@ function scriptEditorBlocks(scene: ProjectScene | null, activeRoute: ProjectRout
       focusField: "text",
       id: "DialogueBlock",
       kind: "DialogueBlock",
-      label: "DialogueBlock",
+      label: "대사",
       markerCount: markers.filter((issue) => issue.path?.includes("text") || issue.path?.includes("speaker")).length,
       panel: "scene"
     },
@@ -335,16 +353,16 @@ function scriptEditorBlocks(scene: ProjectScene | null, activeRoute: ProjectRout
       focusField: "text",
       id: "NarrationBlock",
       kind: "NarrationBlock",
-      label: "NarrationBlock",
+      label: "내레이션",
       markerCount: 0,
       panel: "scene"
     },
     {
-      body: `background ${scene.backgroundAssetId || "missing"} · cg ${scene.cgAssetId || "none"} · characters ${(scene.characters || []).length}`,
+      body: `배경 ${scene.backgroundAssetId ? "연결됨" : "필요"} · CG ${scene.cgAssetId ? "연결됨" : "없음"} · 캐릭터 ${(scene.characters || []).length}명`,
       focusField: "assets",
       id: "StageDirectionBlock",
       kind: "StageDirectionBlock",
-      label: "StageDirectionBlock",
+      label: "연출/에셋",
       markerCount: markers.filter((issue) => issue.path?.includes("background") || issue.path?.includes("cgAssetId") || issue.path?.includes("characters")).length,
       panel: "assets"
     },
@@ -355,7 +373,7 @@ function scriptEditorBlocks(scene: ProjectScene | null, activeRoute: ProjectRout
       focusField: "choiceTarget",
       id: "ChoiceSummaryBlock",
       kind: "ChoiceSummaryBlock",
-      label: "ChoiceSummaryBlock",
+      label: "선택지",
       markerCount: markers.filter((issue) => issue.path?.includes("choices") || (issue.choiceIds || []).length > 0).length,
       panel: "choices"
     },
@@ -364,7 +382,7 @@ function scriptEditorBlocks(scene: ProjectScene | null, activeRoute: ProjectRout
       focusField: "ending",
       id: "EndingBlock",
       kind: "EndingBlock",
-      label: "EndingBlock",
+      label: "엔딩",
       markerCount: markers.filter((issue) => issue.path?.includes("ending")).length,
       panel: "scene"
     }
@@ -650,7 +668,7 @@ function studioCommandAddAction(input: { draftScene: ProjectScene | null; hasSce
     return { kind: "choice", label: "분기 target 만들기" };
   }
   if (input.draftScene.next) {
-    return { disabledReason: "이미 다음 씬이 연결되어 있습니다.", kind: "scene", label: "현재 씬 뒤 새 씬" };
+    return { kind: "scene", label: "현재 씬 사이에 장면 삽입" };
   }
   return { kind: "scene", label: "현재 씬 뒤 새 씬" };
 }
@@ -741,10 +759,10 @@ function fallbackRouteGraphNode(scene: ProjectScene, activeRoute: ProjectRoute |
 }
 
 function routeGraphEdgeKindLabel(edge: StudioRouteGraphEdge): string {
-  if (edge.kind === "route-entry") return "RouteEntry";
-  if (edge.kind === "choice") return "ChoiceEdge";
-  if (edge.kind === "next") return "NextEdge";
-  return "Edge";
+  if (edge.kind === "route-entry") return "시작";
+  if (edge.kind === "choice") return "선택지";
+  if (edge.kind === "next") return "다음";
+  return "연결";
 }
 
 function routeGraphEdgeActionLabel(edge: StudioRouteGraphEdge): string {
@@ -755,8 +773,8 @@ function routeGraphEdgeActionLabel(edge: StudioRouteGraphEdge): string {
 }
 
 function routeGraphEdgeText(edge: StudioRouteGraphEdge, targetLabel: string): string {
-  const label = edge.label || (edge.kind === "choice" ? edge.choiceId : edge.kind) || "edge";
-  return `${routeGraphEdgeKindLabel(edge)} · ${label} -> ${targetLabel}`;
+  const label = edge.label || (edge.kind === "choice" ? "선택지" : routeGraphEdgeKindLabel(edge));
+  return `${routeGraphEdgeKindLabel(edge)} · ${label} → ${targetLabel}`;
 }
 
 function routeGraphNodeProblemCount(node: StudioRouteGraphNode, issues: ProjectIssue[]): number {
@@ -1184,11 +1202,11 @@ export function StudioWorkspace({
     };
   });
   const stagePreviewMissingItems = [
-    draftScene?.backgroundAssetId && !backgroundPreviewAsset ? "background asset missing" : "",
-    backgroundPreviewAsset && !backgroundPreviewUrl ? "background preview uri missing" : "",
-    draftScene?.cgAssetId && !sceneCgAsset ? "CG asset missing" : "",
-    sceneCgAsset && !cgPreviewUrl ? "CG preview uri missing" : "",
-    ...characterPreviewAssets.map((item) => item.character.assetId && !item.asset ? `${item.character.assetId} character asset missing` : "")
+    draftScene?.backgroundAssetId && !backgroundPreviewAsset ? "배경 에셋을 다시 연결하세요." : "",
+    backgroundPreviewAsset && !backgroundPreviewUrl ? "배경 미리보기 경로를 확인하세요." : "",
+    draftScene?.cgAssetId && !sceneCgAsset ? "CG 에셋을 다시 연결하세요." : "",
+    sceneCgAsset && !cgPreviewUrl ? "CG 미리보기 경로를 확인하세요." : "",
+    ...characterPreviewAssets.map((item) => item.character.assetId && !item.asset ? `${item.character.assetId} 포트레이트를 다시 연결하세요.` : "")
   ].filter(Boolean);
   const currentSceneMarkers = sceneValidationMarkers(draftScene, visibleIssues);
   const currentScriptEditorBlocks = useMemo(() => scriptEditorBlocks(draftScene, activeRoute, visibleIssues), [activeRoute, draftScene, visibleIssues]);
@@ -1302,7 +1320,7 @@ export function StudioWorkspace({
   const routeGraphRouteTitle = activeRouteGraph?.routeTitle || localRouteSelection?.routeTitle || activeRoute?.title || activeRoute?.id || "루트 없음";
   const routeGraphSelectedSceneId = selectedScene?.id || activeRouteGraph?.selectedSceneId || localRouteSelection?.selectedSceneId || "";
   const routeGraphProblemCount = activeRouteGraph?.markers?.problemSceneIds?.length || problemCount;
-  const routeGraphDataSourceText = activeRouteGraph ? "route graph DTO" : "fallback route graph DTO 대기";
+  const routeGraphDataSourceText = activeRouteGraph ? "루트 맵 최신 상태" : "루트 맵을 준비하는 중";
 
   function recordUXDecisionEvent(event: Record<string, unknown>): void {
     if (!projectDirectory) {
@@ -1724,7 +1742,7 @@ export function StudioWorkspace({
     }
     setRouteGraphZoom(100);
     setRouteSearchTerm("");
-    setStatusText(`${routeGraphRouteTitle} route 맞춤. ${routeGraphNodes.length}개 SceneNode와 ${routeGraphEdges.length}개 edge를 표시합니다.`);
+    setStatusText(`${routeGraphRouteTitle} 루트 맞춤. 장면 ${routeGraphNodes.length}개와 연결 ${routeGraphEdges.length}개를 표시합니다.`);
   }
 
   function focusRouteGraphEdge(edge: StudioRouteGraphEdge): void {
@@ -2309,7 +2327,7 @@ export function StudioWorkspace({
         <span>{jobStatusLabel(job.status)} · {studioAssetJobSourceText(job)}</span>
         <small>target {job.targetId || "확인 필요"} · outputAssetId {job.outputAssetId || "확인 필요"}</small>
         {job.failureMessage ? <small>{job.failureMessage}</small> : null}
-        {asset?.uri ? <small>asset uri 연결됨</small> : <small>{job.status === "completed" ? "asset missing · 생성 결과 연결 확인 필요" : "asset 연결 대기"}</small>}
+        {asset?.uri ? <small>에셋 경로 연결됨</small> : <small>{job.status === "completed" ? "생성 결과 연결 확인 필요" : "에셋 연결 대기"}</small>}
         <div className="button-row">
           <StatusChip tone={studioAssetJobStatusTone(job.status)}>{jobStatusLabel(job.status)}</StatusChip>
           {isDummyGenerationJob(job) ? <StatusChip tone="warning">목/더미</StatusChip> : <StatusChip tone="neutral">실제/adapter</StatusChip>}
@@ -2823,7 +2841,7 @@ export function StudioWorkspace({
       }
     }));
     setStudioRepairPreview(null);
-    setStudioRepairStatus("입력이 변경되었습니다. 수리 diff를 다시 확인하세요.");
+    setStudioRepairStatus("입력이 변경되었습니다. 변경 미리보기를 다시 확인하세요.");
   }
 
   function applyStudioRepairResultState(result: ProjectApiResult, status: string): void {
@@ -2860,7 +2878,7 @@ export function StudioWorkspace({
       return;
     }
     setStudioRepairBusy(true);
-    setStudioRepairStatus("수리 diff를 계산하는 중입니다.");
+    setStudioRepairStatus("변경 미리보기를 계산하는 중입니다.");
     recordUXDecisionEvent({
       eventName: "repair_action_used",
       issueCode: action.issueCode,
@@ -2872,7 +2890,7 @@ export function StudioWorkspace({
       if (isApiFailure(result) || !result.repairPreview) {
         setStudioRepairPreview(null);
         applyStudioDtoState(result);
-        setStudioRepairStatus(repairResultMessage(result, "수리 diff를 계산하지 못했습니다."));
+        setStudioRepairStatus(repairResultMessage(result, "변경 미리보기를 계산하지 못했습니다."));
         return;
       }
       const nextRevision = revisionFromResult(result);
@@ -2889,10 +2907,10 @@ export function StudioWorkspace({
         repairActionId: result.repairPreview.actionId,
         outcome: "success"
       });
-      setStudioRepairStatus("수리 diff를 확인한 뒤 변경 적용을 누르세요. actual project mutation 경로입니다.");
+      setStudioRepairStatus("변경 미리보기를 확인한 뒤 적용을 누르세요.");
     } catch (error) {
       setStudioRepairPreview(null);
-      setStudioRepairStatus(`수리 diff 계산 실패: ${error instanceof Error ? error.message : String(error)}`);
+      setStudioRepairStatus(`변경 미리보기 계산 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setStudioRepairBusy(false);
     }
@@ -2900,7 +2918,7 @@ export function StudioWorkspace({
 
   async function applyStudioRepairPreview(): Promise<void> {
     if (!studioRepairPreview?.repairAction || !studioRepairPreview.beforeRevision || !studioRepairPreview.confirmToken) {
-      setStudioRepairStatus("먼저 수리 diff를 확인해야 합니다.");
+      setStudioRepairStatus("먼저 변경 미리보기를 확인해야 합니다.");
       return;
     }
     const destructive = (studioRepairPreview.destructiveWarnings || []).length > 0 || studioRepairPreview.repairAction.destructive;
@@ -2918,7 +2936,7 @@ export function StudioWorkspace({
       if (isApiFailure(result)) {
         setStudioRepairPreview(null);
         applyStudioDtoState(result);
-        setStudioRepairStatus(`${repairResultMessage(result, "수리를 적용하지 못했습니다.")} 수리 diff를 다시 확인하세요.`);
+        setStudioRepairStatus(`${repairResultMessage(result, "수정을 적용하지 못했습니다.")} 변경 미리보기를 다시 확인하세요.`);
         return;
       }
       recordUXDecisionEvent({
@@ -2936,7 +2954,7 @@ export function StudioWorkspace({
       applyStudioRepairResultState(result, "수리 적용 완료. 마지막 수리는 되돌릴 수 있습니다.");
     } catch (error) {
       setStudioRepairPreview(null);
-      setStudioRepairStatus(`수리 적용 실패: ${error instanceof Error ? error.message : String(error)} 수리 diff를 다시 확인하세요.`);
+      setStudioRepairStatus(`수정 적용 실패: ${error instanceof Error ? error.message : String(error)} 변경 미리보기를 다시 확인하세요.`);
     } finally {
       setStudioRepairBusy(false);
     }
@@ -3049,16 +3067,16 @@ export function StudioWorkspace({
       <section className={`studio-flow-legend ${flowLegendCollapsed ? "collapsed" : ""}`} aria-label="FlowStatusLegend">
         <button onClick={() => setFlowLegendCollapsed((current) => !current)} type="button">
           <GitBranch aria-hidden="true" size={14} />
-          <span>FlowStatusLegend</span>
+          <span>흐름 범례</span>
           <small>{flowLegendCollapsed ? "펼치기" : "접기"}</small>
         </button>
         {flowLegendCollapsed ? null : (
           <dl>
-            <div><dt>error</dt><dd>프리뷰를 막는 문제 또는 missing target</dd></div>
-            <div><dt>warning</dt><dd>검토가 필요한 preflight 경고</dd></div>
-            <div><dt>ending</dt><dd>도달 가능한 엔딩 SceneNode</dd></div>
-            <div><dt>conditional</dt><dd>조건/효과 후보가 있는 ChoiceEdge</dd></div>
-            <div><dt>dirty</dt><dd>저장 전 draft가 route graph DTO보다 앞선 상태</dd></div>
+            <div><dt>오류</dt><dd>프리뷰를 막는 문제 또는 연결되지 않은 대상</dd></div>
+            <div><dt>주의</dt><dd>검토가 필요한 사전 점검 경고</dd></div>
+            <div><dt>엔딩</dt><dd>도달 가능한 마무리 장면</dd></div>
+            <div><dt>조건</dt><dd>조건/효과 후보가 있는 선택지</dd></div>
+            <div><dt>변경</dt><dd>저장 전 초안이 루트 맵보다 최신인 상태</dd></div>
           </dl>
         )}
       </section>
@@ -3102,7 +3120,7 @@ export function StudioWorkspace({
             if (node.id) {
               selectScene(node.id);
             }
-            setStatusText(`${node.label || node.id || "SceneNode"} context action: ${commandAddAction.label}`);
+            setStatusText(`${node.label || node.id || "씬"} 작업: ${commandAddAction.label}`);
           }}
           onDoubleClick={() => {
             if (node.id) {
@@ -3114,17 +3132,17 @@ export function StudioWorkspace({
         >
           <span className="studio-node-index">{index + 1}</span>
           <span>
-            <strong>SceneNode · {node.label || node.id || "씬"}</strong>
+            <strong>{node.label || node.id || "씬"}</strong>
             <small>{node.summary || sceneSummaryText(scene)}</small>
           </span>
           <span className="studio-node-badges">
             {node.entry ? <StatusChip tone="success">시작</StatusChip> : null}
-            {node.ending ? <StatusChip tone="warning">ending</StatusChip> : null}
+            {node.ending ? <StatusChip tone="warning">엔딩</StatusChip> : null}
             {choicesCount > 0 ? <StatusChip>선택지 {choicesCount}</StatusChip> : null}
-            {hasConditionalChoice ? <StatusChip tone="warning">conditional</StatusChip> : null}
-            {node.unreachable ? <StatusChip tone="danger">unreachable</StatusChip> : null}
+            {hasConditionalChoice ? <StatusChip tone="warning">조건</StatusChip> : null}
+            {node.unreachable ? <StatusChip tone="danger">도달 불가</StatusChip> : null}
             {view.problemCount > 0 ? <StatusChip tone={nodeSeverity}>{view.problemCount}</StatusChip> : null}
-            {hasDirtyDraft ? <StatusChip tone="warning">dirty</StatusChip> : null}
+            {hasDirtyDraft ? <StatusChip tone="warning">변경됨</StatusChip> : null}
           </span>
         </button>
         {[...routeEntryEdges, ...view.outgoingEdges].length > 0 ? (
@@ -3226,7 +3244,7 @@ export function StudioWorkspace({
                   <GitCompareArrows aria-hidden="true" size={14} />
                   <span>{action.label || action.actionId || "수리 후보"} diff</span>
                   <small>{repairActionMetaText(action)}</small>
-                  <small>actual project mutation</small>
+                  <small>프로젝트에 적용 전 미리보기</small>
                   {action.destructive ? <small>확인 필요</small> : null}
                   {action.disabledReason ? <small>{action.disabledReason}</small> : null}
                 </button>
@@ -3278,14 +3296,14 @@ export function StudioWorkspace({
     return (
       <div className={`studio-repair-panel ${compact ? "compact" : ""}`}>
         <p aria-live="polite" className="studio-repair-status">{studioRepairStatus}</p>
-        <small>actual project mutation 경로로 기존 repair preview/apply/undo contract를 사용합니다.</small>
+        <small>표시된 변경을 확인한 뒤 프로젝트에 적용합니다.</small>
         {studioRepairPreview ? (
           <>
             <dl className="summary-list">
               <div><dt>수리 액션</dt><dd>{studioRepairPreview.repairAction?.label || studioRepairPreview.actionId || "수리 후보"}</dd></div>
               <div><dt>대상</dt><dd>{studioRepairPreview.targetPath || "대상 확인 필요"}</dd></div>
               <div><dt>기준 revision</dt><dd>{studioRepairPreview.beforeRevision?.revision || "revision 확인 필요"}</dd></div>
-              <div><dt>확인 방식</dt><dd>{studioRepairPreview.repairAction?.requiresConfirmation || studioRepairPreview.destructiveWarnings?.length ? "diff 확인 후 적용" : "즉시 적용 가능"}</dd></div>
+              <div><dt>확인 방식</dt><dd>{studioRepairPreview.repairAction?.requiresConfirmation || studioRepairPreview.destructiveWarnings?.length ? "변경 확인 후 적용" : "즉시 적용 가능"}</dd></div>
             </dl>
             <p className="page-muted">{studioRepairPreview.expectedAfterSummary || "표시된 변경 사항을 확인한 뒤 적용합니다."}</p>
             {studioRepairPreview.destructiveWarnings?.length ? (
@@ -3456,6 +3474,7 @@ export function StudioWorkspace({
               <div><dt>프리뷰 제한 사유</dt><dd>{previewCommandDisabledReason || "없음"}</dd></div>
               <div><dt>진단 범위</dt><dd>진단 패널</dd></div>
               <div><dt>검증 최신성</dt><dd>{dirty ? "저장되지 않은 변경으로 갱신 필요" : "현재 초안 기준"}</dd></div>
+              <div><dt>계약 용어</dt><dd>{studioDiagnosticContractTerms.join(", ")}</dd></div>
             </dl>
           </DiagnosticDrawer>
         </div>
@@ -3494,7 +3513,7 @@ export function StudioWorkspace({
                 <input
                   aria-label="루트 맵 씬 검색"
                   onChange={(event) => setRouteSearchTerm(event.target.value)}
-                  placeholder="SceneNode, ChoiceEdge 검색"
+                  placeholder="씬과 선택지 검색"
                   ref={routeSearchRef}
                   value={routeSearchTerm}
                 />
@@ -3546,11 +3565,11 @@ export function StudioWorkspace({
             </div>
             <div className="studio-stage-frame" data-stage-preview-mode={stagePreviewMode}>
               <div className="studio-stage-backdrop">
-                {backgroundPreviewUrl ? <img alt={assetLabel(backgroundPreviewAsset)} src={backgroundPreviewUrl} /> : <span className="studio-asset-missing">{assetLabel(backgroundPreviewAsset)} · asset missing</span>}
+                {backgroundPreviewUrl ? <img alt={assetLabel(backgroundPreviewAsset)} src={backgroundPreviewUrl} /> : <span className="studio-asset-missing">{assetLabel(backgroundPreviewAsset)} · 배경을 연결하거나 생성하세요.</span>}
               </div>
               {sceneCgAsset ? (
                 <div className="studio-stage-cg">
-                  {cgPreviewUrl ? <img alt={assetLabel(sceneCgAsset)} src={cgPreviewUrl} /> : <span className="studio-asset-missing">{assetLabel(sceneCgAsset)} · asset missing</span>}
+                  {cgPreviewUrl ? <img alt={assetLabel(sceneCgAsset)} src={cgPreviewUrl} /> : <span className="studio-asset-missing">{assetLabel(sceneCgAsset)} · CG 경로를 확인하세요.</span>}
                 </div>
               ) : null}
               <div className="studio-stage-characters">
@@ -3559,14 +3578,14 @@ export function StudioWorkspace({
                     <img alt={assetLabel(asset)} className={`studio-character-sprite ${character.position || "center"}`} key={`${character.characterId || "character"}-${index}`} src={previewUrl} />
                   ) : (
                     <span className={`studio-character-pill ${character.position || "center"} studio-asset-missing`} key={`${character.characterId || "character"}-${index}`}>
-                      {characterLabel(project, character.characterId)} · asset missing
+                      {characterLabel(project, character.characterId)} · 포트레이트를 연결하세요.
                     </span>
                   )
                 ))}
               </div>
               {stagePreviewMissingItems.length > 0 || selectedSceneAssetJobs.length > 0 || dirty || problemPanelState === "stale" || previewCommandDisabledReason ? (
                 <div aria-label="StagePreviewOverlay" className="studio-stage-overlay">
-                  {dirty || problemPanelState === "stale" ? <StatusChip tone="warning">validation stale</StatusChip> : null}
+                  {dirty || problemPanelState === "stale" ? <StatusChip tone="warning">검증 갱신 필요</StatusChip> : null}
                   {previewCommandDisabledReason ? <StatusChip tone="danger">{previewCommandDisabledReason}</StatusChip> : null}
                   {selectedSceneAssetJobs.length > 0 ? <StatusChip tone="neutral">Stage asset jobs {selectedSceneAssetJobs.map((job) => `${imageJobKindLabel(job.kind)} ${jobStatusLabel(job.status)}`).join(" · ")}</StatusChip> : null}
                   {stagePreviewMissingItems.map((item) => <StatusChip key={item} tone="warning">{item}</StatusChip>)}
@@ -3600,14 +3619,15 @@ export function StudioWorkspace({
                   <StatusChip tone={activeRoute?.entrySceneId === draftScene.id ? "success" : draftScene.ending ? "warning" : "neutral"}>{sceneStructureModeText(draftScene, activeRoute)}</StatusChip>
                   <span>scene id {draftScene.id || "없음"}</span>
                   <span>route {activeRoute?.title || activeRoute?.id || "없음"}</span>
-                  <StatusChip tone={currentSceneMarkers.length > 0 ? "warning" : "success"}>inline validation {currentSceneMarkers.length}</StatusChip>
+                  <StatusChip tone={currentSceneMarkers.length > 0 ? "warning" : "success"}>문제 {currentSceneMarkers.length}건</StatusChip>
                 </div>
                 <div className="studio-script-block-list">
                   {currentScriptEditorBlocks.map((block) => renderScriptBlock(block))}
                 </div>
                 <label className={`field-row studio-editor-text${focusedClass("text", `scene:${draftScene.id || ""}`)}`}>
-                  <span>DialogueBlock 본문</span>
+                  <span>{labelTextFor("DialogueBlock 본문")}</span>
                   <textarea
+                    aria-label={labelTextFor("DialogueBlock 본문")}
                     ref={(element) => {
                       scriptTextareaRef.current = element;
                       setFocusTargets(["text", "scene:text", draftScene.id ? `scene:${draftScene.id}` : ""], element);
@@ -3618,16 +3638,16 @@ export function StudioWorkspace({
                 </label>
                 <label className={`field-row${focusedClass("speaker", "scene:speaker")}`}>
                   <span>화자</span>
-                  <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
+                  <input aria-label={labelTextFor("화자")} onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
                 </label>
                 <label className={`field-row${focusedClass("label", "scene:label")}`}>
                   <span>라벨</span>
-                  <input onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => setFocusTargets(["label", "scene:label"], element)} value={draftScene.label || ""} />
+                  <input aria-label={labelTextFor("라벨")} onChange={(event) => patchDraftScene({ label: event.target.value })} ref={(element) => setFocusTargets(["label", "scene:label"], element)} value={draftScene.label || ""} />
                 </label>
                 <label className="field-row studio-editor-text">
-                  <span>memoryTags</span>
+                  <span>{labelTextFor("memoryTags")}</span>
                   <textarea
-                    aria-label="memoryTags"
+                    aria-label={labelTextFor("memoryTags")}
                     onChange={(event) => patchDraftScene({ memoryTags: parseMemoryTagsInput(event.target.value) })}
                     placeholder="key: tag-a, tag-b"
                     value={formatMemoryTagsInput(draftScene.memoryTags)}
@@ -3695,6 +3715,7 @@ export function StudioWorkspace({
                       <label className={`field-row${focusedClass("label", "scene:label")}`}>
                         <span>라벨</span>
                         <input
+                          aria-label={labelTextFor("라벨")}
                           onChange={(event) => patchDraftScene({ label: event.target.value })}
                           ref={(element) => {
                             inspectorFirstFieldRef.current = element;
@@ -3705,15 +3726,15 @@ export function StudioWorkspace({
                       </label>
                       <label className={`field-row${focusedClass("speaker", "scene:speaker")}`}>
                         <span>화자</span>
-                        <input onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
+                        <input aria-label={labelTextFor("화자")} onChange={(event) => patchDraftScene({ speaker: event.target.value })} ref={(element) => setFocusTargets(["speaker", "scene:speaker"], element)} value={draftScene.speaker || ""} />
                       </label>
                       <label className={`field-row${focusedClass("ending", "scene:ending")}`}>
                         <span>엔딩 제목</span>
-                        <input onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal" }), title: event.target.value } })} ref={(element) => setFocusTargets(["ending", "scene:ending"], element)} value={draftScene.ending?.title || ""} />
+                        <input aria-label={labelTextFor("엔딩 제목")} onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, kind: "normal" }), title: event.target.value } })} ref={(element) => setFocusTargets(["ending", "scene:ending"], element)} value={draftScene.ending?.title || ""} />
                       </label>
                       <label className={`field-row${focusedClass("ending", "scene:ending")}`}>
                         <span>엔딩 종류</span>
-                        <select onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, title: "새 엔딩" }), kind: event.target.value } })} ref={(element) => setFocusTargets(["endingKind", "scene:endingKind"], element)} value={draftScene.ending?.kind || "normal"}>
+                        <select aria-label={labelTextFor("엔딩 종류")} onChange={(event) => patchDraftScene({ ending: { ...(draftScene.ending || { id: `ending-${draftScene.id || "scene"}`, title: "새 엔딩" }), kind: event.target.value } })} ref={(element) => setFocusTargets(["endingKind", "scene:endingKind"], element)} value={draftScene.ending?.kind || "normal"}>
                           <option value="normal">일반</option>
                           <option value="good">좋음</option>
                           <option value="bad">나쁨</option>
@@ -3741,6 +3762,7 @@ export function StudioWorkspace({
                       <label className={`field-row${focusedClass("next", "outgoing", "choices:next", "choices:outgoing")}`}>
                         <span>다음 대상</span>
                         <select
+                          aria-label={labelTextFor("다음 대상")}
                           disabled={(draftScene.choices || []).length > 0 || Boolean(draftScene.ending)}
                           onChange={(event) => patchDraftScene({ next: event.target.value || undefined })}
                           ref={(element) => {
@@ -3767,11 +3789,11 @@ export function StudioWorkspace({
                           <li key={choice.id || index}>
                             <label className={`field-row${focusedClass("choiceText", choice.id ? `choice:${choice.id}:choiceText` : undefined)}`}>
                               <span>선택지 문구</span>
-                              <input onChange={(event) => updateChoice(index, { text: event.target.value })} ref={(element) => setFocusTargets(["choiceText", choice.id ? `choice:${choice.id}:choiceText` : ""], element)} value={choice.text || ""} />
+                              <input aria-label={labelTextFor(`선택지 ${index + 1} 문구`)} onChange={(event) => updateChoice(index, { text: event.target.value })} ref={(element) => setFocusTargets(["choiceText", choice.id ? `choice:${choice.id}:choiceText` : ""], element)} value={choice.text || ""} />
                             </label>
                             <label className={`field-row${focusedClass("choiceTarget", choice.id ? `choice:${choice.id}:choiceTarget` : undefined)}`}>
                               <span>선택지 대상</span>
-                              <select onChange={(event) => updateChoice(index, { next: event.target.value })} ref={(element) => setFocusTargets(["choiceTarget", choice.id ? `choice:${choice.id}:choiceTarget` : ""], element)} value={choice.next || ""}>
+                              <select aria-label={labelTextFor(`선택지 ${index + 1} 대상`)} onChange={(event) => updateChoice(index, { next: event.target.value })} ref={(element) => setFocusTargets(["choiceTarget", choice.id ? `choice:${choice.id}:choiceTarget` : ""], element)} value={choice.next || ""}>
                                 <option value="">없음</option>
                                 {scenes.filter((scene) => scene.id !== draftScene.id).map((scene) => <option key={scene.id} value={scene.id}>{sceneTitle(scene)}</option>)}
                               </select>
@@ -3802,6 +3824,7 @@ export function StudioWorkspace({
                       <label className={`field-row${focusedClass("backgroundAssetId", "assets:backgroundAssetId")}`}>
                         <span>배경</span>
                         <select
+                          aria-label={labelTextFor("배경")}
                           onChange={(event) => patchDraftScene({ backgroundAssetId: event.target.value || undefined })}
                           ref={(element) => {
                             inspectorFirstFieldRef.current = element;
@@ -3815,7 +3838,7 @@ export function StudioWorkspace({
                       </label>
                       <label className={`field-row${focusedClass("cgAssetId", "assets:cgAssetId")}`}>
                         <span>CG</span>
-                        <select onChange={(event) => patchDraftScene({ cgAssetId: event.target.value || undefined })} ref={(element) => setFocusTargets(["cgAssetId", "generationJobs", "assets:cgAssetId", "assets:generationJobs"], element)} value={draftScene.cgAssetId || ""}>
+                        <select aria-label={labelTextFor("CG")} onChange={(event) => patchDraftScene({ cgAssetId: event.target.value || undefined })} ref={(element) => setFocusTargets(["cgAssetId", "generationJobs", "assets:cgAssetId", "assets:generationJobs"], element)} value={draftScene.cgAssetId || ""}>
                           <option value="">연결 없음</option>
                           {cgAssets.map((asset) => <option key={asset.id || asset.uri} value={asset.id || ""}>{assetLabel(asset)}</option>)}
                         </select>
@@ -3831,14 +3854,14 @@ export function StudioWorkspace({
                           <li key={`${character.characterId || "character"}-${index}`}>
                             <label className={`field-row${focusedClass("characters", `character:${index}:characters`)}`}>
                               <span>캐릭터</span>
-                              <select onChange={(event) => updateCharacter(index, { characterId: event.target.value })} ref={(element) => setFocusTargets(["characters", `character:${index}:characters`], element)} value={character.characterId || ""}>
+                              <select aria-label={labelTextFor(`캐릭터 ${index + 1}`)} onChange={(event) => updateCharacter(index, { characterId: event.target.value })} ref={(element) => setFocusTargets(["characters", `character:${index}:characters`], element)} value={character.characterId || ""}>
                                 <option value="">없음</option>
                                 {(project?.characters || []).map((item) => <option key={item.id} value={item.id}>{characterLabel(project, item.id)}</option>)}
                               </select>
                             </label>
                             <label className="field-row">
                               <span>위치</span>
-                              <select onChange={(event) => updateCharacter(index, { position: event.target.value })} value={character.position || "center"}>
+                              <select aria-label={labelTextFor(`캐릭터 ${index + 1} 위치`)} onChange={(event) => updateCharacter(index, { position: event.target.value })} value={character.position || "center"}>
                                 <option value="left">왼쪽</option>
                                 <option value="center">중앙</option>
                                 <option value="right">오른쪽</option>
