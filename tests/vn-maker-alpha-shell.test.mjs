@@ -1422,6 +1422,8 @@ try {
   assert.equal(capturedProjectRequest.body.projectId, "sakura-01");
   assert.equal(capturedProjectRequest.body.projectDirectory, "workspace/sakura-01.vnmaker");
   assert.equal(capturedProjectRequest.body.heroineId, "sakura_01");
+  assert.equal(capturedProjectRequest.body.title, "사쿠라 프로젝트");
+  assert.equal(capturedProjectRequest.body.premise, "사쿠라의 원본 히로인 스냅샷으로 시작하는 제작 프로젝트");
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }
