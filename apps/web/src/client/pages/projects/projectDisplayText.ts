@@ -12,7 +12,16 @@ export type DisplayWorkflowStep = WorkflowStep & {
 
 export function displayWorkflowStep(step: WorkflowStep): DisplayWorkflowStep {
   if (step.id === "studio") {
-    return { ...step, displayLabel: "제작 준비 중", displayState: "waiting" };
+    if (step.state === "done") {
+      return { ...step, displayLabel: "스토리 제작 완료", displayState: "done" };
+    }
+    if (step.state === "current") {
+      return { ...step, displayLabel: "스토리 제작 진행", displayState: "current" };
+    }
+    if (step.state === "blocked") {
+      return { ...step, displayLabel: "스토리 제작 차단", displayState: "blocked" };
+    }
+    return { ...step, displayLabel: "스토리 제작 대기", displayState: "waiting" };
   }
   return { ...step, displayLabel: step.label, displayState: step.state };
 }

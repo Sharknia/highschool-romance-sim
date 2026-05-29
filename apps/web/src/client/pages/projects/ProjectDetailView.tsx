@@ -135,7 +135,7 @@ function projectTabFromValue(value?: string): ProjectTabId {
   return detailTabs.some((tab) => tab.id === value) ? value as ProjectTabId : "overview";
 }
 
-function tabShellStatus(tab: ProjectTabId, summary: ProjectWorkflowSummary, project: ProjectData | null, hasBackgroundAsset: boolean): string {
+function tabShellStatus(tab: ProjectTabId, summary: ProjectWorkflowSummary, project: ProjectData | null, hasBackgroundAsset: boolean, localExportState: ExportState, localExportPlan: ProjectExportPlan): string {
   if (tab === "overview") {
     return summary.blockingIssues?.length ? "확인 필요" : "정상";
   }
@@ -149,10 +149,17 @@ function tabShellStatus(tab: ProjectTabId, summary: ProjectWorkflowSummary, proj
     return stateLabel(summary.previewState);
   }
   if (tab === "export") {
+    if (localExportState === "failed" || localExportState === "blocked" || localExportState === "completed" || localExportState === "running") {
+      return exportStateLabel(localExportState);
+    }
+    if (localExportPlan.state === "failed") {
+      return "실패";
+    }
     return stateLabel(summary.exportState);
   }
   if (tab === "studio") {
-    return "준비 중";
+    const step = summary.steps?.find((item) => item.id === "studio");
+    return workflowStepStateLabel(step?.state);
   }
   const step = summary.steps?.find((item) => item.id === tab);
   return workflowStepStateLabel(step?.state);
@@ -341,8 +348,9 @@ function previewPreflightCapabilityText(preflight: ProjectPreviewPreflight | nul
   const conditionRuntimeSupport = preflight.conditionRuntimeSupport || preflight.runtimeCapabilities?.conditionRuntimeSupport;
   if (conditionRuntimeSupport?.strictPreviewStatus === "not_evaluated") {
     const strictPreviewSuccess = conditionRuntimeSupport.strictPreviewSuccess === true;
-    const status = strictPreviewSuccess ? "strict success 포함" : "strict success 제외";
-    return `condition preview not evaluated · ${status}`;
+    return strictPreviewSuccess
+      ? "조건 미리보기가 참고 경고로 처리됩니다."
+      : "조건 미리보기는 아직 실행 판정에 포함하지 않습니다.";
   }
   const capabilities = preflight.runtimeCapabilities;
   if (capabilities?.choiceConditionFiltering && capabilities?.choiceEffects) {
@@ -446,6 +454,18 @@ function runtimeScene(runtime: ProjectRuntime | null, sceneId?: string): Project
   return runtime.scenes.find((scene) => scene.id === sceneId) || runtime.scenes.find((scene) => scene.id === runtime.startSceneId) || runtime.scenes[0] || null;
 }
 
+function runtimeAssetUri(asset?: ProjectAsset | null): string {
+  return asset?.uri || "";
+}
+
+function runtimeAssetName(asset?: ProjectAsset | null, fallback = "이미지"): string {
+  return asset?.label || asset?.id || fallback;
+}
+
+function runtimeCharacterKey(character: NonNullable<ProjectRuntimeScene["characters"]>[number], index: number): string {
+  return `${character.characterId || character.asset?.id || "character"}-${index}`;
+}
+
 export function ProjectDetailView({
   activeTab,
   currentProject: loadedProject,
@@ -463,6 +483,7 @@ export function ProjectDetailView({
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [heroines, setHeroines] = useState<HeroineDraft[]>([]);
+  const [heroineSourceProjectDirectory, setHeroineSourceProjectDirectory] = useState("");
   const [selectedHeroineId, setSelectedHeroineId] = useState("");
   const [heroineStatus, setHeroineStatus] = useState("히로인 라이브러리를 불러오는 중입니다.");
   const [busy, setBusy] = useState(false);
@@ -567,6 +588,7 @@ export function ProjectDetailView({
   const selectedRepairActionKey = repairPreview?.repairAction ? repairActionKey(repairPreview.repairAction) : "";
   const previewRunBlocked = currentPreviewReadiness.canRun !== true || currentPreviewPreflight?.canRun === false;
   const currentExportPlan = exportPlan || projectExportPlan || emptyExportPlan;
+  const exportRetryableFailure = exportState === "failed" && currentExportPlan.retryable === true;
   const dummyImageAssets = collectDummyImageAssets(currentProject, currentExportPlan, previewRuntime);
   const dummyImageJobs = imageJobs.filter(isDummyGenerationJob);
   const dummyFallbackTargets = buildDummyFallbackTargets(dummyImageJobs, dummyImageAssets);
@@ -584,7 +606,7 @@ export function ProjectDetailView({
       tab: projectTabFromValue(item.tab)
     }))
   ].filter((action, index, actions) => actions.findIndex((candidate) => candidate.tab === action.tab) === index);
-  const exportRunReady = Boolean(currentProject && currentExportPlan.canExport === true && exportState !== "blocked" && exportState !== "failed");
+  const exportRunReady = Boolean(currentProject && (currentExportPlan.canExport === true || exportRetryableFailure) && exportState !== "blocked");
 
   function recordUXDecisionEvent(event: Record<string, unknown>): void {
     if (!projectDirectory) {
@@ -662,6 +684,7 @@ export function ProjectDetailView({
       }
       const nextHeroines = Array.isArray(result.heroines) ? result.heroines : [];
       setHeroines(nextHeroines);
+      setHeroineSourceProjectDirectory(result.projectDirectory || "");
       setSelectedHeroineId(nextHeroines[0]?.id || "");
       setHeroineStatus(nextHeroines.length > 0 ? "프로젝트에 사용할 히로인을 선택하세요." : "히로인 라이브러리를 먼저 준비해야 합니다.");
     }).catch((error) => {
@@ -793,7 +816,8 @@ export function ProjectDetailView({
     try {
       const result = await postAuthedJson<ProjectApiResult>(`/api/projects/${detailProjectId}/heroine`, {
         projectDirectory,
-        heroine: selectedHeroine
+        heroineId: selectedHeroine.id,
+        sourceProjectDirectory: heroineSourceProjectDirectory || undefined
       });
       if (result.ok === false) {
         setHeroineStatus(result.message || result.error || "히로인 스냅샷을 배정하지 못했습니다.");
@@ -1167,6 +1191,21 @@ export function ProjectDetailView({
     return validationIssues(result).map(issueText);
   }
 
+  function advancePreviewScene(nextSceneId?: string): void {
+    const targetSceneId = nextSceneId || currentPreviewScene?.next || "";
+    if (!targetSceneId) {
+      setPreviewStatus("이 장면에서 이어질 다음 씬이 없습니다.");
+      return;
+    }
+    const targetScene = previewRuntime?.scenes?.find((scene) => scene.id === targetSceneId);
+    if (!targetScene) {
+      setPreviewStatus("다음 씬을 찾을 수 없습니다. Studio에서 연결 상태를 확인하세요.");
+      return;
+    }
+    setPreviewSceneId(targetScene.id || targetSceneId);
+    setPreviewStatus(`${targetScene.label || targetScene.id || "다음 씬"}으로 이동했습니다.`);
+  }
+
   function updateRepairInput(action: ProjectRepairAction, input: ProjectRepairActionRequiredInput, value: string): void {
     if (!input.name) {
       return;
@@ -1469,11 +1508,24 @@ export function ProjectDetailView({
       setSmokeResult(result.smoke || null);
       if (result.ok === false) {
         setExportState(result.code === "EXPORT_BLOCKED" ? "blocked" : "failed");
+        setExportPlan(result.exportPlan ? {
+          ...result.exportPlan,
+          state: result.code === "EXPORT_BLOCKED" ? "blocked" : "failed",
+          retryable: result.retryable ?? result.exportPlan.retryable ?? result.code !== "EXPORT_BLOCKED"
+        } : null);
         setExportStatus(result.message || result.error || "내보내기 실행에 실패했습니다.");
         return;
       }
       if (result.smoke?.ok === false) {
         setExportState("failed");
+        setExportPlan({
+          ...(result.exportPlan || currentExportPlan),
+          state: "failed",
+          canExport: result.exportPlan?.canExport ?? currentExportPlan.canExport,
+          failureCause: result.smoke.issues?.join(" ") || "실행 확인 결과 실패했습니다.",
+          retryable: true,
+          nextAction: "산출물과 실행 확인 결과를 확인한 뒤 다시 실행하세요."
+        });
         setExportStatus("실행 확인 결과 실패했습니다. 산출물과 smoke issue를 확인하세요.");
         return;
       }
@@ -1519,7 +1571,7 @@ export function ProjectDetailView({
     <section className="page-panel project-detail-panel" aria-labelledby="projectDetailTitle">
       <div className="section-header page-header">
         <div>
-          <p className="eyebrow">Project Detail</p>
+          <p className="eyebrow">프로젝트 작업</p>
           <h2 id="projectDetailTitle">{currentProject?.title || (projectId ? projectId : shellProjectTitle)}</h2>
         </div>
         <StatusChip>{activeTabLabel}</StatusChip>
@@ -1561,7 +1613,7 @@ export function ProjectDetailView({
           label: item.label,
           to: `/projects/${detailProjectId}/${item.id}`,
           badge: item.id === "background" && currentProject?.assets?.some((asset) => asset.kind === "background") ? "1/1" : undefined,
-          status: tabShellStatus(item.id, summary, currentProject, hasBackgroundAsset)
+          status: tabShellStatus(item.id, summary, currentProject, hasBackgroundAsset, exportState, currentExportPlan)
         }))}
         onBeforeNavigate={(item) => hasUnsavedProjectDraft ? window.confirm(`${item.label} 탭으로 이동할까요? 저장하지 않은 변경은 유지되지 않습니다.`) : true}
       />
@@ -1790,7 +1842,7 @@ export function ProjectDetailView({
                 </div>
               ) : null}
               <dl className="summary-list">
-                <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri ? "생성된 배경 경로는 진단에서 확인" : "생성 전"}</dd></div>
+                <div><dt>저장 위치</dt><dd>{currentBackgroundAsset?.uri || activeBackgroundJob?.asset?.uri || "생성 전"}</dd></div>
                 <div><dt>에셋 연결</dt><dd>{backgroundConnectionText(currentBackgroundAsset, activeBackgroundJob)}</dd></div>
                 <div><dt>장면 연결</dt><dd>{backgroundSceneConnectionText(backgroundLinkedScene)}</dd></div>
               </dl>
@@ -1814,7 +1866,10 @@ export function ProjectDetailView({
                         </div>
                         <span>{jobStatusLabel(job.status)} · {generationProviderText(job.provider)}</span>
                         <p>{job.prompt || "프롬프트 없음"}</p>
-                        <small>{job.asset?.uri ? "결과 에셋 연결됨" : "결과 에셋 대기 중"}</small>
+                        <small>{job.asset?.uri || job.status === "completed" ? `결과 에셋 ${job.outputAssetId || job.asset?.id || "연결됨"}` : "결과 에셋 대기 중"}</small>
+                        {job.asset?.source ? <small>source {job.asset.source}</small> : null}
+                        {job.asset?.uri ? <small>{job.asset.uri}</small> : null}
+                        {backgroundLinkedScene ? <small>연결된 장면 {sceneLabel(backgroundLinkedScene)}</small> : null}
                         {isDummyGenerationJob(job) ? (
                           <>
                             <p>{dummyFallbackDetailText(job)}</p>
@@ -1910,9 +1965,6 @@ export function ProjectDetailView({
                 <div><dt>준비 상태</dt><dd>{previewReadinessStateLabel(currentPreviewReadiness.state)}</dd></div>
                 <div><dt>사전 점검</dt><dd>{previewPreflightStatusText(currentPreviewPreflight)}</dd></div>
                 <div><dt>조건 처리</dt><dd>{previewPreflightCapabilityText(currentPreviewPreflight)}</dd></div>
-                <div><dt>actual preview evidence</dt><dd>{currentPreviewPreflight?.canRun === true ? "preflightResult canRun true" : "preflightResult 확인 필요"}</dd></div>
-                <div><dt>condition preview not_evaluated</dt><dd>{currentPreviewPreflight?.conditionRuntimeSupport?.strictPreviewStatus || "not_evaluated"}</dd></div>
-                <div><dt>fake/mock preview</dt><dd>{dummyFallbackTargets.length ? `${dummyFallbackTargets.length}개 목 이미지 포함 가능` : "0"}</dd></div>
                 <div><dt>필수 데이터 상태</dt><dd>{Object.entries(currentPreviewReadiness.requiredData || {}).map(([name, value]) => `${requiredDataNameLabel(name)}: ${requiredDataValueLabel(value)}`).join(" · ") || "확인 전"}</dd></div>
                 <div><dt>실패 원인</dt><dd>{currentPreviewReadiness.failureCause || "없음"}</dd></div>
                 <div><dt>재시도 가능 여부</dt><dd>{currentPreviewReadiness.retryable ? "가능" : "불필요"}</dd></div>
@@ -2054,17 +2106,49 @@ export function ProjectDetailView({
             <section className="detail-card">
               <h3>실행 화면</h3>
               {currentPreviewScene ? (
-                <div className="runtime-preview">
-                  {currentPreviewScene.cgAsset?.uri ? <img alt={currentPreviewScene.cgAsset.label || "CG"} src={currentPreviewScene.cgAsset.uri} /> : null}
-                  <span>{currentPreviewScene.label || currentPreviewScene.id}</span>
-                  <strong>{currentPreviewScene.speaker || "나레이션"}</strong>
-                  <p>{currentPreviewScene.text || "본문 없음"}</p>
+                <div className="runtime-preview runtime-preview-stage">
+                  <div className="runtime-stage-frame">
+                    <div className="runtime-stage-background">
+                      {runtimeAssetUri(currentPreviewScene.backgroundAsset) ? (
+                        <img alt={runtimeAssetName(currentPreviewScene.backgroundAsset, "배경")} src={runtimeAssetUri(currentPreviewScene.backgroundAsset)} />
+                      ) : (
+                        <span>배경 이미지가 아직 연결되지 않았습니다.</span>
+                      )}
+                    </div>
+                    {runtimeAssetUri(currentPreviewScene.cgAsset) ? (
+                      <div className="runtime-stage-cg">
+                        <img alt={runtimeAssetName(currentPreviewScene.cgAsset, "CG")} src={runtimeAssetUri(currentPreviewScene.cgAsset)} />
+                      </div>
+                    ) : null}
+                    <div className="runtime-stage-characters">
+                      {(currentPreviewScene.characters || []).map((character, index) => (
+                        runtimeAssetUri(character.asset) ? (
+                          <img alt={runtimeAssetName(character.asset, character.characterId || "캐릭터")} key={runtimeCharacterKey(character, index)} src={runtimeAssetUri(character.asset)} />
+                        ) : (
+                          <span key={runtimeCharacterKey(character, index)}>{character.characterId || "캐릭터"} 포트레이트 연결 필요</span>
+                        )
+                      ))}
+                    </div>
+                    <div className="runtime-dialogue-box">
+                      <span>{currentPreviewScene.label || currentPreviewScene.id}</span>
+                      <strong>{currentPreviewScene.speaker || "나레이션"}</strong>
+                      <p>{currentPreviewScene.text || "본문 없음"}</p>
+                      {currentPreviewScene.ending ? <small>엔딩: {currentPreviewScene.ending.title}</small> : null}
+                    </div>
+                  </div>
                   {currentPreviewScene.choices?.length ? (
-                    <ul className="compact-list">
-                      {currentPreviewScene.choices.map((choice) => <li key={choice.id || choice.text}>{choice.text}</li>)}
-                    </ul>
+                    <div className="runtime-choice-row">
+                      {currentPreviewScene.choices.map((choice) => (
+                        <Button key={choice.id || choice.text} onClick={() => advancePreviewScene(choice.next)} variant="ghost">
+                          {choice.text || "선택지"}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : currentPreviewScene.next ? (
+                    <Button icon={<ArrowRight size={16} />} onClick={() => advancePreviewScene()} variant="primary">
+                      다음 씬
+                    </Button>
                   ) : null}
-                  {currentPreviewScene.ending ? <small>엔딩: {currentPreviewScene.ending.title}</small> : null}
                 </div>
               ) : (
                 <p className="page-muted">프리뷰를 생성하면 실행 화면이 표시됩니다.</p>
