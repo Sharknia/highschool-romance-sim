@@ -78,10 +78,25 @@ export function generateHeroinePortrait(
   });
 }
 
-export function createProjectFromHeroine(postJson: PostAuthedJson, heroine: HeroineDraft): Promise<HeroineLibraryResult> {
+function suggestProjectId(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "new-project";
+}
+
+export function createProjectFromHeroine(postJson: PostAuthedJson, heroine: HeroineDraft, sourceProjectDirectory = ""): Promise<HeroineLibraryResult> {
+  const title = `${heroine.name} 프로젝트`;
+  const premise = `${heroine.name}의 원본 히로인 스냅샷으로 시작하는 제작 프로젝트`;
+  const projectId = suggestProjectId(title);
   return postJson<HeroineLibraryResult>("/api/projects/from-heroine", {
     heroineId: heroine.id,
-    title: `${heroine.name} 프로젝트`,
-    premise: `${heroine.name}의 원본 히로인 스냅샷으로 시작하는 제작 프로젝트`
+    projectDirectory: `workspace/${projectId}.vnmaker`,
+    projectId,
+    sourceProjectDirectory: sourceProjectDirectory || undefined,
+    title,
+    premise
   });
 }

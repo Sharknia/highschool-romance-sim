@@ -20,6 +20,7 @@ export function HeroineDetailPage() {
   const [state, setState] = useState<HeroineLoadState>("loading");
   const [status, setStatus] = useState("히로인 정보를 불러오는 중입니다.");
   const [heroine, setHeroine] = useState<HeroineDraft | null>(null);
+  const [heroineSourceProjectDirectory, setHeroineSourceProjectDirectory] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
@@ -32,8 +33,10 @@ export function HeroineDetailPage() {
       setState(notFound ? "notFound" : "error");
       setStatus(notFound ? "히로인을 찾을 수 없습니다." : `히로인 정보를 불러오지 못했습니다. ${failureText(result, "다시 시도하세요.")}`);
       setHeroine(null);
+      setHeroineSourceProjectDirectory("");
       return;
     }
+    setHeroineSourceProjectDirectory(result.projectDirectory || "");
     setHeroine({
       ...result.heroine!,
       heroineRevision: result.heroineRevision
@@ -62,7 +65,7 @@ export function HeroineDetailPage() {
     if (!heroine) return;
     setState("saving");
     setStatus("히로인 기반 프로젝트 생성 중입니다.");
-    const result = await createProjectFromHeroine(postAuthedJson, heroine);
+    const result = await createProjectFromHeroine(postAuthedJson, heroine, heroineSourceProjectDirectory);
     if (result.ok === false) {
       setState("ready");
       setStatus(`히로인 기반 프로젝트 생성 실패: ${failureText(result, "다시 시도하세요.")}`);
