@@ -5,18 +5,10 @@ import { useAuth } from "../../auth/AuthProvider";
 import { Button, StatusBanner, StatusRegion } from "../../components/ui";
 import { useWorkspaceShell } from "../../components/WorkspaceLayout";
 import type { HeroineDraft, HeroineLibraryResult } from "../heroines/heroinePageTypes";
+import { suggestProjectId } from "./projectId";
 import type { ProjectApiResult } from "./projectPageTypes";
 
 type CreateMode = "blank" | "heroine";
-
-function suggestProjectId(title: string): string {
-  return title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    || "new-project";
-}
 
 function statusTone(status: string): "neutral" | "waiting" | "success" | "error" {
   if (status.includes("실패") || status.includes("차단") || status.includes("이미 존재") || status.includes("권한")) {
