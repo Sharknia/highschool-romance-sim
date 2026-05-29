@@ -1,4 +1,5 @@
 import type { ApiResult } from "../../api/types";
+import { suggestProjectId } from "../projects/projectId";
 import type { HeroineDraft, HeroineLibraryResult, HeroineRevisionRef } from "./heroinePageTypes";
 
 type PostAuthedJson = <T extends ApiResult = ApiResult>(path: string, body: unknown) => Promise<T>;
@@ -78,19 +79,10 @@ export function generateHeroinePortrait(
   });
 }
 
-function suggestProjectId(title: string): string {
-  return title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    || "new-project";
-}
-
 export function createProjectFromHeroine(postJson: PostAuthedJson, heroine: HeroineDraft, sourceProjectDirectory = ""): Promise<HeroineLibraryResult> {
   const title = `${heroine.name} 프로젝트`;
   const premise = `${heroine.name}의 원본 히로인 스냅샷으로 시작하는 제작 프로젝트`;
-  const projectId = suggestProjectId(title);
+  const projectId = suggestProjectId(title, heroine.id);
   return postJson<HeroineLibraryResult>("/api/projects/from-heroine", {
     heroineId: heroine.id,
     projectDirectory: `workspace/${projectId}.vnmaker`,
